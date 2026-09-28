@@ -103,6 +103,29 @@ class AgentAutonomyIntegrationTests(unittest.TestCase):
         self.assertFalse(result["ok"])
         self.assertTrue(result["autonomy_blocked"])
 
+    def test_task_waiting_confirmation_pauses_if_policy_is_lowered(self):
+        self.agent.autonomy.update("operator")
+        created = self.agent.tasks.create(
+            "Записать в буфер",
+            [{"skill": "clipboard.write", "params": {"text": "черновик"}}],
+            start=True,
+        )
+        self.assertTrue(created["ok"], created)
+        task = self.agent.tasks.get(int(created["task"]["id"]))
+        self.assertEqual("waiting", task["status"])
+        action_id = task["steps"][0]["pending_action"]
+        self.assertTrue(action_id)
+
+        self.agent.autonomy.update("assistant")
+        result = self.agent.confirm_action(action_id, True)
+        self.assertFalse(result["ok"])
+        self.assertTrue(result["autonomy_blocked"])
+
+        task = self.agent.tasks.get(int(created["task"]["id"]))
+        self.assertEqual("paused", task["status"])
+        self.assertEqual("pending", task["steps"][0]["status"])
+        self.assertIn("operator", task["error"])
+
     def test_raw_ui_action_is_blocked_for_observer(self):
         self.agent.autonomy.update("observer")
         result = self.agent.queue_action("click", {"x": 1, "y": 1}, ask=False)
