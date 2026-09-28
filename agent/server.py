@@ -695,9 +695,11 @@ class AgentHandler(BaseHTTPRequestHandler):
         if path == "/memory":
             query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
             wanted = str((query.get("q") or [""])[0] or "")
+            session = brain_mod.session_key((query.get("session") or ["main"])[0])
             store = agent.runner.store
             rows = store.recall(wanted, 30, touch=False) if wanted else store.memories(100)
-            return self._json(200, {"ok": True, "memories": rows, "count": len(rows)})
+            return self._json(200, {"ok": True, "memories": rows, "count": len(rows),
+                                    "layers": store.memory_layers(session)})
         if path == "/ui":
             body = ui.page().encode("utf-8")
             self.send_response(200)
