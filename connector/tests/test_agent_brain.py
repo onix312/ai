@@ -358,11 +358,16 @@ class BrainChatTests(unittest.TestCase):
         self.assertFalse(answer["handled"])
         self.assertEqual([], self.store.dialog("main"))
 
-    def test_confirm_skill_becomes_pending(self):
-        with patch.dict(self.agent.runner._caps, {"windows": True}):
-            answer = self.brain.chat("закрой блокнот")
+    def test_dangerous_skill_becomes_pending(self):
+        answer = self.brain.chat("выключи компьютер")
         self.assertEqual("pending", answer["kind"])
         self.assertEqual({"id": "abc", "text": answer["pending"]["text"]}, answer["pending"])
+        self.assertEqual(("system.power", {"action": "shutdown"}), self.agent.calls[-1])
+
+    def test_reversible_local_skill_does_not_become_pending(self):
+        with patch.dict(self.agent.runner._caps, {"windows": True}):
+            answer = self.brain.chat("закрой блокнот")
+        self.assertNotEqual("pending", answer["kind"])
         self.assertEqual(("window.close", {"title": "блокнот"}), self.agent.calls[-1])
 
     def test_unavailable_skill_is_explained(self):
