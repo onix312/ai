@@ -46,8 +46,12 @@ class TaskEngineTests(unittest.TestCase):
         self.store = Store(pathlib.Path(self.tmp.name) / "assistant.sqlite3")
         self.agent = _Agent(self.store)
         self.engine = TaskEngine(self.agent)
+        self.verifier_patch = patch("agent.task_engine.verifier.verify", return_value={
+            "status": "assumed", "reason": "Изолированный исполнитель", "evidence": {}})
+        self.verifier_patch.start()
 
     def tearDown(self):
+        self.verifier_patch.stop()
         self.store.close()
         self.tmp.cleanup()
 

@@ -92,6 +92,12 @@ class BackendClient:
     def plan_op(self, op: str, plan_id: str = "", **payload: Any) -> dict[str, Any]:
         return self.post("/plans", {"op": op, "id": str(plan_id), **payload})
 
+    def replans(self) -> dict[str, Any]:
+        return self.get("/replans")
+
+    def replan_op(self, op: str, replan_id: str = "", **payload: Any) -> dict[str, Any]:
+        return self.post("/replans", {"op": op, "id": str(replan_id), **payload})
+
     def decide(self, action_id: str, confirmed: bool) -> dict[str, Any]:
         return self.post("/action/confirm", {"id": action_id, "confirmed": bool(confirmed)})
 
