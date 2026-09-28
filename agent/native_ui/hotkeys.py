@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import ctypes
+import ctypes.wintypes
 import sys
 from typing import Callable
 
