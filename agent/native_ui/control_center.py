@@ -723,7 +723,12 @@ class ControlCenter(QMainWindow):
             (self.proactivity_budget, "max_nonurgent_per_hour", 2),
             (self.proactivity_cooldown, "cooldown_minutes", 30),
         ):
-            idx = combo.findData(int(settings.get(key) or default))
+            raw = settings.get(key)
+            value = default if raw is None or raw == "" else int(raw)
+            idx = combo.findData(value)
+            if idx < 0:
+                combo.addItem(str(value) if key == "max_nonurgent_per_hour" else f"{value} мин", value)
+                idx = combo.findData(value)
             if idx >= 0:
                 combo.setCurrentIndex(idx)
         self.proactivity_quiet_start.setText(str(settings.get("quiet_start") or "22:00"))
