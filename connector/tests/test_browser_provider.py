@@ -1,10 +1,14 @@
 """Browser Provider 1.0: loopback guard, structured read and Brain contracts."""
 from __future__ import annotations
 
+import pathlib
+import tempfile
 import unittest
 from unittest.mock import patch
 
-from agent import brain, browser
+from agent import brain, browser, executor
+from agent.panel_client import Client
+from agent.store import Store
 
 
 class BrowserGuardTests(unittest.TestCase):
@@ -110,6 +114,25 @@ class BrowserReadTests(unittest.TestCase):
             result = browser.selection()
         self.assertEqual("важный фрагмент", result["selection"])
         self.assertEqual("https://guide.test", result["url"])
+
+
+class BrowserExecutorTests(unittest.TestCase):
+    def test_registered_browser_skill_reaches_provider(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = Store(pathlib.Path(tmp) / "assistant.sqlite3")
+            runner = executor.Runner(store=store, panel=Client("http://127.0.0.1:1"))
+            runner._caps = {"browser": True, "browser_reason": ""}
+            try:
+                with patch.object(browser, "tabs", return_value={
+                    "ok": True, "tabs": [{"id": "1", "title": "Tab", "url": "https://example.test"}],
+                    "count": 1, "reason": "",
+                }) as call:
+                    result = runner.run("browser.tabs", {"limit": 5})
+                self.assertTrue(result["ok"])
+                self.assertEqual(1, result["count"])
+                call.assert_called_once_with(5)
+            finally:
+                store.close()
 
 
 class BrowserBrainTests(unittest.TestCase):
