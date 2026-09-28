@@ -1,0 +1,77 @@
+"""Provider Architecture 1.0 contracts."""
+from __future__ import annotations
+
+import pathlib
+import tempfile
+import unittest
+from unittest.mock import patch
+
+from agent import browser, executor
+from agent.panel_client import Client
+from agent.providers import registry
+from agent.store import Store
+
+
+class ProviderRegistryTests(unittest.TestCase):
+    def test_registry_has_no_drift_or_duplicate_ownership(self):
+        self.assertEqual([], registry.validate())
+
+    def test_migrated_skills_have_exact_owner(self):
+        self.assertEqual("browser", registry.for_skill("browser.page").spec.name)
+        self.assertEqual("desktop", registry.for_skill("desktop.observe").spec.name)
+        self.assertIsNone(registry.for_skill("system.volume"))
+
+    def test_catalog_reports_capability_reasons_and_contracts(self):
+        rows = registry.catalog({
+            "browser": False,
+            "browser_reason": "DevTools выключен",
+            "windows": True,
+            "windows_reason": "",
+        })
+        by_name = {row["name"]: row for row in rows}
+        self.assertFalse(by_name["browser"]["available"])
+        self.assertIn("DevTools", by_name["browser"]["reason"])
+        self.assertTrue(by_name["desktop"]["available"])
+        browser_skills = {row["name"]: row for row in by_name["browser"]["skills"]}
+        self.assertEqual("read", browser_skills["browser.page"]["risk"])
+        self.assertFalse(browser_skills["browser.page"]["confirm"])
+        self.assertTrue(browser_skills["browser.page"]["reversible"])
+
+
+class ProviderDispatchTests(unittest.TestCase):
+    def test_executor_routes_browser_skill_through_provider(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = Store(pathlib.Path(tmp) / "assistant.sqlite3")
+            runner = executor.Runner(store=store, panel=Client("http://127.0.0.1:1"))
+            runner._caps = {"browser": True, "browser_reason": ""}
+            provider = registry.for_skill("browser.tabs")
+            try:
+                with patch.object(provider, "run", return_value={
+                    "ok": True, "tabs": [], "count": 0, "reason": "",
+                }) as run:
+                    result = runner.run("browser.tabs", {"limit": 7})
+                self.assertTrue(result["ok"])
+                run.assert_called_once_with("browser.tabs", {"limit": 7})
+            finally:
+                store.close()
+
+    def test_executor_routes_desktop_observe_through_provider(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = Store(pathlib.Path(tmp) / "assistant.sqlite3")
+            runner = executor.Runner(store=store, panel=Client("http://127.0.0.1:1"))
+            runner._caps = {"windows": True, "windows_reason": ""}
+            provider = registry.for_skill("desktop.observe")
+            try:
+                with patch.object(provider, "run", return_value={
+                    "ok": True, "window": {"title": "Test"}, "controls": [],
+                }) as run:
+                    result = runner.run("desktop.observe", {"limit": 12, "ocr": False})
+                self.assertTrue(result["ok"])
+                run.assert_called_once_with(
+                    "desktop.observe", {"title": "", "limit": 12, "screenshot": False, "ocr": False})
+            finally:
+                store.close()
+
+
+if __name__ == "__main__":
+    unittest.main()
