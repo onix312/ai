@@ -15,6 +15,7 @@ def status_icon(state: str = "idle") -> QIcon:
         "thinking": "#8b5cf6",
         "speaking": "#22c55e",
         "error": "#ef4444",
+        "stopped": "#991b1b",
         "offline": "#475569",
     }
     pix = QPixmap(64, 64)
@@ -81,7 +82,7 @@ class LumaTray(QSystemTrayIcon):
     def apply_status(self, connected: bool, mic_enabled: bool, model_ok: bool,
                      assistant_state: str = "idle", error: str = "",
                      safety_stopped: bool = False) -> None:
-        state = assistant_state if connected else "offline"
+        state = "stopped" if safety_stopped and connected else (assistant_state if connected else "offline")
         if error:
             state = "error"
         self.setIcon(status_icon(state))
