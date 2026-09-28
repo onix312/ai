@@ -240,7 +240,14 @@ def _target(target_id: str = "") -> dict[str, Any]:
         if found is None:
             raise BrowserError("Вкладка не найдена или уже закрыта")
         return found
-    return next((row for row in rows if row.get("active")), rows[0])
+    active = next((row for row in rows if row.get("active")), None)
+    if active is not None:
+        return active
+    if len(rows) == 1:
+        return rows[0]
+    raise BrowserError(
+        "Не удалось однозначно определить активную вкладку. "
+        "Откройте нужную вкладку на переднем плане или укажите target_id.")
 
 
 def _command(target: dict[str, Any], method: str, params: dict[str, Any]) -> dict[str, Any]:
