@@ -1,0 +1,36 @@
+name: trusted-local-mode
+
+on:
+  pull_request:
+    paths:
+      - "agent/skills.py"
+      - "agent/server.py"
+      - "agent/executor.py"
+      - "connector/tests/test_assistant_skills.py"
+      - "connector/tests/test_autonomy.py"
+      - "connector/tests/test_task_engine.py"
+      - "docs/TRUSTED-LOCAL-MODE.md"
+      - "docs/NOZZA-NEXT-HANDOFF.md"
+      - ".github/workflows/trusted-local-mode.yml"
+  push:
+    branches:
+      - "feature/nozza-trusted-local-mode-v1"
+
+jobs:
+  contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Compile
+        run: python -m compileall -q agent
+      - name: Trusted Local contracts
+        run: >-
+          python -m unittest
+          connector.tests.test_assistant_skills
+          connector.tests.test_autonomy
+          connector.tests.test_task_engine
+          connector.tests.test_providers
+          connector.tests.test_event_engine

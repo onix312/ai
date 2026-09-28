@@ -7,13 +7,13 @@
 
   * реестр совпадает с исполнением: у каждого объявленного навыка есть
     обработчик, а самопроверка `skills.validate()` не находит нарушений;
-  * подтверждение определяется риском из реестра, а вызывающая сторона не может
-    его понизить (`confirmed` в теле запроса не читается);
+  * Local Trusted Mode спрашивает подтверждение только для реально опасного
+    или необратимого; вызывающая сторона не может сама понизить policy;
   * недоступный навык не прячется: у него есть причина, и она не пустая;
   * параметры разбираются по объявленным типам, а необъявленное имя отбрасывается
     с предупреждением — модель не может протащить `delete_all`;
-  * выученный навык (идея И180) собирается только из существующих шагов, всегда
-    требует подтверждения и не может занять имя встроенного.
+  * выученный навык (идея И180) собирается только из существующих шагов,
+    наследует опасность цепочки и не может занять имя встроенного.
 
 Живые окна, звук и снимки экрана здесь не проверяются: для них есть
 `test_agent_os.py` и чеки-лист владельца в `docs/ПОМОЩНИК.md`.
@@ -86,13 +86,17 @@ class RegistryShapeTests(unittest.TestCase):
             self.assertRegex(name, r"^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$",
                              f"имя «{name}» не выглядит как «группа.навык»")
 
-    def test_confirmation_follows_risk(self):
+    def test_confirmation_follows_local_trusted_policy(self):
         for name, skill in skills.SKILLS.items():
-            if skill["risk"] in skills.CONFIRM_RISKS:
-                self.assertTrue(skills.confirm_required({"name": name, **skill}),
-                                f"«{name}» двигает чужое и не спрашивает подтверждения")
+            row = {"name": name, **skill}
+            if skills.danger_of(row) or not skills.reversible_of(row):
+                self.assertTrue(skills.confirm_required(row),
+                                f"опасный «{name}» обязан спрашивать подтверждение")
+            elif skill["risk"] in ("write", "system"):
+                self.assertFalse(skills.confirm_required(row),
+                                 f"обратимый локальный «{name}» не должен тормозить Trusted Mode")
             if skill["risk"] == "read":
-                self.assertFalse(skills.confirm_required({"name": name, **skill}),
+                self.assertFalse(skills.confirm_required(row),
                                  f"чтение «{name}» не должно требовать подтверждения")
 
     def test_ideas_are_described_in_docs(self):
@@ -203,9 +207,7 @@ class LearnTests(unittest.TestCase):
                       {"skill": "files.recent", "params": {"limit": 5}}]})
         self.assertEqual("", reason)
         self.assertIsNotNone(skill)
-        self.assertTrue(skill["confirm"], "выученный навык обязан спрашивать человека")
-        # Оба шага — чтение, поэтому риск остаётся чтением, но подтверждение
-        # у выученного навыка всегда требуется (цепочка чужих шагов).
+        self.assertFalse(skill["confirm"], "безопасная локальная цепочка должна запускаться сразу")
         self.assertEqual("read", skill["risk"], "риск — максимальный из шагов")
         self.assertEqual(("panel", "sqlite"), tuple(skill["requires"]))
         self.assertEqual(["И180"], list(skill["ideas"]))
@@ -217,6 +219,14 @@ class LearnTests(unittest.TestCase):
                       {"skill": "files.tidy_apply"}]})
         self.assertEqual("", reason)
         self.assertEqual("write", skill["risk"])
+        self.assertFalse(skill["confirm"])
+
+    def test_learned_chain_with_dangerous_step_keeps_confirmation(self):
+        skill, reason = skills.learn({
+            "name": "my.publish", "title": "Публикация",
+            "steps": [{"skill": "tg.post", "params": {"text": "готово"}}]})
+        self.assertEqual("", reason)
+        self.assertTrue(skill["confirm"])
 
     def test_builtin_name_cannot_be_taken(self):
         skill, reason = skills.learn({"name": "panel.do", "title": "Обход",
@@ -293,12 +303,16 @@ class ExecutionTests(RunnerTestCase):
         self.assertFalse(result["ok"])
         self.assertIn("limit", result["reason"])
 
-    def test_write_skill_waits_for_human(self):
-        result = self.runner.run("files.tidy_apply", {})
+    def test_reversible_write_runs_without_confirmation_in_trusted_mode(self):
+        result = self.runner.run("files.tidy_apply", {"folder": self.tmp.name})
+        self.assertNotIn("needs_confirmation", result)
+
+    def test_dangerous_irreversible_skill_waits_for_human(self):
+        result = self.runner.run("screen.archive_erase", {})
         self.assertFalse(result["ok"])
         self.assertTrue(result["needs_confirmation"])
-        self.assertTrue(result["text"], "окно подтверждения обязано показывать, что будет")
-        entry = self.store.last_outcome("files.tidy_apply")
+        self.assertTrue(result["text"])
+        entry = self.store.last_outcome("screen.archive_erase")
         self.assertEqual("needs_confirmation", entry["outcome"])
 
     def test_confirmed_flag_is_not_taken_from_params(self):
@@ -328,17 +342,16 @@ class ExecutionTests(RunnerTestCase):
         self.assertIsNotNone(entry)
         self.assertEqual("files.index", entry["skill"])
 
-    def test_learned_skill_runs_steps_after_confirmation(self):
+    def test_safe_learned_skill_runs_without_confirmation(self):
         learned, reason = skills.learn({"name": "my.report", "title": "Отчёт",
                                         "steps": [{"skill": "files.search",
                                                    "params": {"query": "договор"}},
                                                   {"skill": "agent.skills"}]})
         self.assertEqual("", reason)
         self.store.save_skill("my.report", learned)
-        waiting = self.runner.run("my.report", {})
-        self.assertTrue(waiting["needs_confirmation"])
-        result = self.runner.run("my.report", {}, confirmed=True)
+        result = self.runner.run("my.report", {})
         self.assertTrue(result["ok"], result.get("reason"))
+        self.assertNotIn("needs_confirmation", result)
         self.assertEqual(2, len(result["steps"]))
         self.assertTrue(all(step["ok"] for step in result["steps"]))
 

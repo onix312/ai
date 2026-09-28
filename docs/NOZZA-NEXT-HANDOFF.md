@@ -1,5 +1,15 @@
 # NOZZA — handoff и roadmap после Verification Engine 1.0
 
+> **Актуализация 29.09.2026:** Provider Architecture 1.0, Persona Engine 1.0,
+> Autonomy Levels 1.0 и Proactivity/Event Engine 1.0 уже в `main`.
+> Большой Security 2.0 отложен: NOZZA работает как локальный доверенный
+> ассистент. Текущая ветка — **Local Trusted Mode 1.0**: обратимые локальные
+> write/system действия выполняются без лишнего подтверждения, а confirmation
+> остаётся на внешних, физических и необратимых границах.
+> После этого основной приоритет: **Voice Engine 3.0 → Native UI 2.0 →
+> Packaging / NOZZA.exe → постепенный Core refactor**.
+
+
 > **Актуализация 28.09.2026:** после первоначального handoff в `main` уже
 > реализованы Replan Engine 1.0, Memory 2.0 и Desktop Perception 2.0.
 > Текущий этап этой ветки — Browser Provider 1.0. После него следующий

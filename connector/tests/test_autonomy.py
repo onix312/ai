@@ -82,15 +82,15 @@ class AgentAutonomyIntegrationTests(unittest.TestCase):
     def test_observer_blocks_write_skill_before_confirmation_queue(self):
         self.agent.autonomy.update("observer")
         result = self.agent.run_skill(
-            "list.clear", {"list": "покупки"}, ask=False)
+            "screen.archive_erase", {}, ask=False)
         self.assertFalse(result["ok"])
         self.assertTrue(result["autonomy_blocked"])
         self.assertEqual([], self.agent.pending())
 
-    def test_assistant_allows_write_to_reach_normal_confirmation(self):
+    def test_assistant_allows_dangerous_skill_to_reach_normal_confirmation(self):
         self.agent.autonomy.update("assistant")
         result = self.agent.run_skill(
-            "list.clear", {"list": "покупки"}, ask=False)
+            "screen.archive_erase", {}, ask=False)
         self.assertTrue(result["ok"])
         self.assertTrue(result["queued"])
         self.assertTrue(result["requires_confirmation"])
@@ -98,7 +98,7 @@ class AgentAutonomyIntegrationTests(unittest.TestCase):
     def test_pending_action_is_rechecked_after_level_is_lowered(self):
         self.agent.autonomy.update("assistant")
         queued = self.agent.run_skill(
-            "list.clear", {"list": "покупки"}, ask=False)
+            "screen.archive_erase", {}, ask=False)
         self.agent.autonomy.update("observer")
         result = self.agent.confirm_action(queued["id"], True)
         self.assertFalse(result["ok"])
@@ -107,8 +107,8 @@ class AgentAutonomyIntegrationTests(unittest.TestCase):
     def test_task_waiting_confirmation_pauses_if_policy_is_lowered(self):
         self.agent.autonomy.update("operator")
         created = self.agent.tasks.create(
-            "Записать в буфер",
-            [{"skill": "list.clear", "params": {"list": "покупки"}}],
+            "Очистить архив экрана",
+            [{"skill": "screen.archive_erase", "params": {}}],
             start=True,
         )
         self.assertTrue(created["ok"], created)
