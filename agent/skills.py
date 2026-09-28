@@ -33,19 +33,31 @@ from typing import Any
 # прислать в навык значение, которое он прочитает не так, как задумано.
 PARAM_TYPES = ("text", "int", "float", "bool", "date", "path", "object", "oneof")
 
-# Риск решает, нужно ли подтверждение человека.
+# Risk остаётся полезной диагностикой и ограничителем Autonomy, но в Local
+# Trusted Mode он больше не означает «спрашивать на каждом локальном действии».
+# Подтверждение определяется реальной опасностью/необратимостью.
 #   read         — ничего не меняет;
-#   own          — пишет только в свою базу ассистента (индекс, журнал, заметки, память);
-#   soft         — мягкое действие удобства (18.21): открыть программу из белого
-#                  списка, звук громче или тише, пауза музыки, свернуть или
-#                  переключить окно. Обратимо одной фразой, данных не трогает, в
-#                  чужое окно ничего не вводит — поэтому без окна «Подтвердить»;
-#   write        — меняет чужое: файлы на диске, панель, ввод в чужое окно;
-#   system       — меняет состояние компьютера (питание, микрофон, автозагрузка);
-#   irreversible — откатить нельзя (удаление, стирание архива).
-# Порядок — от мягкого к опасному: у выученного навыка риск — максимальный из шагов.
+#   own          — пишет только в локальные данные ассистента;
+#   soft         — обратимое действие удобства;
+#   write        — меняет состояние приложения/файлов/интеграции;
+#   system       — меняет состояние компьютера;
+#   irreversible — откатить нельзя.
+# Порядок нужен Planner/Autonomy и для максимального риска цепочки.
 RISKS = ("read", "own", "soft", "write", "system", "irreversible")
-CONFIRM_RISKS = ("write", "system", "irreversible")
+CONFIRM_RISKS = ("irreversible",)
+
+# Local Trusted Mode = default. Эти действия всё ещё спрашивают человека,
+# потому что имеют внешний, физический или труднообратимый эффект. Остальные
+# локальные обратимые write/system skills выполняются сразу.
+DANGEROUS_SKILLS = frozenset({
+    "panel.do",             # PrintFlow catalog решает печать/деньги; outer gate сохраняем
+    "tg.post",              # внешняя публикация от имени владельца
+    "system.power",         # сон/reboot/shutdown и похожие power actions
+    "system.install",       # установка ПО/моделей
+    "screen.archive_erase", # необратимое стирание архива ассистента
+    "assistant.macro_run",  # может содержать опасный вложенный шаг
+})
+EXECUTION_POLICY = "local_trusted"
 
 # Хост: кто исполняет навык. `agent` — эта программа, `panel` — PrintFlow
 # через loopback. Хост нужен, чтобы панель и ассистент говорили об одном навыке
@@ -1279,17 +1291,31 @@ def availability(skill: dict[str, Any], caps: dict[str, Any]) -> tuple[bool, str
     return True, ""
 
 
-def confirm_required(skill: dict[str, Any]) -> bool:
-    """Нужно ли подтверждение человека. Реестр, а не запрос, решает это.
+def reversible_of(skill: dict[str, Any]) -> bool:
+    """Можно ли разумно вернуть состояние без потери пользовательских данных."""
+    if "reversible" in skill:
+        return bool(skill.get("reversible"))
+    return risk_of(skill) != "irreversible"
 
-    Правило: риск из `CONFIRM_RISKS` — подтверждение обязательно. Выученный
-    навык подтверждается всегда, потому что он исполняет цепочку чужих шагов.
+
+def danger_of(skill: dict[str, Any]) -> bool:
+    """Требует ли навык явного решения человека в Local Trusted Mode."""
+    if "danger" in skill:
+        return bool(skill.get("danger"))
+    name = str(skill.get("name") or "").strip().casefold()
+    return name in DANGEROUS_SKILLS or risk_of(skill) == "irreversible"
+
+
+def confirm_required(skill: dict[str, Any]) -> bool:
+    """Подтверждение только для опасного или необратимого.
+
+    Local Trusted Mode считает этот компьютер доверенной локальной средой:
+    обратимые локальные write/system действия не должны превращаться в поток
+    карточек «Разрешить?». Явное `confirm=True` остаётся жёстким override.
     """
-    if skill.get("learned"):
-        return True
     if bool(skill.get("confirm")):
         return True
-    return str(skill.get("risk") or "read") in CONFIRM_RISKS
+    return danger_of(skill) or not reversible_of(skill)
 
 
 def risk_of(skill: dict[str, Any]) -> str:
@@ -1307,7 +1333,10 @@ def payload(skill: dict[str, Any], caps: dict[str, Any] | None = None) -> dict[s
         "host": str(skill.get("host") or "agent"),
         "provider": str(skill.get("provider") or ""),
         "risk": risk_of(skill),
+        "reversible": reversible_of(skill),
+        "danger": danger_of(skill),
         "confirm": confirm_required(skill),
+        "execution_policy": EXECUTION_POLICY,
         "params": {str(k): str(v) for k, v in dict(skill.get("params") or {}).items()},
         "requires": list(skill.get("requires") or ()),
         "ideas": list(skill.get("ideas") or ()),
@@ -1471,7 +1500,8 @@ def learn(raw: Any, learned: dict[str, dict[str, Any]] | None = None) -> tuple[d
         встроенного и не может выглядеть как панельный;
       * шаги — только существующие навыки, и не другие выученные: цепочка
         цепочек непроверяема, а отказ в середине длинной цепочки необъясним;
-      * риск — максимальный из шагов, подтверждение — всегда;
+      * риск — максимальный из шагов; подтверждение нужно только если хотя бы
+        один шаг опасный/необратимый по Local Trusted Mode;
       * параметров у выученного навыка нет: он повторяет записанные шаги, а не
         принимает значения от модели. Так выученный навык не становится
         способом обойти проверку параметров встроенного.
@@ -1520,17 +1550,20 @@ def learn(raw: Any, learned: dict[str, dict[str, Any]] | None = None) -> tuple[d
             if need not in requires:
                 requires.append(need)
     description = " ".join(str(raw.get("description") or "").split())[:240] or title
+    confirm = any(confirm_required({"name": step["skill"], **SKILLS[step["skill"]]})
+                  for step in steps)
     skill = {
         "title": title,
         "description": description,
         "host": "agent",
         "risk": risk,
-        "confirm": True,
+        "confirm": confirm,
         "params": {},
         "steps": steps,
         "requires": tuple(requires),
         "ideas": ("И180",),
-        "doc": "Выучен владельцем: исполняет шаги подряд и всегда спрашивает подтверждение.",
+        "doc": ("Выучен владельцем: исполняет шаги подряд; подтверждение нужно, "
+                "только если цепочка содержит опасный или необратимый шаг."),
     }
     return skill, ""
 
@@ -1553,8 +1586,8 @@ def validate() -> list[str]:
             problems.append(f"{name}: хост «{skill.get('host')}» неизвестен")
         if risk_of(skill) not in RISKS:
             problems.append(f"{name}: риск «{skill.get('risk')}» неизвестен")
-        if risk_of(skill) in CONFIRM_RISKS and not confirm_required(skill):
-            problems.append(f"{name}: риск требует подтверждения, а навык его не спрашивает")
+        if danger_of({"name": name, **skill}) and not confirm_required({"name": name, **skill}):
+            problems.append(f"{name}: опасный навык не спрашивает подтверждения")
         for need in skill.get("requires") or ():
             if need not in CAPABILITIES:
                 problems.append(f"{name}: требует неизвестную способность «{need}»")
