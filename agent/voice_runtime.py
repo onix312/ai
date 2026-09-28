@@ -324,7 +324,9 @@ class VoiceRuntime:
                 silence = 0.0
             else:
                 silence += 0.1
-                if silence >= config.VOICE_SILENCE_SECONDS:
+                # Не зависеть от двоичного представления 0.1: восемь 100-ms
+                # чанков должны ровно закрывать стандартные 0.8 s паузы.
+                if silence + 1e-9 >= config.VOICE_SILENCE_SECONDS:
                     break
             if started and time.time() - started_at >= config.VOICE_MAX_PHRASE_SECONDS:
                 break
