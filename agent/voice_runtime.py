@@ -344,7 +344,9 @@ class VoiceRuntime:
         from . import pc
         while pc.is_speaking():
             time.sleep(0.08)
-        self._expire_conversation(force_refresh=True)
+        # Follow-up отсчитывается от конца ответа, а не от запуска TTS.
+        self.conversation_until = time.time() + config.VOICE_FOLLOWUP_SECONDS
+        self.state = "listening"
 
     def _expire_conversation(self, force_refresh: bool = False) -> None:
         if self._handler_busy:
