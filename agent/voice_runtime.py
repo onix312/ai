@@ -332,7 +332,12 @@ class VoiceRuntime:
                 self.echo_floor *= 0.92
 
             if not started and not loud:
-                pre_roll.append(data)
+                if speaking_now:
+                    # Suppressed speaker leakage must not ride into ASR as
+                    # pre-roll when the owner starts speaking over TTS.
+                    pre_roll.clear()
+                else:
+                    pre_roll.append(data)
                 continue
 
             if loud and not started:
