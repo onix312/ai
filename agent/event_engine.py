@@ -10,10 +10,9 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
-from .store import now_iso
 
 MODES = ("silent", "important", "balanced", "active")
 URGENCIES = ("low", "normal", "important", "urgent")
@@ -59,6 +58,8 @@ def _quiet(now: dt.datetime, start: str, end: str) -> bool:
 @dataclass(slots=True)
 class EventEngine:
     agent: Any
+    store: Any = field(init=False)
+    personal: Any = field(init=False)
 
     def __post_init__(self) -> None:
         self.store = self.agent.runner.store
@@ -320,6 +321,18 @@ class EventEngine:
             str(settings.get("quiet_end") or ""),
         ):
             return False, "quiet hours"
+
+        cooldown = max(1, int(settings.get("cooldown_minutes") or 30))
+        if urgency != "urgent":
+            since = _iso(now - dt.timedelta(minutes=cooldown))
+            rows = self.store._rows(
+                "SELECT COUNT(*) AS n FROM assistant_events "
+                "WHERE id<>? AND source=? AND kind=? AND state='delivered' AND created_at>=?",
+                (int(event.get("id") or 0), str(event.get("source") or ""),
+                 str(event.get("kind") or ""), since),
+            )
+            if rows and int(rows[0]["n"] or 0) > 0:
+                return False, f"cooldown {cooldown} min"
 
         if urgency not in ("important", "urgent"):
             max_hour = int(settings.get("max_nonurgent_per_hour") or 0)
