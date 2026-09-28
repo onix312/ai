@@ -72,6 +72,11 @@ class VoiceRuntime:
         )
 
     @property
+    def armed_until(self) -> float:
+        """Совместимость со старым /mic/arm."""
+        return max(self.manual_until, self.conversation_until)
+
+    @property
     def conversation_active(self) -> bool:
         return time.time() < self.conversation_until
 
@@ -191,7 +196,7 @@ class VoiceRuntime:
                 callback=lambda data, *_a: frames.put(bytes(data)),
             ):
                 while self._should_run():
-                    audio = self._next_phrase(frames)
+                    audio, during_output = self._next_phrase(frames)
                     self._expire_conversation()
                     if not audio:
                         continue
@@ -203,7 +208,7 @@ class VoiceRuntime:
                         continue
                     self.last_error = ""
                     self.last_phrase = text
-                    self._handle_text(text)
+                    self._handle_text(text, during_output=during_output)
         except OSError as exc:
             self.last_error = f"Микрофон не открылся: {exc}"
             self.state = "error"
@@ -212,12 +217,13 @@ class VoiceRuntime:
             if not self.persistent_enabled:
                 self.state = "idle"
 
-    def _next_phrase(self, frames: "queue.Queue[bytes]") -> list[bytes]:
-        """Простой локальный VAD: голос начинается по уровню и кончается паузой."""
+    def _next_phrase(self, frames: "queue.Queue[bytes]") -> tuple[list[bytes], bool]:
+        """Простой VAD; помечает звук, начавшийся во время TTS, против эха."""
         chunks: list[bytes] = []
         started = False
         silence = 0.0
         started_at = 0.0
+        during_output = False
         while self._should_run():
             try:
                 data = frames.get(timeout=0.2)
@@ -229,6 +235,11 @@ class VoiceRuntime:
                 if not started:
                     started = True
                     started_at = time.time()
+                    try:
+                        from . import pc
+                        during_output = pc.is_speaking()
+                    except Exception:
+                        during_output = False
                 silence = 0.0
                 chunks.append(data)
             elif started:
@@ -238,9 +249,9 @@ class VoiceRuntime:
                     break
             if started and time.time() - started_at >= config.VOICE_MAX_PHRASE_SECONDS:
                 break
-        return chunks
+        return chunks, during_output
 
-    def _handle_text(self, text: str) -> None:
+    def _handle_text(self, text: str, during_output: bool = False) -> None:
         clean = " ".join(str(text or "").split())
         if not clean:
             return
@@ -248,7 +259,7 @@ class VoiceRuntime:
 
         # Пока NOZZA говорит, собственный голос не считается новой командой.
         # Слушается только явный barge-in.
-        if pc.is_speaking():
+        if during_output or pc.is_speaking():
             if is_stop_phrase(clean):
                 pc.stop_speaking()
                 self.conversation_until = time.time() + config.VOICE_FOLLOWUP_SECONDS
