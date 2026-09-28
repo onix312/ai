@@ -318,16 +318,6 @@ class NativeApp:
     def reset_persona(self) -> None:
         def done(payload: dict[str, Any]) -> None:
             if payload.get("ok"):
-                self.center.set_persona_payload({
-                    **payload,
-                    "options": {
-                        "address": ["formal", "informal"],
-                        "verbosity": ["brief", "normal", "detailed"],
-                        "humor": ["off", "light", "playful"],
-                        "initiative": ["quiet", "balanced", "active"],
-                        "relationship": ["professional", "friendly", "warm"],
-                    },
-                })
                 self.run_async(self.backend.persona, self.center.set_persona_payload,
                                lambda _message: None)
                 self.center.set_persona_message("Профиль возвращён к значениям по умолчанию.")
