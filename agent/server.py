@@ -41,6 +41,7 @@ from typing import Any
 
 from . import brain as brain_mod
 from . import capabilities, config, executor, pc, planner, replanner, skills, speech, task_engine, ui, voice_runtime, window, winapi
+from .providers import registry as provider_registry
 
 # Ожидающее действие живёт недолго: неподтверждённый клик не должен висеть
 # вечно и выстрелить через час, когда человек уже ушёл.
@@ -395,6 +396,12 @@ class Agent:
                                 for row in rows if not row["available"]],
                 "stats": self.runner.store.stats()}
 
+    def providers_payload(self) -> dict[str, Any]:
+        self.runner.refresh_capabilities()
+        rows = provider_registry.catalog(self.runner.caps)
+        return {"ok": True, "providers": rows, "count": len(rows),
+                "ready": sum(1 for row in rows if row["available"])}
+
     def journal(self, limit: int = 30) -> dict[str, Any]:
         """Журнал действий на компьютере. Чтение журнала в журнал не пишется."""
         rows = self.runner.store.journal_recent(limit)
@@ -678,6 +685,8 @@ class AgentHandler(BaseHTTPRequestHandler):
             return self._json(200, {"ok": True, "replans": agent.replanner.list()})
         if path == "/skills":
             return self._json(200, agent.skills_payload())
+        if path == "/providers":
+            return self._json(200, agent.providers_payload())
         if path == "/journal":
             query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
             limit = int((query.get("limit") or ["30"])[0] or 30)

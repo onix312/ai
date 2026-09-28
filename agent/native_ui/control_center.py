@@ -419,6 +419,13 @@ class ControlCenter(QMainWindow):
         self.mic_button = QPushButton("🎤 Включить wake word")
         self.mic_button.clicked.connect(self.mic_toggle)
         sl.addWidget(self.mic_button)
+        providers_title = QLabel("Providers")
+        providers_title.setStyleSheet("font-size:16px; font-weight:700; margin-top:12px;")
+        sl.addWidget(providers_title)
+        self.providers_view = QTextBrowser()
+        self.providers_view.setMaximumHeight(220)
+        self.providers_view.setPlainText("Загрузка…")
+        sl.addWidget(self.providers_view)
         note = QLabel(
             "Нативный интерфейс не содержит мозг ассистента. Он подключается "
             "к локальному agent core на 127.0.0.1; старый /ui остаётся fallback."
@@ -474,6 +481,23 @@ class ControlCenter(QMainWindow):
             self.footer.setText("Агент недоступен" + (f": {error}" if error else ""))
             self.settings_status.setText("Backend: недоступен" + (f" · {error}" if error else ""))
         self.mic_button.setText("🎤 Выключить wake word" if armed else "🎤 Включить wake word")
+
+    def set_providers_payload(self, payload: dict[str, Any]) -> None:
+        rows = list(payload.get("providers") or [])
+        if not rows:
+            self.providers_view.setPlainText("Providers пока не зарегистрированы.")
+            return
+        lines = []
+        for row in rows:
+            mark = "✓" if row.get("available") else "–"
+            title = str(row.get("title") or row.get("name") or "provider")
+            skill_names = [str(item.get("name") or "") for item in (row.get("skills") or [])]
+            detail = ", ".join(skill_names) if skill_names else "skills не перенесены"
+            line = f"{mark} {title}: {detail}"
+            if not row.get("available") and row.get("reason"):
+                line += f"\n  {row.get('reason')}"
+            lines.append(line)
+        self.providers_view.setPlainText("\n\n".join(lines))
 
     def set_planner_message(self, text: str) -> None:
         page = self.pages.get("tasks")

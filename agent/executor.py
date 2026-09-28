@@ -34,7 +34,8 @@ import time
 from typing import Any, Callable
 
 from . import avito as avito_mod
-from . import browser as browser_mod, capabilities, config, documents, fileops, model, pc, personal_skills, skills, tg as tg_mod, when, winapi
+from . import capabilities, config, documents, fileops, model, pc, skills, tg as tg_mod, when, winapi
+from .providers import registry as provider_registry
 from .learning import Learning
 from .panel_client import Client
 from .personal import Personal
@@ -310,10 +311,11 @@ class Runner:
     def _dispatch(self, skill: dict[str, Any], params: dict[str, Any]) -> dict[str, Any]:
         if skill.get("steps"):
             return self._run_steps(skill)
+        skill_name = str(skill.get("name") or "")
+        provider = provider_registry.for_skill(skill_name)
+        if provider is not None:
+            return provider.run(skill_name, params, self)
         handlers: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
-            "panel.actions": self._panel_actions,
-            "panel.do": self._panel_do,
-            "panel.ask": self._panel_ask,
             "files.index": self._files_index,
             "files.search": self._files_search,
             "files.recent": self._files_recent,
@@ -323,8 +325,6 @@ class Runner:
             "files.tidy_plan": self._files_tidy_plan,
             "files.tidy_apply": self._files_tidy_apply,
             "knowledge.shop": self._knowledge_shop,
-            "day.briefing": lambda p: self._day("briefing", p),
-            "day.summary": lambda p: self._day("summary", p),
             "agent.skills": self._agent_skills,
             "agent.why": self._agent_why,
             "agent.journal": self._agent_journal,
@@ -377,11 +377,6 @@ class Runner:
             "window.focus": self._window_focus,
             "window.text": self._window_text,
             "window.controls": self._window_controls,
-            "desktop.observe": self._desktop_observe,
-            "browser.tabs": self._browser_tabs,
-            "browser.page": self._browser_page,
-            "browser.find": self._browser_find,
-            "browser.selection": self._browser_selection,
             "window.click": self._window_click,
             "window.type": self._window_type,
             "window.snap": self._window_snap,
@@ -425,8 +420,6 @@ class Runner:
             "memory.recall": self._memory_recall,
             "memory.forget": self._memory_forget,
         }
-        # 18.22: личные навыки и обучение живут в своём модуле.
-        handlers.update(personal_skills.handlers(self))
         handler = handlers.get(str(skill.get("name") or ""))
         if handler is None:
             return {"ok": False,
@@ -453,40 +446,6 @@ class Runner:
                                   f"{result.get('reason')}"}
         return {"ok": True, "steps": done, "reason": "",
                 "hint": f"Выполнено шагов: {len(done)}"}
-
-    # --- панель (И137, И1, И174) ------------------------------------------
-    def _panel_actions(self, _params: dict[str, Any]) -> dict[str, Any]:
-        return self.panel.actions()
-
-    def _panel_do(self, params: dict[str, Any]) -> dict[str, Any]:
-        action, why = self.panel.find_action(str(params.get("action") or ""))
-        if action is None:
-            return {"ok": False, "reason": why}
-        inner = params.get("params")
-        values = inner if isinstance(inner, dict) else {}
-        # Подтверждение действия панели берётся из её каталога: ассистент не
-        # решает сам, какие действия двигают деньги и печать.
-        confirmed = bool(action.get("confirm"))
-        result = self.panel.run_action(action, values, confirmed=confirmed)
-        result["title_action"] = str(action.get("title") or action.get("id") or "")
-        result["panel_confirm"] = confirmed
-        explain = " ".join(str(params.get("explain") or "").split())[:300]
-        result["target"] = explain or result["title_action"]
-        if not confirmed:
-            result["hint"] = "Действие чтения: выполнено без подтверждения"
-        elif explain and result.get("ok"):
-            result["hint"] = explain  # в журнал — что именно сделано словами панели, а не «готово»
-        return result
-
-    def _panel_ask(self, params: dict[str, Any]) -> dict[str, Any]:
-        question = str(params.get("question") or "").strip()
-        if not question:
-            return {"ok": False, "reason": "Пустой вопрос"}
-        return self.panel.ask(question)
-
-    def _day(self, kind: str, params: dict[str, Any]) -> dict[str, Any]:
-        days = int(params.get("days") or 1)
-        return self.panel.day(kind, days=max(1, min(90, days)))
 
     # --- файлы и знания (И142, И143, И144, И147, И148) --------------------
     def _folders(self, raw: Any, default: tuple[str, ...]) -> list[str]:
@@ -1253,32 +1212,6 @@ class Runner:
         return {"ok": True, "controls": rows, "count": len(rows), "reason": "",
                 "hint": (f"Элементов: {len(rows)}" if rows
                          else "Программа рисует интерфейс сама — стандартных элементов нет")}
-
-    def _desktop_observe(self, params: dict) -> dict:
-        from .perception import observe
-        return observe(str(params.get("title") or ""),
-                       int(params.get("limit") or 80),
-                       bool(params.get("screenshot", False)),
-                       bool(params.get("ocr", True)))
-
-    def _browser_tabs(self, params: dict) -> dict:
-        return browser_mod.tabs(int(params.get("limit") or 30))
-
-    def _browser_page(self, params: dict) -> dict:
-        return browser_mod.page(
-            target_id=str(params.get("target_id") or ""),
-            max_chars=int(params.get("max_chars") or browser_mod.MAX_TEXT),
-        )
-
-    def _browser_find(self, params: dict) -> dict:
-        return browser_mod.find(
-            str(params.get("query") or ""),
-            target_id=str(params.get("target_id") or ""),
-            limit=int(params.get("limit") or 8),
-        )
-
-    def _browser_selection(self, params: dict) -> dict:
-        return browser_mod.selection(str(params.get("target_id") or ""))
 
     def _window_click(self, params: dict) -> dict:
         if params.get("x") is None or params.get("y") is None:
