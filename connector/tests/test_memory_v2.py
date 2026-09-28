@@ -5,6 +5,7 @@ import pathlib
 import sqlite3
 import tempfile
 import unittest
+import math
 
 from agent.store import Store
 
@@ -106,6 +107,58 @@ class MemoryV2Tests(unittest.TestCase):
         self.assertAlmostEqual(0.55, float(row["confidence"]), places=2)
         self.assertEqual(1, int(row["evidence_count"]))
         self.assertEqual("self", row["provenance"])
+
+    def test_inference_cannot_replace_explicit_profile(self):
+        first = self.store.remember("Владельца зовут Олег", kind="profile",
+                                    subject="имя", source="chat")["memory"]
+        rejected = self.store.remember("Владельца зовут Саша", kind="profile",
+                                       subject="имя", source="self")
+        self.assertFalse(rejected["ok"])
+        self.assertTrue(rejected["conflict"])
+        self.assertEqual(first["id"], rejected["memory"]["id"])
+        self.assertEqual("Владельца зовут Олег", self.store.memories(1)[0]["text"])
+
+    def test_window_is_explicit_and_origin_cannot_be_spoofed_by_inference(self):
+        window = self.store.remember("Владелец любит PLA", source="window")["memory"]
+        guessed = self.store.remember("Владелец любит ABS", source="self",
+                                      origin="explicit")["memory"]
+        self.assertEqual("explicit", window["origin"])
+        self.assertEqual("inferred", guessed["origin"])
+        self.assertEqual(window["at"], window["created_at"])
+        self.assertEqual(1, window["observed_count"])
+        skill = self.store.remember("Модель думает, что нужен ABS", source="skill")["memory"]
+        self.assertEqual("inferred", skill["origin"])
+
+    def test_nonfinite_confidence_is_replaced_with_default(self):
+        row = self.store.remember("Небезопасная уверенность", source="self",
+                                  confidence=math.nan)["memory"]
+        self.assertAlmostEqual(0.55, row["confidence"])
+
+    def test_same_text_in_different_kinds_keeps_both_records(self):
+        self.store.remember("Олег любит PLA", kind="fact", source="chat")
+        self.store.remember("Олег любит PLA", kind="preference", subject="материал",
+                            source="chat")
+        self.assertEqual(2, len(self.store.memories(10)))
+
+    def test_four_layers_use_existing_data_without_exposing_journal_params(self):
+        self.store.add_turn("native", "user", "Привет")
+        self.store.journal("files.search", "done", detail="Найдено", params={"secret": "x"})
+        self.store.remember("PLA плавится", kind="fact", source="chat")
+        self.store.remember("Любит короткие ответы", kind="preference", subject="стиль",
+                            source="self")
+        layers = self.store.memory_layers("native")
+        self.assertEqual("Привет", layers["working"][0]["text"])
+        self.assertEqual("PLA плавится", layers["semantic"][0]["text"])
+        self.assertEqual("Любит короткие ответы", layers["user_model"][0]["text"])
+        self.assertNotIn("params", layers["episodic"][0])
+
+    def test_reopen_does_not_reset_observed_confidence(self):
+        self.store.remember("Вижу окно", source="observed", confidence=0.93)
+        self.store.close()
+        self.store = Store(self.path)
+        row = self.store.memories(1)[0]
+        self.assertAlmostEqual(0.93, row["confidence"])
+        self.assertEqual("observed", row["origin"])
 
 
 if __name__ == "__main__":

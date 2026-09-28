@@ -1,0 +1,29 @@
+name: memory-v2
+
+on:
+  pull_request:
+    paths:
+      - "agent/store.py"
+      - "agent/brain.py"
+      - "agent/server.py"
+      - "agent/native_ui/backend.py"
+      - "connector/tests/test_memory_v2.py"
+      - "connector/tests/test_agent_brain.py"
+      - ".github/workflows/memory-v2.yml"
+
+jobs:
+  memory:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Compile memory and brain
+        run: python -m compileall -q agent/store.py agent/brain.py agent/server.py
+      - name: Memory contracts
+        run: >-
+          python -m unittest
+          connector.tests.test_memory_v2
+          connector.tests.test_agent_brain.BrainChatTests
+          connector.tests.test_assistant_store

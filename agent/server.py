@@ -40,7 +40,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
 from . import brain as brain_mod
-from . import capabilities, config, executor, pc, planner, skills, speech, task_engine, ui, voice_runtime, window, winapi
+from . import capabilities, config, executor, pc, planner, replanner, skills, speech, task_engine, ui, voice_runtime, window, winapi
 
 # Ожидающее действие живёт недолго: неподтверждённый клик не должен висеть
 # вечно и выстрелить через час, когда человек уже ушёл.
@@ -69,6 +69,7 @@ class Agent:
         self._brain: brain_mod.Brain | None = None
         self._tasks: task_engine.TaskEngine | None = None
         self._planner: planner.Planner | None = None
+        self._replanner: replanner.Replanner | None = None
         self._stop = threading.Event()
         # Голос: фраза после стоп-слова идёт мозгу, ответ звучит вслух.
         self.microphone.handler = self.voice_phrase
@@ -100,6 +101,14 @@ class Agent:
         if self._planner is None:
             self._planner = planner.Planner(self)
         return self._planner
+
+    @property
+    def replanner(self) -> replanner.Replanner:
+        if self._replanner is None:
+            with self._lock:
+                if self._replanner is None:
+                    self._replanner = replanner.Replanner(self)
+        return self._replanner
 
     def chat(self, text: str, session: str = "main", mode: str = "full",
              plan: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -360,6 +369,23 @@ class Agent:
         if op == "list":
             return {"ok": True, "plans": self.planner.list()}
         return {"ok": False, "reason": f"Неизвестная операция плана «{op}»"}
+
+    def replan_op(self, body: dict[str, Any]) -> dict[str, Any]:
+        op = str(body.get("op") or "list").strip().casefold()
+        if op == "preview":
+            try:
+                task_id = int(body.get("task_id") or 0)
+            except (TypeError, ValueError):
+                return {"ok": False, "reason": "Некорректный номер задачи"}
+            self.runner.refresh_capabilities()
+            return self.replanner.preview(task_id)
+        if op == "approve":
+            return self.replanner.approve(str(body.get("id") or ""))
+        if op == "discard":
+            return self.replanner.discard(str(body.get("id") or ""))
+        if op == "list":
+            return {"ok": True, "replans": self.replanner.list()}
+        return {"ok": False, "reason": f"Неизвестная операция перепланирования «{op}»"}
 
     def skills_payload(self) -> dict[str, Any]:
         rows = self.runner.catalog()
@@ -646,6 +672,8 @@ class AgentHandler(BaseHTTPRequestHandler):
             return self._json(200, {"ok": True, "tasks": agent.tasks.list(limit, status)})
         if path == "/plans":
             return self._json(200, {"ok": True, "plans": agent.planner.list()})
+        if path == "/replans":
+            return self._json(200, {"ok": True, "replans": agent.replanner.list()})
         if path == "/skills":
             return self._json(200, agent.skills_payload())
         if path == "/journal":
@@ -667,9 +695,11 @@ class AgentHandler(BaseHTTPRequestHandler):
         if path == "/memory":
             query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
             wanted = str((query.get("q") or [""])[0] or "")
+            session = brain_mod.session_key((query.get("session") or ["main"])[0])
             store = agent.runner.store
             rows = store.recall(wanted, 30, touch=False) if wanted else store.memories(100)
-            return self._json(200, {"ok": True, "memories": rows, "count": len(rows)})
+            return self._json(200, {"ok": True, "memories": rows, "count": len(rows),
+                                    "layers": store.memory_layers(session)})
         if path == "/ui":
             body = ui.page().encode("utf-8")
             self.send_response(200)
@@ -770,6 +800,8 @@ class AgentHandler(BaseHTTPRequestHandler):
             return self._json(200, agent.task_op(body))
         if path == "/plans":
             return self._json(200, agent.plan_op(body))
+        if path == "/replans":
+            return self._json(200, agent.replan_op(body))
         if path == "/memory":
             store = agent.runner.store
             op = str(body.get("op") or "remember")

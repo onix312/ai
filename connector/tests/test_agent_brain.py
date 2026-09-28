@@ -71,7 +71,8 @@ class PcHelpersTests(unittest.TestCase):
             document.write_text("x", encoding="utf-8")
             self.assertIn("Исполняемые", pc.launch_plan(str(script), roots=(tmp,))[1])
             self.assertEqual("path", pc.launch_plan(str(document), roots=(tmp,))[0]["kind"])
-            self.assertIn("вне разрешённых", pc.launch_plan("/etc/passwd", roots=(tmp,))[1])
+            outside = str(pathlib.Path(tmp).parent / "outside.txt")
+            self.assertIn("вне разрешённых", pc.launch_plan(outside, roots=(tmp,))[1])
         self.assertEqual(["calc.exe"], pc.launch_plan("калькулятор", platform="win32")[0]["command"])
         self.assertEqual("exe", pc.launch_plan("bambu", platform="win32")[0]["kind"])
         self.assertIn("нет в списке", pc.launch_plan("rm -rf /")[1])
@@ -338,6 +339,15 @@ class BrainChatTests(unittest.TestCase):
         self.assertIn("PETG", self.brain.chat("что ты помнишь про Марию?")["reply"])
         self.brain.chat("меня зовут Олег")
         self.assertEqual("Вас зовут Олег.", self.brain.chat("как меня зовут")["reply"])
+
+    def test_inferred_memory_is_labelled_and_not_used_as_certain_name(self):
+        self.store.remember("Мария любит PETG", source="self")
+        answer = self.brain.chat("что ты помнишь про Марию?")
+        self.assertIn("предположение", answer["reply"])
+        self.store.remember("Владельца зовут Илья", kind="profile",
+                            subject="имя", source="self")
+        self.assertEqual("", self.brain._owner_name())
+        self.assertIn("Уточните", self.brain.chat("как меня зовут")["reply"])
 
     def test_capabilities_and_clock_answer_locally(self):
         self.assertIn("навыков", self.brain.chat("что ты умеешь")["reply"])
@@ -698,7 +708,7 @@ class ExecutorRefusalTests(unittest.TestCase):
         self.assertTrue(self.dispatch("memory.forget", {"what": "сушить PETG"})["ok"])
 
     def test_app_open_respects_roots(self):
-        result = self.dispatch("app.open", {"target": "/etc/passwd"})
+        result = self.dispatch("app.open", {"target": str(pathlib.Path(self._tmp.name) / "outside.txt")})
         self.assertFalse(result["ok"])
         self.assertIn("вне разрешённых", result["reason"])
 
@@ -735,9 +745,10 @@ class ServerSecurityTests(unittest.TestCase):
         cls._env.start()
         cls._ports = patch.multiple(config, SPEECH_PORT=0, AGENT_PORT=0, PRINTFLOW_URL=DEAD_PANEL)
         cls._ports.start()
-        agent = server.Agent()
-        agent._runner = executor.Runner(store=Store(pathlib.Path(cls._tmp.name) / "a.sqlite3"), panel=Client(DEAD_PANEL))
-        cls.speech, cls.server = server.serve(agent)
+        cls.agent = server.Agent()
+        cls.agent._runner = executor.Runner(store=Store(pathlib.Path(cls._tmp.name) / "a.sqlite3"),
+                                            panel=Client(DEAD_PANEL))
+        cls.speech, cls.server = server.serve(cls.agent)
         cls.port = cls.server.server_address[1]
         cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
         cls.thread.start()
@@ -745,8 +756,10 @@ class ServerSecurityTests(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         cls.server.shutdown()
+        cls.thread.join(timeout=2)
         cls.server.server_close()
         cls.speech.server_close()
+        cls.agent.runner.store.close()
         cls._ports.stop()
         cls._env.stop()
         cls._tmp.cleanup()
@@ -788,6 +801,8 @@ class ServerSecurityTests(unittest.TestCase):
         self.assertTrue(saved["ok"])
         code, _h, listed = self.request("/memory?q=сушить".replace("сушить", "%D1%81%D1%83%D1%88%D0%B8%D1%82%D1%8C"))
         self.assertEqual(1, listed["count"])
+        self.assertEqual("explicit", listed["memories"][0]["origin"])
+        self.assertEqual("Сушить PETG 4 часа", listed["layers"]["semantic"][0]["text"])
         self.request("/chat", {"text": "2+2", "session": "h"})
         code, _h, history = self.request("/chat/history?session=h")
         self.assertEqual(["user", "assistant"], [turn["role"] for turn in history["turns"]])
