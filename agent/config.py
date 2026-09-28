@@ -23,9 +23,9 @@ AGENT_PORT = int(os.environ.get("PRINTFLOW_AGENT_PORT", "8799") or 8799)
 PRINTFLOW_URL = os.environ.get("PRINTFLOW_URL", "http://127.0.0.1:8765").rstrip("/")
 WAKE_WORD = os.environ.get("PRINTFLOW_WAKE_WORD", "ноза").strip().lower()
 LANGUAGE = os.environ.get("PRINTFLOW_SPEECH_LANG", "ru")
-# Запись голоса живёт только во включённом режиме: микрофон закрыт, пока человек не
-# нажал горячую клавишу или кнопку агента. Постоянно открытый микрофон исключён
-# решением владельца (вопрос 6 допроса).
+# Старый ручной arm-режим сохранён для совместимости. Основной Voice Engine 2.0
+# ниже может держать локальный микрофон включённым для wake word; запись на диск
+# не ведётся.
 MIC_ARM_SECONDS = float(os.environ.get("PRINTFLOW_MIC_ARM_SECONDS", "25") or 25)
 SPEECH_MODEL_PATH = os.environ.get("PRINTFLOW_SPEECH_MODEL_PATH", "").strip()
 
