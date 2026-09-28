@@ -1,4 +1,4 @@
-"""Точка сборки нативного NOZZA UI."""
+"""Точка сборки нативного UI Люмы."""
 from __future__ import annotations
 
 import os
@@ -332,7 +332,7 @@ class NativeApp:
     def save_persona(self, profile: dict[str, Any]) -> None:
         def done(payload: dict[str, Any]) -> None:
             if payload.get("ok"):
-                self.center.set_persona_message("✓ Стиль NOZZA сохранён.")
+                self.center.set_persona_message("✓ Стиль Люмы сохранён.")
                 self.run_async(self.backend.persona, self.center.set_persona_payload,
                                lambda _message: None)
             else:
