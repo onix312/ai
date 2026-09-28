@@ -65,6 +65,22 @@ class BrowserReadTests(unittest.TestCase):
         self.assertEqual("One", result["tabs"][0]["title"])
         self.assertNotIn("websocket", result["tabs"][0])
 
+    def test_ambiguous_current_tab_is_not_guessed(self):
+        rows = [
+            {"id": "1", "title": "One", "url": "https://one.test",
+             "websocket": "ws://127.0.0.1:9222/devtools/page/1", "active": False},
+            {"id": "2", "title": "Two", "url": "https://two.test",
+             "websocket": "ws://127.0.0.1:9222/devtools/page/2", "active": False},
+        ]
+        with patch.object(browser, "_raw_tabs", return_value=rows):
+            with self.assertRaises(browser.BrowserError) as error:
+                browser._target()
+        self.assertIn("однозначно", str(error.exception))
+
+    def test_single_tab_is_safe_fallback(self):
+        with patch.object(browser, "_raw_tabs", return_value=[self.target]):
+            self.assertEqual("tab-1", browser._target()["id"])
+
     def test_page_returns_structured_dom_without_mutation(self):
         dom = {
             "title": "Store",
