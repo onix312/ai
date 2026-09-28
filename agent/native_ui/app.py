@@ -50,8 +50,7 @@ class NativeApp:
         self.center.chat_submitted.connect(self.send_chat)
         self.center.refresh_page.connect(self.refresh_page)
         self.center.clear_chat.connect(self.clear_chat)
-        self.center.mic_toggle.connect(self.toggle_mic)
-
+        self.center.mic_toggle.connect(self.toggle_mic)\n        self.center.task_decision.connect(self.decide_task)\n
         self._restore_geometry()
         self._install_hotkey()
 
@@ -195,6 +194,18 @@ class NativeApp:
             "pending": pending.get("pending") or [],
             "notifications": notes.get("notifications") or [],
         }
+
+    def decide_task(self, action_id: str, confirmed: bool) -> None:
+        if not action_id:
+            return
+
+        def done(payload: dict[str, Any]) -> None:
+            message = str(payload.get("reason") or ("Выполнено." if payload.get("done") else "Отменено."))
+            self.quick.show_answer(message)
+            self.refresh_page("tasks")
+            self.refresh_history()
+
+        self.run_async(lambda: self.backend.decide(action_id, confirmed), done)
 
     # --------------------------------------------------------------- mic
     def toggle_mic(self) -> None:
