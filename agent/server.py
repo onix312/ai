@@ -319,7 +319,10 @@ class Agent:
                 source=str(body.get("source") or "api"),
                 start=bool(body.get("start")),
             )
-        task_id = int(body.get("id") or 0)
+        try:
+            task_id = int(body.get("id") or 0)
+        except (TypeError, ValueError):
+            return {"ok": False, "reason": "Некорректный номер задачи"}
         if op == "run":
             return self.tasks.start(task_id)
         if op == "pause":
@@ -429,9 +432,12 @@ class Agent:
 
     def _purge(self) -> None:
         deadline = time.time() - PENDING_TTL_SEC
-        for action_id in [key for key, value in self._pending.items()
-                          if value["created_at"] < deadline]:
+        expired = [key for key, value in self._pending.items()
+                   if value["created_at"] < deadline]
+        for action_id in expired:
             self._pending.pop(action_id, None)
+            if self._tasks is not None:
+                self.tasks.on_action_expired(action_id)
 
     def _ask(self, action_id: str) -> None:
         """Окно подтверждения на этом компьютере.
