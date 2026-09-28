@@ -21,7 +21,13 @@ from dataclasses import dataclass, field
 SPEECH_PORT = int(os.environ.get("PRINTFLOW_SPEECH_PORT", "8791") or 8791)
 AGENT_PORT = int(os.environ.get("PRINTFLOW_AGENT_PORT", "8799") or 8799)
 PRINTFLOW_URL = os.environ.get("PRINTFLOW_URL", "http://127.0.0.1:8765").rstrip("/")
-WAKE_WORD = os.environ.get("PRINTFLOW_WAKE_WORD", "ноза").strip().lower()
+ASSISTANT_NAME = os.environ.get("NOZZA_ASSISTANT_NAME", "Люма").strip() or "Люма"
+WAKE_WORD = os.environ.get("PRINTFLOW_WAKE_WORD", "люма").strip().lower()
+LEGACY_WAKE_WORDS = tuple(
+    word.strip().lower()
+    for word in os.environ.get("NOZZA_LEGACY_WAKE_WORDS", "ноза,нозза,nozza,noza").split(",")
+    if word.strip()
+)
 LANGUAGE = os.environ.get("PRINTFLOW_SPEECH_LANG", "ru")
 # Старый ручной arm-режим сохранён для совместимости. Основной Voice Engine 2.0
 # ниже может держать локальный микрофон включённым для wake word; запись на диск
