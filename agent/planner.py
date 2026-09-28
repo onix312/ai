@@ -192,6 +192,17 @@ class Planner:
             checked, reason = self.agent.tasks.validate_steps(steps)
             if reason:
                 return {"ok": False, "reason": f"План больше нельзя запустить: {reason}"}
+            policy = getattr(self.agent, "autonomy", None)
+            if policy is not None:
+                learned = self.agent.runner.learned()
+                for row in checked:
+                    skill = skills.get(str(row.get("skill") or ""), learned)
+                    if skill is None:
+                        continue
+                    allowed_step, why_step = policy.check_skill(skill, "plan")
+                    if not allowed_step:
+                        return {"ok": False, "reason": why_step, "autonomy_blocked": True,
+                                "autonomy": policy.payload()}
             result = self.agent.tasks.create(
                 str(draft["title"]),
                 [{"skill": row["skill"], "params": row["params"]} for row in checked],
