@@ -49,6 +49,24 @@ class NativeQtSmokeTests(unittest.TestCase):
             },
             "invariant": "confirmations остаются обязательными",
         })
+        center.set_proactivity_payload({
+            "ok": True,
+            "settings": {
+                "mode": "active",
+                "max_nonurgent_per_hour": 0,
+                "cooldown_minutes": 45,
+                "quiet_start": "23:00",
+                "quiet_end": "07:00",
+            },
+            "modes": ["silent", "important", "balanced", "active"],
+            "urgencies": ["low", "normal", "important", "urgent"],
+            "autopilot": True,
+            "invariant": "Event Engine 1.0 создаёт только уведомления.",
+            "recent": [
+                {"state": "suppressed", "title": "Цель", "reason": "quiet hours"},
+                {"state": "delivered", "title": "Задача остановилась", "reason": ""},
+            ],
+        })
         center.set_persona_payload({
             "ok": True,
             "profile": {
@@ -117,6 +135,14 @@ class NativeQtSmokeTests(unittest.TestCase):
         self.assertEqual("assistant", center.autonomy_provider_boxes["printflow"].currentData())
         self.assertEqual(4, center.autonomy_provider_boxes["desktop"].count())
         self.assertIn("обязательными", center.autonomy_status.text())
+        self.assertEqual("active", center.proactivity_mode.currentData())
+        self.assertEqual(0, center.proactivity_budget.currentData())
+        self.assertEqual(45, center.proactivity_cooldown.currentData())
+        self.assertEqual("23:00", center.proactivity_quiet_start.text())
+        self.assertEqual("07:00", center.proactivity_quiet_end.text())
+        self.assertIn("Autopilot включён", center.proactivity_status.text())
+        self.assertIn("[suppressed] Цель", center.events_view.toPlainText())
+        self.assertIn("quiet hours", center.events_view.toPlainText())
         self.assertIsInstance(center.pages["tasks"], TasksPage)
         task_page = center.pages["tasks"]
         labels = [w.text() for w in task_page.findChildren(QLabel)]

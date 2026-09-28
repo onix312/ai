@@ -40,7 +40,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
 from . import brain as brain_mod
-from . import autonomy as autonomy_mod, capabilities, config, executor, pc, persona as persona_mod, planner, replanner, skills, speech, task_engine, ui, voice_runtime, window, winapi
+from . import autonomy as autonomy_mod, capabilities, config, event_engine as event_mod, executor, pc, persona as persona_mod, planner, replanner, skills, speech, task_engine, ui, voice_runtime, window, winapi
 from .providers import registry as provider_registry
 
 # Ожидающее действие живёт недолго: неподтверждённый клик не должен висеть
@@ -73,6 +73,7 @@ class Agent:
         self._replanner: replanner.Replanner | None = None
         self._persona: persona_mod.Persona | None = None
         self._autonomy: autonomy_mod.AutonomyPolicy | None = None
+        self._events: event_mod.EventEngine | None = None
         self._stop = threading.Event()
         # Голос: фраза после стоп-слова идёт мозгу, ответ звучит вслух.
         self.microphone.handler = self.voice_phrase
@@ -127,6 +128,13 @@ class Agent:
             self._autonomy = autonomy_mod.AutonomyPolicy(self.runner.store)
         return self._autonomy
 
+    @property
+    def events(self) -> event_mod.EventEngine:
+        """Notification-only proactive event layer."""
+        if self._events is None:
+            self._events = event_mod.EventEngine(self)
+        return self._events
+
     def chat(self, text: str, session: str = "main", mode: str = "full",
              plan: dict[str, Any] | None = None) -> dict[str, Any]:
         """Фраза человека → ответ мозга. Способности обновляются перед разговором."""
@@ -147,14 +155,30 @@ class Agent:
             fired = self.runner.personal.tick(now)
         except Exception as exc:  # noqa: BLE001 — планировщик не имеет права уронить агента
             print(f"  ⚠ Планировщик: {exc.__class__.__name__}: {exc}")
-            return []
-        if fired and self._voice_notify():
-            for item in fired[:3]:
+            fired = []
+
+        # Explicit commitments remain guaranteed. Event Engine mirrors them only
+        # into its journal and never decides whether the reminder itself exists.
+        try:
+            for item in fired:
+                self.events.record_explicit(item, now)
+        except Exception as exc:  # noqa: BLE001 — proactivity must never break reminders
+            print(f"  ⚠ Event journal: {exc.__class__.__name__}: {exc}")
+
+        proactive: list[dict[str, Any]] = []
+        try:
+            proactive = self.events.tick(now)
+        except Exception as exc:  # noqa: BLE001
+            print(f"  ⚠ Event Engine: {exc.__class__.__name__}: {exc}")
+
+        delivered = list(fired) + list(proactive)
+        if delivered and self._voice_notify():
+            for item in delivered[:3]:
                 try:
                     pc.speak(f"{item['title']}: {item['text']}"[:300])
                 except Exception:  # noqa: BLE001
                     pass
-        return fired
+        return delivered
 
     def _voice_notify(self) -> bool:
         if not self.capabilities.get("speech_out"):
@@ -739,6 +763,13 @@ class AgentHandler(BaseHTTPRequestHandler):
             return self._json(200, agent.persona.payload())
         if path == "/autonomy":
             return self._json(200, agent.autonomy.payload())
+        if path == "/proactivity":
+            return self._json(200, agent.events.payload())
+        if path == "/events":
+            query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+            state = str((query.get("state") or [""])[0] or "")
+            limit = int((query.get("limit") or ["50"])[0] or 50)
+            return self._json(200, {"ok": True, "events": agent.events.list(limit, state)})
         if path == "/journal":
             query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
             limit = int((query.get("limit") or ["30"])[0] or 30)
@@ -882,6 +913,13 @@ class AgentHandler(BaseHTTPRequestHandler):
                     body.get("providers") if "providers" in body else None,
                 ))
             return self._json(200, {"ok": False, "reason": f"Неизвестная autonomy-операция «{op}»"})
+        if path == "/proactivity":
+            op = str(body.get("op") or "update").strip().casefold()
+            if op == "reset":
+                return self._json(200, agent.events.reset())
+            if op == "update":
+                return self._json(200, agent.events.update(body.get("settings") or {}))
+            return self._json(200, {"ok": False, "reason": f"Неизвестная proactivity-операция «{op}»"})
         if path == "/memory":
             store = agent.runner.store
             op = str(body.get("op") or "remember")
