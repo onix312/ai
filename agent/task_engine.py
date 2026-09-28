@@ -200,6 +200,14 @@ class TaskEngine:
                     self._set_task(task_id, status="failed", current_step=seq, error=reason)
                     return
                 self._set_step(task_id, seq, status="done", finished_at=now_iso(), result=result)
+                latest = self.get(task_id)
+                if latest is None:
+                    return
+                if latest["status"] == "cancelled":
+                    return
+                if latest["status"] == "paused":
+                    self._set_task(task_id, current_step=seq + 1)
+                    return
                 self._set_task(task_id, status="running", current_step=seq + 1, error="")
         finally:
             with self._lock:
@@ -234,6 +242,14 @@ class TaskEngine:
         task = self.get(task_id)
         if task is None:
             return {"ok": False, "reason": "Задача не найдена"}
+        for step in task["steps"]:
+            action_id = str(step.get("pending_action") or "")
+            if step["status"] == "waiting" and action_id:
+                discard = getattr(self.agent, "discard_action", None)
+                if callable(discard):
+                    discard(action_id)
+                self._set_step(task_id, int(step["seq"]), status="pending",
+                               pending_action="", result={})
         self._set_task(task_id, status="paused")
         return {"ok": True, "task": self.get(task_id)}
 
