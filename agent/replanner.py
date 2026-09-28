@@ -7,7 +7,7 @@ import time
 import uuid
 from typing import Any
 
-from . import config, model, planner, skills
+from . import autonomy, config, model, planner, skills
 
 _RULES = """Ты перепланировщик NOZZA. Верни только JSON с полями summary, ask, steps.
 steps — массив объектов {skill, params, why}. Предложи максимум 8 шагов из каталога.
@@ -142,10 +142,10 @@ class Replanner:
         return {"ok": True, "replan": self._public(draft)}
 
     def approve(self, draft_id: str) -> dict[str, Any]:
-        allowed, why = self.agent.autonomy.check("agent", "core")
+        allowed, why, policy = autonomy.check_agent(self.agent, "agent", "core")
         if not allowed:
             return {"ok": False, "reason": why, "autonomy_blocked": True,
-                    "autonomy": self.agent.autonomy.payload()}
+                    "autonomy": policy}
         self._purge()
         key = str(draft_id or "").strip()
         with self._lock:
