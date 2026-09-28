@@ -475,6 +475,18 @@ class TaskEngine:
         threading.Thread(target=create_preview, daemon=True,
                          name=f"nozza-replan-{task_id}").start()
 
+    def pause_all(self, reason: str = "Остановлено") -> dict[str, Any]:
+        paused: list[int] = []
+        for task in self.list(200):
+            if str(task.get("status") or "") not in ("running", "waiting"):
+                continue
+            task_id = int(task.get("id") or 0)
+            result = self.pause(task_id)
+            if result.get("ok"):
+                self._set_task(task_id, error=str(reason or "Остановлено")[:500])
+                paused.append(task_id)
+        return {"ok": True, "paused": paused, "count": len(paused)}
+
     def pause(self, task_id: int) -> dict[str, Any]:
         task = self.get(task_id)
         if task is None:
