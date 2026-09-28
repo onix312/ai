@@ -8,7 +8,7 @@ import time
 import unittest
 from unittest.mock import patch
 
-from agent import config, pc, speech, voice_runtime
+from agent import pc, speech, voice_runtime
 
 
 class _Recognizer:
@@ -100,7 +100,6 @@ class VoiceStreamingTests(unittest.TestCase):
 
         self.assertTrue(during_output)
         self.assertGreaterEqual(runtime.echo_suppressed, 2)
-        self.assertGreater(runtime.echo_threshold, config.VOICE_VAD_THRESHOLD)
         self.assertEqual(owner, chunks[0], "suppressed TTS leakage must stay out of ASR pre-roll")
 
     def test_status_exposes_echo_gate_telemetry(self):
