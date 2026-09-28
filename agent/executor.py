@@ -377,6 +377,7 @@ class Runner:
             "window.focus": self._window_focus,
             "window.text": self._window_text,
             "window.controls": self._window_controls,
+            "desktop.observe": self._desktop_observe,
             "window.click": self._window_click,
             "window.type": self._window_type,
             "window.snap": self._window_snap,
@@ -1249,6 +1250,13 @@ class Runner:
                 "hint": (f"Элементов: {len(rows)}" if rows
                          else "Программа рисует интерфейс сама — стандартных элементов нет")}
 
+    def _desktop_observe(self, params: dict) -> dict:
+        from .perception import observe
+        return observe(str(params.get("title") or ""),
+                       int(params.get("limit") or 80),
+                       bool(params.get("screenshot", False)),
+                       bool(params.get("ocr", True)))
+
     def _window_click(self, params: dict) -> dict:
         if params.get("x") is None or params.get("y") is None:
             # Раньше пустой вызов кликал в угол экрана (0, 0) — туда, где у
@@ -1325,7 +1333,17 @@ class Runner:
             return {"ok": False, "reason": f"Снимок области не получился: {exc}"}
 
     def _screen_describe(self, params: dict) -> dict:
-        """Описание экрана только видящей моделью: текстовая раньше «описывала» наугад."""
+        """Use structured observations before the local visual model."""
+        from .perception import observe
+        state = observe(ocr=True)
+        if state.get("ok"):
+            labels = [str(item.get("text") or "").strip() for item in state.get("controls", [])]
+            labels += [str(item.get("text") or "").strip() for item in state.get("ocr", [])]
+            labels = [label for label in labels if label]
+            if labels:
+                title = state["window"]["title"]
+                return {"ok": True, "description": f"Окно «{title}»: " + "; ".join(labels[:12]),
+                        "sources": state["sources"], "reason": ""}
         max_side = max(320, min(1600, int(params.get("max_side") or 1024)))
         seeing, why = model.vision_ok()
         if not seeing:
@@ -1353,13 +1371,13 @@ class Runner:
         if not txt:
             return {"ok": False, "reason": "Пустой запрос"}
         try:
-            from .screen import find_text_on_screen
-            found, reason = find_text_on_screen(txt)
+            from .perception import find_text
+            found, reason = find_text(txt)
             if reason and not found:
                 return {"ok": False, "reason": reason}
-            method = "ocr" if self.caps.get("ocr") else "titles"
+            method = found.get("method", "unknown")
             return {"ok": True, "found": found, "method": method, "reason": "",
-                    "hint": "" if method == "ocr" else "Без распознавания текста ищу только в заголовках окон"}
+                    "hint": "" if method == "ocr" else "Источник: " + method}
         except Exception as exc:
             return {"ok": False, "reason": f"Поиск не удался: {exc}"}
 
@@ -1383,8 +1401,7 @@ class Runner:
                         return {"ok": False, "reason": f"Окно «{title}» не в белом списке"}
         except Exception:
             pass
-        # клик — заглушка, так как координаты неизвестны без OCR
-        return {"ok": False, "reason": "Клик по найденному тексту требует OCR — пока только поиск в заголовках окон", "found": find_res.get("found")}
+        return {"ok": False, "reason": "Клик по распознанному тексту пока недоступен: цель может быть неверной", "found": find_res.get("found")}
 
     def _screen_archive(self, params: dict) -> dict:
         title = str(params.get("title") or "").strip()[:300]

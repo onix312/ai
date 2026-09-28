@@ -782,8 +782,8 @@ def summarize(skill: str, result: dict[str, Any]) -> str:
     if skill == "screen.describe":
         return str(result.get("description") or "Описание пустое.")
     if skill == "screen.find":
-        found = result.get("found") or []
-        return (f"На экране нашёл: {', '.join(str(item.get('text') if isinstance(item, dict) else item)[:40] for item in found[:5])}."
+        found = result.get("found") or {}
+        return (f"Нашёл «{found.get('text') or found.get('title') or ''}» ({result.get('method')})."
                 if found else "На экране этого не видно.")
     if skill in ("day.briefing", "day.summary"):
         lines = result.get("lines") or []

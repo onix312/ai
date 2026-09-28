@@ -41,8 +41,8 @@ def detect() -> dict:
 
 def _detect_now() -> dict:
     """Свежая карта возможностей — один раз при старте агента."""
-    screen_ok = bool(WINDOWS and (_has("mss") or _has("PIL")))
-    screen_reason = "" if screen_ok else ("Нет mss или Pillow — снимок экрана недоступен" if WINDOWS else "Снимок экрана работает только в Windows")
+    screen_ok = bool(WINDOWS and _has("PIL"))
+    screen_reason = "" if screen_ok else ("Нет Pillow — снимок экрана недоступен" if WINDOWS else "Снимок экрана работает только в Windows")
     capabilities = {
         "windows": WINDOWS,
         "windows_reason": "" if WINDOWS else "Управление окнами работает только в Windows",
@@ -51,8 +51,10 @@ def _detect_now() -> dict:
         "type": WINDOWS,
         "screen": screen_ok,
         "screen_reason": screen_reason,
-        "ocr": bool(_has("rapidocr_onnxruntime") or _has("pytesseract")),
-        "ocr_reason": "" if (_has("rapidocr_onnxruntime") or _has("pytesseract")) else "Нет OCR-библиотеки: агент показывает снимок человеку и не угадывает текст",
+        "uia": bool(WINDOWS and _has("pywinauto")),
+        "uia_reason": "" if WINDOWS and _has("pywinauto") else "UI Automation недоступен: нужен Windows и pywinauto",
+        "ocr": bool(WINDOWS and _has("mss") and _has("rapidocr_onnxruntime")),
+        "ocr_reason": "" if WINDOWS and _has("mss") and _has("rapidocr_onnxruntime") else "OCR недоступен: нужны Windows, mss и rapidocr-onnxruntime",
         "tesseract": bool(shutil.which("tesseract")),
         "speech": bool(_has("vosk") or _has("faster_whisper")),
         "speech_reason": "" if (_has("vosk") or _has("faster_whisper")) else "Нет vosk или faster-whisper — распознавание речи недоступно",
@@ -179,7 +181,7 @@ def dynamic(panel_url: str = "", model_url: str = "") -> dict:
 def missing(capabilities: dict) -> list[str]:
     """Причины, по которым агент не умеет того, что обещает панель."""
     return [str(capabilities[key]) for key in ("windows_reason", "screen_reason",
-                                               "ocr_reason", "speech_reason",
+                                               "uia_reason", "ocr_reason", "speech_reason",
                                                "microphone_reason", "files_reason",
                                                "sqlite_reason", "native_ui_reason", "tray_reason",
                                                "window_reason", "panel_reason",
