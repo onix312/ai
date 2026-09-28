@@ -24,6 +24,7 @@ import re
 import sys
 import tempfile
 import threading
+import time
 import unittest
 import urllib.error
 import urllib.request
