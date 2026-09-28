@@ -286,3 +286,22 @@ Task Engine после успешного действия пытается не
 и clipboard после `clipboard.write`.
 
 Подробно: [../docs/VERIFICATION.md](../docs/VERIFICATION.md).
+
+
+## Browser Provider 1.0
+
+NOZZA умеет читать Chromium структурированно через локальный DevTools endpoint,
+не полагаясь на скриншоты: вкладки, URL/title, видимый текст, ссылки, кнопки,
+формы и выделение.
+
+Живые read-only skills: `browser.tabs`, `browser.page`, `browser.find`,
+`browser.selection`.
+
+Provider принимает только loopback CDP и не возвращает значения полей форм.
+Произвольный JavaScript, cookies, localStorage, click/fill/submit в v1
+отсутствуют.
+
+По умолчанию используется `http://127.0.0.1:9222`. Настройка:
+`NOZZA_BROWSER_CDP_URL` (старое `PRINTFLOW_BROWSER_CDP_URL` тоже понимается).
+
+Подробно: [../docs/BROWSER-PROVIDER.md](../docs/BROWSER-PROVIDER.md).
