@@ -142,6 +142,10 @@ class Replanner:
         return {"ok": True, "replan": self._public(draft)}
 
     def approve(self, draft_id: str) -> dict[str, Any]:
+        allowed, why = self.agent.autonomy.check("agent", "core")
+        if not allowed:
+            return {"ok": False, "reason": why, "autonomy_blocked": True,
+                    "autonomy": self.agent.autonomy.payload()}
         self._purge()
         key = str(draft_id or "").strip()
         with self._lock:
