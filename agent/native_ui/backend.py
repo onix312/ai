@@ -144,6 +144,19 @@ class BackendClient:
     def autonomy_reset(self) -> dict[str, Any]:
         return self.post("/autonomy", {"op": "reset"})
 
+    def proactivity(self) -> dict[str, Any]:
+        return self.get("/proactivity")
+
+    def proactivity_update(self, settings: dict[str, Any]) -> dict[str, Any]:
+        return self.post("/proactivity", {"op": "update", "settings": settings})
+
+    def proactivity_reset(self) -> dict[str, Any]:
+        return self.post("/proactivity", {"op": "reset"})
+
+    def events(self, limit: int = 50, state: str = "") -> dict[str, Any]:
+        q = urllib.parse.urlencode({"limit": int(limit), "state": str(state or "")})
+        return self.get(f"/events?{q}")
+
     def arm_mic(self, seconds: float = 25.0) -> dict[str, Any]:
         return self.speech_post("/mic/arm", {"seconds": float(seconds)})
 
