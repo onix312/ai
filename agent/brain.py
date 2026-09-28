@@ -1027,7 +1027,13 @@ class Brain:
     def personal(self) -> Any:
         return self.runner.personal
 
+    def _guest_mode(self) -> bool:
+        security = getattr(self.agent, "security", None)
+        return bool(security is not None and security.guest())
+
     def _persona_prompt(self) -> str:
+        if self._guest_mode():
+            return "Гостевой режим. Обращайся нейтрально и кратко. Не используй личные данные владельца."
         persona = getattr(self.agent, "persona", None)
         if persona is None:
             return "Обращайся на «вы». Отвечай кратко и дружелюбно."
@@ -1190,6 +1196,8 @@ class Brain:
 
     # --- разговор -----------------------------------------------------------
     def _owner_name(self) -> str:
+        if self._guest_mode():
+            return ""
         try:
             rows = self.store.memories(5, kind="profile")
         except Exception:
@@ -1248,7 +1256,7 @@ class Brain:
         chips = ["Что сейчас печатается?", "Как там компьютер?", "Что ты умеешь?"] if talk in ("greet", "how", "who") else []
         if talk == "greet":
             try:  # привычки владельца: «в это время вы обычно…» — первыми кнопками
-                chips = self.learning.suggestions(self.clock()) + ["Мой день"] + chips[:2]
+                chips = ([] if self._guest_mode() else self.learning.suggestions(self.clock())) + (["Мой день"] if not self._guest_mode() else []) + chips[:2]
             except Exception:  # noqa: BLE001
                 pass
         return self._reply(session, text, texts[talk].strip(), kind="answer", source="talk", steps=steps,
@@ -1318,6 +1326,13 @@ class Brain:
         op, payload = memory_command(text)
         if not op:
             return None
+        if self._guest_mode():
+            return {
+                "op": op,
+                "payload": payload,
+                "text": "Гостевой режим: память владельца временно недоступна.",
+                "rows": [],
+            }
         if op == "remember":
             saved = self.store.remember(payload, kind="fact", source="chat")
             if not saved.get("ok"):
@@ -1354,6 +1369,8 @@ class Brain:
     def _learning_turn(self, session: str, text: str, history: list[dict[str, Any]], steps: list[dict[str, Any]],
                        started: float, mode: str) -> dict[str, Any] | None:
         """Ответ на уточнение, урок, поправка. None — реплика не про это."""
+        if self._guest_mode():
+            return None
         phrase = normalize_phrase(text)
         last = history[-1] if history and history[-1].get("role") == "assistant" else {}
         awaiting = (last.get("meta") or {}).get("awaiting")
@@ -1542,6 +1559,8 @@ class Brain:
         return out
 
     def _learned(self, text: str, sources: tuple[str, ...]) -> dict[str, Any] | None:
+        if self._guest_mode():
+            return None
         try:
             return self.learning.match(text, sources)
         except Exception:  # noqa: BLE001
@@ -1983,7 +2002,7 @@ class Brain:
                steps: list[dict[str, Any]], started: float, state: dict[str, Any] | None = None,
                workshop: bool = False) -> dict[str, Any]:
         state = state if state is not None else model.status()
-        memories = self.store.recall(text, 5, touch=False)
+        memories = [] if self._guest_mode() else self.store.recall(text, 5, touch=False)
         if not state.get("ok"):
             # Техническая причина (порт, ошибка Ollama) — в ходе мысли, а не в лицо человеку.
             steps.append({"kind": "model", "title": "Модель", "detail": str(state.get("reason") or "недоступна")[:200]})
@@ -1994,7 +2013,7 @@ class Brain:
             else:
                 # Непонятое не пропадает: фраза копится во вкладке «Обучение», а
                 # «это значит …» следующей репликой учит помощника сразу.
-                if not getattr(self._local, "nested", False):
+                if not self._guest_mode() and not getattr(self._local, "nested", False):
                     try:
                         self.learning.note_unknown(text)
                         awaiting = {"kind": "teach", "phrase": text}
@@ -2009,7 +2028,7 @@ class Brain:
             return self._reply(session, text, note, kind="clarify", source="rules", steps=steps, started=started,
                                suggestions=["Что ты умеешь?", "Чему ты научился?", "Что сейчас печатается?"],
                                extra={"panel_asked": True, **({"awaiting": awaiting} if awaiting else {})})
-        catalog = skills.prompt(self.runner.caps, self.runner.learned())
+        catalog = skills.prompt(self.runner.caps, {} if self._guest_mode() else self.runner.learned())
         now = self.clock()
         context = [date_line(now) + f" Время {now:%H:%M}."]
         try:
@@ -2066,7 +2085,7 @@ class Brain:
         steps.append({"kind": "check", "title": "Проверка реестром", "detail": "навык и параметры в порядке"})
         answer = self._execute(session, text, {**_plan(name, params, "модель"), "source": "model"},
                                history, steps, started, source="model")
-        if answer.get("kind") == "action" and not name.startswith(_NO_SELF_LEARN) and "due" not in params \
+        if not self._guest_mode() and answer.get("kind") == "action" and not name.startswith(_NO_SELF_LEARN) and "due" not in params \
                 and not getattr(self._local, "nested", False):
             # Самообучение (И318): понятое моделью и выполненное — в следующий раз без модели.
             try:
