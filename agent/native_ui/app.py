@@ -56,6 +56,8 @@ class NativeApp:
         self.center.persona_reset.connect(self.reset_persona)
         self.center.autonomy_save.connect(self.save_autonomy)
         self.center.autonomy_reset.connect(self.reset_autonomy)
+        self.center.proactivity_save.connect(self.save_proactivity)
+        self.center.proactivity_reset.connect(self.reset_proactivity)
         self.center.task_command.connect(self.task_command)
         self.center.plan_preview.connect(self.plan_preview)
         self.center.plan_command.connect(self.plan_command)
@@ -125,6 +127,11 @@ class NativeApp:
         self.run_async(
             self.backend.autonomy,
             self.center.set_autonomy_payload,
+            lambda _message: None,
+        )
+        self.run_async(
+            self.backend.proactivity,
+            self.center.set_proactivity_payload,
             lambda _message: None,
         )
 
@@ -339,6 +346,24 @@ class NativeApp:
             else:
                 self.center.set_autonomy_message(str(payload.get("reason") or "Не удалось сбросить policy."))
         self.run_async(self.backend.autonomy_reset, done)
+
+    def save_proactivity(self, settings: dict[str, Any]) -> None:
+        def done(payload: dict[str, Any]) -> None:
+            if payload.get("ok"):
+                self.center.set_proactivity_payload(payload)
+                self.center.set_proactivity_message("✓ Настройки инициативности сохранены.")
+            else:
+                self.center.set_proactivity_message(str(payload.get("reason") or "Настройки не сохранены."))
+        self.run_async(lambda: self.backend.proactivity_update(dict(settings or {})), done)
+
+    def reset_proactivity(self) -> None:
+        def done(payload: dict[str, Any]) -> None:
+            if payload.get("ok"):
+                self.center.set_proactivity_payload(payload)
+                self.center.set_proactivity_message("Инициативность возвращена к значениям по умолчанию.")
+            else:
+                self.center.set_proactivity_message(str(payload.get("reason") or "Не удалось сбросить настройки."))
+        self.run_async(self.backend.proactivity_reset, done)
 
     def reset_persona(self) -> None:
         def done(payload: dict[str, Any]) -> None:
