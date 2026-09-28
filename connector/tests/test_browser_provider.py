@@ -150,6 +150,20 @@ class BrowserReadTests(unittest.TestCase):
         self.assertEqual("https://guide.test", result["url"])
 
 
+class BrowserParamContractTests(unittest.TestCase):
+    def test_optional_browser_target_id_is_really_optional(self):
+        from agent import skills
+        clean, errors = skills.check_params(skills.get("browser.selection"), {})
+        self.assertEqual({}, clean)
+        self.assertEqual([], errors)
+
+    def test_optional_page_limit_is_really_optional(self):
+        from agent import skills
+        clean, errors = skills.check_params(skills.get("browser.page"), {})
+        self.assertEqual({}, clean)
+        self.assertEqual([], errors)
+
+
 class BrowserExecutorTests(unittest.TestCase):
     def test_registered_browser_skill_reaches_provider(self):
         with tempfile.TemporaryDirectory() as tmp:

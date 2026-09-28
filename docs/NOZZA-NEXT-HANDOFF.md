@@ -5,6 +5,9 @@
 > Текущий этап этой ветки — Browser Provider 1.0. После него следующий
 > архитектурный приоритет: Provider Architecture cleanup, затем Persona Engine,
 > Autonomy Levels и Proactivity/Event Engine.
+> Provider Architecture 1.0 — текущая ветка: Browser + Desktop уже мигрируются
+> из executor в provider registry; после завершения следующий продуктовый слой —
+> Persona Engine.
 
 
 Эта ветка создана как точка продолжения для следующей версии агента.

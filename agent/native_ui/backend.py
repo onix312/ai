@@ -123,6 +123,9 @@ class BackendClient:
     def capabilities(self) -> dict[str, Any]:
         return self.get("/capabilities")
 
+    def providers(self) -> dict[str, Any]:
+        return self.get("/providers")
+
     def arm_mic(self, seconds: float = 25.0) -> dict[str, Any]:
         return self.speech_post("/mic/arm", {"seconds": float(seconds)})
 

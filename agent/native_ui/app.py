@@ -108,6 +108,11 @@ class NativeApp:
             self._render_status()
 
         self.run_async(self.backend.capabilities, done, lambda _message: None)
+        self.run_async(
+            self.backend.providers,
+            self.center.set_providers_payload,
+            lambda _message: None,
+        )
 
     def _render_status(self) -> None:
         self.tray.apply_status(
