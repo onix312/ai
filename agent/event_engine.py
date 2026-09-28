@@ -396,9 +396,12 @@ class EventEngine:
                 urgency = "normal"
                 text = f"Завтра срок цели «{row.get('title')}». Прогресс: {row.get('progress') or 0}/{row.get('target') or 0}."
                 kind = "goal_due_soon"
+            event_key = f"goal:{row.get('id')}:{kind}:{today.isoformat()}"
+            if self._existing("goal", event_key):
+                continue
             out.append(self.emit(
                 source="goal",
-                event_key=f"goal:{row.get('id')}:{kind}:{today.isoformat()}",
+                event_key=event_key,
                 provider="personal",
                 kind=kind,
                 title="Цель",
@@ -421,9 +424,12 @@ class EventEngine:
                 continue
             marker = str(task.get("updated_at") or task.get("error") or task.get("current_step") or "")
             digest = hashlib.sha256(marker.encode("utf-8")).hexdigest()[:12]
+            event_key = f"task:{task.get('id')}:failed:{digest}"
+            if self._existing("task", event_key):
+                continue
             out.append(self.emit(
                 source="task",
-                event_key=f"task:{task.get('id')}:failed:{digest}",
+                event_key=event_key,
                 provider="core",
                 kind="task_failed",
                 title="Задача остановилась",
