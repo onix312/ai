@@ -11,7 +11,7 @@ import time
 import uuid
 from typing import Any
 
-from . import config, model, skills
+from . import autonomy, config, model, skills
 
 MAX_GOAL = 1200
 MAX_STEPS = 8
@@ -172,10 +172,10 @@ class Planner:
         return {"ok": True, "plan": self._public(draft)}
 
     def approve(self, draft_id: str) -> dict[str, Any]:
-        allowed, why = self.agent.autonomy.check("agent", "core")
+        allowed, why, policy = autonomy.check_agent(self.agent, "agent", "core")
         if not allowed:
             return {"ok": False, "reason": why, "autonomy_blocked": True,
-                    "autonomy": self.agent.autonomy.payload()}
+                    "autonomy": policy}
         self._purge()
         key = str(draft_id or "").strip()
         with self._lock:
