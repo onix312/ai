@@ -305,3 +305,18 @@ Provider принимает только loopback CDP и не возвращае
 `NOZZA_BROWSER_CDP_URL` (старое `PRINTFLOW_BROWSER_CDP_URL` тоже понимается).
 
 Подробно: [../docs/BROWSER-PROVIDER.md](../docs/BROWSER-PROVIDER.md).
+
+
+## Provider Architecture 1.0
+
+Интеграции постепенно выносятся из центрального executor в capability providers.
+В первом срезе перенесены Browser Provider и Desktop Perception Provider.
+
+Публичные имена skills не меняются. Safety остаётся выше provider:
+`Agent.run_skill → validation/confirmation → Runner → Provider`.
+
+`GET /providers` показывает доступность providers, required capabilities и
+owned skills. Control Center отображает этот каталог в Настройках.
+
+Следующие кандидаты миграции: Files, PrintFlow, Telegram и Personal.
+Подробно: [../docs/PROVIDERS.md](../docs/PROVIDERS.md).
