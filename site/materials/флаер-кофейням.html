@@ -326,6 +326,170 @@ const START = {
   fine: 'Фигурка надевается на стакан снаружи и не касается напитка. Пластик PLA, моется тёплой водой. Ставить в микроволновку и посудомойку нельзя.',
 };
 
+const PRESETS = {
+  standard: START,
+  short: {
+    f_h1: '3D-ПЕЧАТЬ', f_h2: 'ДЛЯ КОФЕЙНИ',
+    f_chip: 'Образцы в коробке — можно забрать себе',
+    f_lead: 'Игрушки на стакан, QR-таблички и небольшой фирменный декор. Печатаем локально и можем начать с теста.',
+    f_cta: 'Попробуем?', f_qrcap: 'сканируйте — откроется Telegram',
+    s1t: 'Что это', s1d: 'NOZZA — локальная мастерская 3D-печати. Делаем небольшие партии для бизнеса и тестируем идеи без больших тиражей.',
+    s2t: 'Образцы ваши', s2d: 'Фигурки из коробки можно сразу попробовать на стаканах и показать команде. Они надеваются снаружи и не касаются напитка.',
+    s3t: 'Сделаем под вас', s3d: 'Можем адаптировать форму, цвет и идею под стиль кофейни: персонаж, QR-табличка, держатель или небольшой декор.',
+    s4t: 'Начнём с теста', s4d: 'Сделаем маленькую партию и посмотрим на реакцию гостей. Если идея работает — повторим нужным тиражом.',
+    fine: START.fine,
+  },
+  custom: {
+    f_h1: 'ВАША ИДЕЯ', f_h2: 'В 3D-ФОРМЕ',
+    f_chip: 'Образцы — старт для своего дизайна',
+    f_lead: 'Персонажи, аксессуары на стакан, QR-таблички и элементы интерьера под визуальный стиль вашей кофейни.',
+    f_cta: 'Обсудим макет?', f_qrcap: 'сканируйте — покажем варианты',
+    s1t: 'Начинаем с задачи', s1d: 'Вы показываете стиль, место использования и примерную идею. Мы подбираем форму, размер и способ печати.',
+    s2t: 'Сначала прототип', s2d: 'Перед партией делаем небольшой тест: можно потрогать деталь, проверить посадку и понять, подходит ли идея гостям.',
+    s3t: 'Дальше — своё', s3d: 'После теста можем подготовить оригинальную модель под бренд: фирменного героя, настольную QR-табличку, держатель или декор.',
+    s4t: 'Тираж по факту', s4d: 'Количество и сроки обсуждаем после макета. Можно начать с небольшой партии и масштабировать только удачный вариант.',
+    fine: START.fine,
+  },
+};
+
+const DRAFT_KEY = 'nozza:cafe-flyer:drafts:v1';
+
+function readDrafts() {
+  try {
+    const value = JSON.parse(localStorage.getItem(DRAFT_KEY) || '{}');
+    return value && typeof value === 'object' ? value : {};
+  } catch (e) { return {}; }
+}
+function writeDrafts(value) {
+  try { localStorage.setItem(DRAFT_KEY, JSON.stringify(value)); } catch (e) { /* private mode */ }
+}
+function pageSnapshot() {
+  const page = {};
+  document.querySelectorAll('[data-page]').forEach((el) => {
+    const key = el.getAttribute('data-page');
+    page[key] = el.type === 'checkbox' ? !!el.checked : el.value;
+  });
+  return page;
+}
+function applySnapshot(page) {
+  Object.keys(page || {}).forEach((key) => {
+    const el = document.querySelector('[data-page="' + CSS.escape(key) + '"]');
+    if (!el) return;
+    if (el.type === 'checkbox') el.checked = !!page[key];
+    else el.value = page[key] == null ? '' : String(page[key]);
+  });
+  NZ.pageStateSave(page || {});
+  updateCounters();
+  draw();
+}
+function refreshDraftSelect(selected) {
+  const select = $('draftSelect');
+  if (!select) return;
+  const drafts = readDrafts();
+  const names = Object.keys(drafts).sort((a, b) => a.localeCompare(b, 'ru'));
+  select.innerHTML = names.length
+    ? '<option value="">— выберите версию —</option>' + names.map((name) =>
+        '<option value="' + NZ.esc(name) + '">' + NZ.esc(name) + '</option>').join('')
+    : '<option value="">— нет сохранённых —</option>';
+  if (selected && names.includes(selected)) select.value = selected;
+}
+function setEditorStatus(text, kind) {
+  const status = $('editorStatus');
+  if (!status) return;
+  status.className = 'editor-status' + (kind ? ' ' + kind : '');
+  status.textContent = text;
+}
+function updateCounters() {
+  let over = 0;
+  document.querySelectorAll('[data-editor-limit]').forEach((el) => {
+    const limit = Number(el.dataset.editorLimit) || 0;
+    const n = String(el.value || '').length;
+    let counter = el.parentElement && el.parentElement.querySelector('[data-counter-for="' + el.id + '"]');
+    if (!counter && el.parentElement) {
+      counter = document.createElement('small');
+      counter.className = 'counter';
+      counter.dataset.counterFor = el.id;
+      el.parentElement.appendChild(counter);
+    }
+    if (!counter) return;
+    counter.textContent = n + ' / ' + limit;
+    counter.className = 'counter' + (n > limit ? ' bad' : n > limit * .88 ? ' warn' : '');
+    if (n > limit) over++;
+  });
+  return over;
+}
+function updateEditorHealth(layoutOverflow) {
+  const textOver = updateCounters();
+  const link = qrTarget();
+  if (!link) {
+    setEditorStatus('⚠ Укажите Telegram или ссылку QR перед печатью', 'bad');
+    return;
+  }
+  if (layoutOverflow) {
+    setEditorStatus('⚠ Текст оборота не помещается: сократите отмеченные блоки', 'bad');
+    return;
+  }
+  if (textOver) {
+    setEditorStatus('⚠ Несколько полей длиннее рекомендуемого лимита', 'warn');
+    return;
+  }
+  setEditorStatus('✓ Макет готов к пробной печати', 'ok');
+}
+function setEditorSection(value) {
+  document.querySelectorAll('[data-editor-section]').forEach((row) => {
+    const section = row.dataset.editorSection;
+    row.dataset.editorHidden = value !== 'all' && section !== value ? '1' : '0';
+  });
+}
+function setupEditor() {
+  document.querySelectorAll('[data-editor-limit]').forEach((el) => {
+    el.addEventListener('input', updateCounters);
+  });
+  updateCounters();
+
+  const section = $('editorSection');
+  section.addEventListener('change', () => setEditorSection(section.value));
+  setEditorSection(section.value);
+
+  $('btnPreset').addEventListener('click', () => {
+    const preset = PRESETS[$('editorPreset').value] || PRESETS.standard;
+    applySnapshot(preset);
+    setEditorStatus('Пресет применён · изменения автосохранены', 'ok');
+  });
+
+  $('btnDraftSave').addEventListener('click', () => {
+    const name = String($('draftName').value || '').trim().slice(0, 48);
+    if (!name) { setEditorStatus('Введите имя версии', 'warn'); $('draftName').focus(); return; }
+    const drafts = readDrafts();
+    drafts[name] = { savedAt: new Date().toISOString(), page: pageSnapshot() };
+    writeDrafts(drafts);
+    refreshDraftSelect(name);
+    setEditorStatus('✓ Версия «' + name + '» сохранена', 'ok');
+  });
+
+  $('btnDraftLoad').addEventListener('click', () => {
+    const name = $('draftSelect').value;
+    const draft = readDrafts()[name];
+    if (!name || !draft || !draft.page) { setEditorStatus('Выберите сохранённую версию', 'warn'); return; }
+    applySnapshot(draft.page);
+    $('draftName').value = name;
+    setEditorStatus('✓ Загружена версия «' + name + '»', 'ok');
+  });
+
+  $('btnDraftDelete').addEventListener('click', () => {
+    const name = $('draftSelect').value;
+    if (!name) { setEditorStatus('Выберите версию для удаления', 'warn'); return; }
+    if (!confirm('Удалить сохранённую версию «' + name + '»?')) return;
+    const drafts = readDrafts();
+    delete drafts[name];
+    writeDrafts(drafts);
+    refreshDraftSelect();
+    setEditorStatus('Версия удалена. Текущий макет не изменён.', '');
+  });
+
+  refreshDraftSelect();
+}
+
 /* Ссылка QR: по умолчанию — Telegram владельца (домен не куплен, зашивать
    его в макет нельзя: тираж уйдёт в никуда). */
 function tgLink(tg) {
@@ -493,6 +657,7 @@ function fitBacks() {
   const warn = $('overWarn');
   warn.hidden = !over;
   warn.textContent = over ? `⚠ текст не помещается на ${over} ${plural(over, 'флаере', 'флаерах', 'флаерах')} — сократите блоки 01–04` : '';
+  return over;
 }
 
 /* «1 лист», «2 листа», «5 листов» — иначе счётчик тиража читается как ошибка. */
@@ -578,7 +743,8 @@ function draw() {
   }
 
   $('sheets').innerHTML = out.join('');
-  fitBacks();
+  const overflow = fitBacks();
+  updateEditorHealth(overflow);
 
   const perSheet = fold ? (compact ? 2 : 1) : (compact ? 4 : 2);
   const paper = fold ? Math.ceil(count / perSheet) : Math.ceil(count / perSheet) * 2;
@@ -600,6 +766,7 @@ document.querySelectorAll('[data-nz="tg"]').forEach((el) => {
 });
 
 NZ.mount(draw);
+setupEditor();
 $('qrlink').placeholder = tgLink(NZ.contact().tg) || 'по умолчанию — ваш Telegram';
 </script>
 </body></html>
