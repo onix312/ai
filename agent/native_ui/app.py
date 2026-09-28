@@ -50,7 +50,9 @@ class NativeApp:
         self.center.chat_submitted.connect(self.send_chat)
         self.center.refresh_page.connect(self.refresh_page)
         self.center.clear_chat.connect(self.clear_chat)
-        self.center.mic_toggle.connect(self.toggle_mic)\n        self.center.task_decision.connect(self.decide_task)\n
+        self.center.mic_toggle.connect(self.toggle_mic)
+        self.center.task_decision.connect(self.decide_task)
+
         self._restore_geometry()
         self._install_hotkey()
 
