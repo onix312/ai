@@ -13,7 +13,7 @@
 | Порт | Роль | Маршруты |
 | --- | --- | --- |
 | 8791 | Речь | `GET /health`, `GET /voice/status`, `POST /voice/enable`, `POST /voice/disable`, `POST /voice/stop`, `POST /transcribe`, `POST /mic/arm`, `POST /mic/disarm`, `GET /capabilities` |
-| 8799 | Личный ассистент + компьютер | `GET /health`, `GET /status`, `GET /windows`, `GET /screen`, `GET /pending`, `POST /click`, `POST /type`, `POST /key`, `POST /activate`, `POST /action/confirm`, `GET /skills`, `POST /skill`, `GET /journal`, `GET /ui`, `POST /chat`, `GET|POST /memory`, `GET|POST /personal`, `GET|POST /learning`, `POST /feedback`, `GET /notifications` |
+| 8799 | Личный ассистент + компьютер | `GET /health`, `GET /status`, `GET /windows`, `GET /screen`, `GET /pending`, `POST /click`, `POST /type`, `POST /key`, `POST /activate`, `POST /action/confirm`, `GET /skills`, `POST /skill`, `GET /journal`, `GET /ui`, `POST /chat`, `GET|POST /memory`, `GET|POST /personal`, `GET|POST /learning`, `POST /feedback`, `GET /notifications`, `GET|POST /tasks` |
 
 Портов два, потому что панель настраивает их раздельно: `assistant_speech_url`
 (голос) и `assistant_agent_url` (окна, навыки и действия). Можно включить одно, не
@@ -241,3 +241,20 @@ python -m agent.native_ui
 `http://127.0.0.1:8799/ui` сохранён как fallback/диагностика.
 
 Подробности: [../docs/НАТИВНЫЙ-ИНТЕРФЕЙС.md](../docs/НАТИВНЫЙ-ИНТЕРФЕЙС.md).
+
+
+### Task Engine 1.0
+
+NOZZA хранит многошаговые задачи в своей SQLite и выполняет их строго через
+существующий реестр навыков и очередь подтверждений. Понятные цепочки вроде
+«громкость 30 и следующий трек» становятся задачей с прогрессом, а не набором
+независимых вызовов.
+
+Если шаг требует подтверждения, задача останавливается в `waiting`. После
+перезапуска незавершённая задача автоматически не повторяет шаги, а переходит в
+`paused`, чтобы человек проверил состояние и явно продолжил.
+
+Маршруты: `GET /tasks`, `POST /tasks`. Нативный Control Center показывает
+прогресс, паузу, продолжение, отмену и карточки подтверждений.
+
+Подробно: [../docs/TASK-ENGINE.md](../docs/TASK-ENGINE.md).
