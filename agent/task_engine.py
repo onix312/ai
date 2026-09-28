@@ -10,7 +10,7 @@ import hashlib
 import threading
 from typing import Any
 
-from . import planner, skills, verifier
+from . import autonomy, planner, skills, verifier
 from .store import now_iso
 
 TERMINAL = frozenset(("done", "cancelled"))
@@ -269,10 +269,10 @@ class TaskEngine:
         return [task for row in rows if (task := self.get(int(row["id"]))) is not None]
 
     def start(self, task_id: int) -> dict[str, Any]:
-        allowed, why = self.agent.autonomy.check("operator", "core")
+        allowed, why, policy = autonomy.check_agent(self.agent, "operator", "core")
         if not allowed:
             return {"ok": False, "reason": why, "autonomy_blocked": True,
-                    "autonomy": self.agent.autonomy.payload()}
+                    "autonomy": policy}
         with self._lock:
             task = self.get(task_id)
             if task is None:
