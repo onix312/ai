@@ -84,6 +84,7 @@ CAPABILITIES = (
     "whitelist",   # белый список приложений
     "macro",       # макросы
     "quick_open",  # быстрый поиск файлов
+    "browser",     # структурированный Chromium DevTools на loopback
 )
 
 # Предел на объявленные шаги выученного навыка: сценарий из восьмидесяти шагов —
@@ -638,6 +639,38 @@ SKILLS: dict[str, dict[str, Any]] = {
         "requires": ("windows",), "ideas": ("И210",),
         "doc": "Рабочая область без панели задач, SetWindowPos через ctypes, требует подтверждения.",
     },
+    # --- браузер: структурированный read-only контекст --------------------
+    "browser.tabs": {
+        "title": "Вкладки браузера",
+        "description": "Список вкладок Chromium через локальный DevTools: заголовок и адрес.",
+        "host": "agent", "risk": "read", "params": {"limit": "int"},
+        "requires": ("browser",), "ideas": ("И284",),
+        "doc": "Только loopback CDP. Ничего не кликает и не меняет на странице.",
+    },
+    "browser.page": {
+        "title": "Прочитать текущую страницу",
+        "description": "Заголовок, URL, видимый текст, ссылки, кнопки и структура форм без значений полей.",
+        "host": "agent", "risk": "read",
+        "params": {"target_id": "text", "max_chars": "int"},
+        "requires": ("browser",), "ideas": ("И278", "И279"),
+        "doc": "Фиксированный read-only DOM script; password и значения форм не возвращаются.",
+    },
+    "browser.find": {
+        "title": "Найти на странице",
+        "description": "Найти фразу в видимом тексте текущей вкладки и вернуть контекст.",
+        "host": "agent", "risk": "read",
+        "params": {"query": "text", "target_id": "text", "limit": "int"},
+        "requires": ("browser",), "ideas": ("И278",),
+        "doc": "Поиск идёт по уже прочитанному видимому тексту, без кликов и ввода.",
+    },
+    "browser.selection": {
+        "title": "Выделенный текст страницы",
+        "description": "Прочитать выделенный фрагмент текущей вкладки вместе с заголовком и URL.",
+        "host": "agent", "risk": "read", "params": {"target_id": "text"},
+        "requires": ("browser",), "ideas": ("И295",),
+        "doc": "Источник сохраняется как URL/заголовок; содержимое форм и пароли не читаются.",
+    },
+
     # --- зрение (Н35-Н40, И212, И213) ------------------------------------
     "screen.shot": {
         "title": "Снимок экрана",

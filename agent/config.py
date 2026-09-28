@@ -45,6 +45,14 @@ MODEL_URL = os.environ.get("PRINTFLOW_MODEL_URL", "http://127.0.0.1:11434").rstr
 MODEL_NAME = os.environ.get("PRINTFLOW_MODEL_NAME", "").strip()
 MODEL_TIMEOUT_SEC = float(os.environ.get("PRINTFLOW_MODEL_TIMEOUT_SEC", "90") or 90)
 
+# Browser Provider 1.0: только локальный Chromium DevTools endpoint.
+# NOZZA_* — новое имя продукта; PRINTFLOW_* оставлен для совместимости.
+BROWSER_CDP_URL = (
+    os.environ.get("NOZZA_BROWSER_CDP_URL")
+    or os.environ.get("PRINTFLOW_BROWSER_CDP_URL")
+    or "http://127.0.0.1:9222"
+).rstrip("/")
+
 # Своя база ассистента: память, индекс документов, журнал действий на ПК.
 STORE_PATH = os.environ.get("PRINTFLOW_ASSISTANT_DB", "").strip()
 

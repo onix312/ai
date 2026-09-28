@@ -1,5 +1,12 @@
 # NOZZA — handoff и roadmap после Verification Engine 1.0
 
+> **Актуализация 28.09.2026:** после первоначального handoff в `main` уже
+> реализованы Replan Engine 1.0, Memory 2.0 и Desktop Perception 2.0.
+> Текущий этап этой ветки — Browser Provider 1.0. После него следующий
+> архитектурный приоритет: Provider Architecture cleanup, затем Persona Engine,
+> Autonomy Levels и Proactivity/Event Engine.
+
+
 Эта ветка создана как точка продолжения для следующей версии агента.
 Главная идея проекта: NOZZA — отдельный локальный AI-человек в ПК, а PrintFlow — один из её providers.
 

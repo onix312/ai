@@ -175,6 +175,11 @@ def dynamic(panel_url: str = "", model_url: str = "") -> dict:
     state = model.status(model_url)
     out.update(model=bool(state["ok"]),
                model_reason="" if state["ok"] else str(state["reason"]))
+
+    from . import browser
+    browser_ok, browser_reason = browser.probe()
+    out.update(browser=bool(browser_ok),
+               browser_reason="" if browser_ok else str(browser_reason))
     return out
 
 

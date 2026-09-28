@@ -34,7 +34,7 @@ import time
 from typing import Any, Callable
 
 from . import avito as avito_mod
-from . import capabilities, config, documents, fileops, model, pc, personal_skills, skills, tg as tg_mod, when, winapi
+from . import browser as browser_mod, capabilities, config, documents, fileops, model, pc, personal_skills, skills, tg as tg_mod, when, winapi
 from .learning import Learning
 from .panel_client import Client
 from .personal import Personal
@@ -378,6 +378,10 @@ class Runner:
             "window.text": self._window_text,
             "window.controls": self._window_controls,
             "desktop.observe": self._desktop_observe,
+            "browser.tabs": self._browser_tabs,
+            "browser.page": self._browser_page,
+            "browser.find": self._browser_find,
+            "browser.selection": self._browser_selection,
             "window.click": self._window_click,
             "window.type": self._window_type,
             "window.snap": self._window_snap,
@@ -1256,6 +1260,25 @@ class Runner:
                        int(params.get("limit") or 80),
                        bool(params.get("screenshot", False)),
                        bool(params.get("ocr", True)))
+
+    def _browser_tabs(self, params: dict) -> dict:
+        return browser_mod.tabs(int(params.get("limit") or 30))
+
+    def _browser_page(self, params: dict) -> dict:
+        return browser_mod.page(
+            target_id=str(params.get("target_id") or ""),
+            max_chars=int(params.get("max_chars") or browser_mod.MAX_TEXT),
+        )
+
+    def _browser_find(self, params: dict) -> dict:
+        return browser_mod.find(
+            str(params.get("query") or ""),
+            target_id=str(params.get("target_id") or ""),
+            limit=int(params.get("limit") or 8),
+        )
+
+    def _browser_selection(self, params: dict) -> dict:
+        return browser_mod.selection(str(params.get("target_id") or ""))
 
     def _window_click(self, params: dict) -> dict:
         if params.get("x") is None or params.get("y") is None:
