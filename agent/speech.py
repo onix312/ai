@@ -109,6 +109,46 @@ def discover_vosk_model() -> str:
     return ""
 
 
+
+
+class StreamingRecognizer:
+    """Incremental Vosk session for live partial transcripts.
+
+    Audio never leaves RAM. `feed()` may update a partial hypothesis many times,
+    while `finish()` returns the final phrase once VAD closes the utterance.
+    """
+
+    def __init__(self, model: Any, rate: int = 16000) -> None:
+        from vosk import KaldiRecognizer  # type: ignore
+
+        self._recognizer = KaldiRecognizer(model, int(rate))
+        self._recognizer.SetWords(False)
+        self._parts: list[str] = []
+        self.partial = ""
+
+    def feed(self, data: bytes) -> str:
+        chunk = bytes(data or b"")
+        if not chunk:
+            return self.partial
+        if self._recognizer.AcceptWaveform(chunk):
+            text = str(json.loads(self._recognizer.Result() or "{}").get("text") or "").strip()
+            if text:
+                self._parts.append(text)
+            self.partial = ""
+        else:
+            self.partial = str(
+                json.loads(self._recognizer.PartialResult() or "{}").get("partial") or ""
+            ).strip()
+        return " ".join([*self._parts, self.partial] if self.partial else self._parts).strip()
+
+    def finish(self) -> str:
+        text = str(json.loads(self._recognizer.FinalResult() or "{}").get("text") or "").strip()
+        if text:
+            self._parts.append(text)
+        self.partial = ""
+        return " ".join(part for part in self._parts if part).strip()
+
+
 class Recognizer:
     """Один рантайм речи на процессоре. Модель грузится при первом обращении."""
 
@@ -164,6 +204,20 @@ class Recognizer:
             except OSError as exc:
                 self.reason = f"Модель речи не загрузилась: {exc}"
                 return False
+
+    @property
+    def streaming(self) -> bool:
+        return self._engine == "vosk" and self._model is not None
+
+    def start_stream(self, rate: int = 16000) -> StreamingRecognizer | None:
+        """Начать incremental ASR, если активен Vosk; Whisper остаётся fallback."""
+        if not self.load() or self._engine != "vosk":
+            return None
+        try:
+            return StreamingRecognizer(self._model, rate)
+        except (ImportError, OSError, RuntimeError, ValueError) as exc:
+            self.reason = f"Streaming ASR недоступен: {exc}"
+            return None
 
     def transcribe_wav(self, audio: bytes, language: str = config.LANGUAGE) -> tuple[str, str]:
         """WAV 16 кГц моно → текст. Пустой текст возвращается с причиной."""
