@@ -113,6 +113,7 @@ class VoiceRuntime:
             self.manual_until = 0.0
             self.conversation_until = 0.0
             self.state = "idle"
+            self.last_error = ""
             self._shutdown.set()
 
     def arm(self, seconds: float = config.MIC_ARM_SECONDS) -> tuple[bool, str]:
@@ -148,8 +149,12 @@ class VoiceRuntime:
     def stop_output(self) -> dict[str, Any]:
         from . import pc
         stopped = pc.stop_speaking()
-        self.conversation_until = time.time() + config.VOICE_FOLLOWUP_SECONDS
-        self.state = "listening"
+        if self.persistent_enabled or time.time() < self.manual_until:
+            self.conversation_until = time.time() + config.VOICE_FOLLOWUP_SECONDS
+            self.state = "listening"
+        else:
+            self.conversation_until = 0.0
+            self.state = "idle"
         return {"ok": True, "stopped": stopped, **self.status()}
 
     def _prepare(self) -> tuple[bool, str]:
@@ -195,6 +200,9 @@ class VoiceRuntime:
                 blocksize=1600,
                 callback=lambda data, *_a: frames.put(bytes(data)),
             ):
+                self.last_error = ""
+                if self.state == "error":
+                    self.state = "idle"
                 while self._should_run():
                     audio, during_output = self._next_phrase(frames)
                     self._expire_conversation()
@@ -340,6 +348,8 @@ class VoiceRuntime:
 
     def _expire_conversation(self, force_refresh: bool = False) -> None:
         if self._handler_busy:
+            return
+        if self.state == "error" and self.last_error:
             return
         if self.conversation_active:
             if force_refresh or self.state not in ("listening", "speaking"):
