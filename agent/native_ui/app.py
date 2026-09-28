@@ -154,6 +154,10 @@ class NativeApp:
             if self.orb.isVisible():
                 self.orb.set_state("error", 1800)
             return
+        if self.state.safety_stopped:
+            self.orb.set_state("stopped")
+            self.orb.set_activity(0, "")
+            return
         voice_state = self.state.assistant_state
         if voice_state in ("listening", "thinking", "speaking", "error"):
             self.orb.set_state(voice_state, 1800 if voice_state == "error" else 0)
