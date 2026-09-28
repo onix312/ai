@@ -240,6 +240,42 @@ class _FakeProcess:
         self.alive = False
 
 
+class StreamingTtsQueueTests(unittest.TestCase):
+    def test_sentences_are_spoken_in_order_without_overlap(self):
+        calls = []
+        with patch.object(pc, "speech_engine", return_value="sapi"), \
+             patch.object(pc, "speak", side_effect=lambda text, rate=0, volume=100: (calls.append(text) or {"pid": 1}, "")), \
+             patch.object(pc, "is_speaking", return_value=False):
+            stream = pc.SpeechQueue()
+            self.assertTrue(stream.write("Первая."))
+            self.assertTrue(stream.write("Вторая."))
+            stream.close()
+            stream._thread.join(1)
+        self.assertEqual(["Первая.", "Вторая."], calls)
+
+    def test_stop_drops_queued_sentences(self):
+        gate = threading.Event()
+        calls = []
+
+        def fake_speak(text, rate=0, volume=100):
+            calls.append(text)
+            gate.wait(0.2)
+            return {"pid": 1}, ""
+
+        with patch.object(pc, "speech_engine", return_value="sapi"), \
+             patch.object(pc, "speak", side_effect=fake_speak), \
+             patch.object(pc, "is_speaking", return_value=False), \
+             patch.object(pc, "stop_speaking", return_value=True):
+            stream = pc.SpeechQueue()
+            stream.write("Первая.")
+            stream.write("Вторая.")
+            time.sleep(0.02)
+            stream.stop()
+            gate.set()
+            stream._thread.join(1)
+        self.assertLessEqual(len(calls), 1)
+
+
 class TtsInterruptionTests(unittest.TestCase):
     def tearDown(self):
         pc.stop_speaking()

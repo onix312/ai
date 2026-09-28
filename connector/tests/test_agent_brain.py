@@ -334,6 +334,26 @@ class _PlannerSink:
         }}
 
 
+class VoiceReplyStreamingTests(unittest.TestCase):
+    def test_free_answer_streams_complete_sentences_only(self):
+        spoken = []
+        stream = brain._VoiceReplyStream(lambda text: spoken.append(text) or True)
+        stream.feed('{"skill":"","params":{},"reply":"Первая фраза.')
+        self.assertEqual([], spoken)
+        stream.feed('{"skill":"","params":{},"reply":"Первая фраза. Вторая')
+        self.assertEqual(["Первая фраза."], spoken)
+        stream.feed('{"skill":"","params":{},"reply":"Первая фраза. Вторая без точки","ask":""}')
+        self.assertEqual(["Первая фраза.", "Вторая без точки"], spoken)
+        self.assertGreater(stream.count, 0)
+
+    def test_action_reply_is_never_streamed_before_execution(self):
+        spoken = []
+        stream = brain._VoiceReplyStream(lambda text: spoken.append(text) or True)
+        stream.feed('{"skill":"app.open","params":{"app":"telegram"},"reply":"Открываю Telegram."')
+        stream.feed('{"skill":"app.open","params":{"app":"telegram"},"reply":"Открываю Telegram.","ask":""}')
+        self.assertEqual([], spoken)
+
+
 class BrainChatTests(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
@@ -424,6 +444,35 @@ class BrainChatTests(unittest.TestCase):
         self.assertEqual("cancelled", result.get("status"))
         self.assertEqual("", result.get("reply"))
         self.assertEqual([], self.store.dialog("voice"))
+
+    def test_voice_free_answer_marks_streamed_chars(self):
+        spoken = []
+
+        class FakeSpeechQueue:
+            def write(self, text):
+                spoken.append(text)
+                return True
+            def close(self):
+                pass
+            def stop(self):
+                pass
+
+        raw = '{"skill":"","params":{},"reply":"Первая фраза. Вторая фраза.","ask":""}'
+
+        def fake_chat(*_args, on_stream=None, **_kwargs):
+            self.assertIsNotNone(on_stream)
+            on_stream('{"skill":"","params":{},"reply":"Первая фраза.')
+            on_stream(raw)
+            return {"ok": True, "text": raw, "reason": "", "model": "qwen"}
+
+        with patch.object(model, "status", return_value={"ok": True, "model": "qwen", "reason": "", "url": "http://127.0.0.1:11434"}), \
+             patch.object(model, "chat", side_effect=fake_chat), \
+             patch.object(pc, "SpeechQueue", return_value=FakeSpeechQueue()):
+            answer = self.brain.chat("расскажи что-нибудь", session="voice")
+
+        self.assertEqual("answer", answer["kind"])
+        self.assertGreater(answer.get("voice_streamed_chars", 0), 0)
+        self.assertEqual(["Первая фраза.", "Вторая фраза."], spoken)
 
     def test_model_plan_is_checked_by_registry(self):
         with patch.object(model, "status", return_value={"ok": True, "model": "qwen2.5:3b", "reason": ""}), \

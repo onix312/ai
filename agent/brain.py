@@ -69,6 +69,73 @@ _WORKSHOP_WORDS = ("заказ", "задани", "печат", "принтер",
                    "клиент", "долг", "касс", "смен", "очеред", "полк", "стеллаж", "p1s", "p2s", "x1c", "a1")
 
 
+def _decode_json_string_prefix(raw: str) -> tuple[str, bool]:
+    """Decode as much of a JSON string body as is complete."""
+    out: list[str] = []
+    index = 0
+    escapes = {'"': '"', "\\": "\\", "/": "/", "b": "\b", "f": "\f",
+               "n": "\n", "r": "\r", "t": "\t"}
+    while index < len(raw):
+        char = raw[index]
+        if char == '"':
+            return "".join(out), True
+        if char != "\\":
+            out.append(char)
+            index += 1
+            continue
+        if index + 1 >= len(raw):
+            break
+        code = raw[index + 1]
+        if code == "u":
+            if index + 6 > len(raw):
+                break
+            try:
+                out.append(chr(int(raw[index + 2:index + 6], 16)))
+            except ValueError:
+                break
+            index += 6
+            continue
+        if code not in escapes:
+            break
+        out.append(escapes[code])
+        index += 2
+    return "".join(out), False
+
+
+class _VoiceReplyStream:
+    """Extract completed sentences only from a safe free-answer JSON reply."""
+
+    _REPLY_RE = re.compile(r'"reply"\s*:\s*"')
+    _SAFE_SKILL_RE = re.compile(r'"skill"\s*:\s*(?:""|null)')
+
+    def __init__(self, sink: Callable[[str], bool]) -> None:
+        self.sink = sink
+        self.emitted = 0
+        self.count = 0
+
+    def feed(self, raw: str) -> None:
+        match = self._REPLY_RE.search(str(raw or ""))
+        if not match:
+            return
+        prefix = raw[:match.start()]
+        if not self._SAFE_SKILL_RE.search(prefix):
+            return
+        decoded, closed = _decode_json_string_prefix(raw[match.end():])
+        if len(decoded) <= self.emitted:
+            return
+        boundary = self.emitted
+        for found in re.finditer(r"(?<=[.!?…])(?:\s+|$)", decoded[self.emitted:]):
+            boundary = self.emitted + found.end()
+        if closed:
+            boundary = len(decoded)
+        if boundary <= self.emitted:
+            return
+        phrase = decoded[self.emitted:boundary].strip()
+        self.emitted = boundary
+        if phrase and self.sink(phrase):
+            self.count += len(phrase)
+
+
 def normalize_phrase(text: str) -> str:
     """Фраза без обращения, вежливости и хвостовой пунктуации — то, что разбирают правила."""
     clean = " ".join(str(text or "").replace("ё", "е").replace("Ё", "Е").split())[:MAX_TEXT]
@@ -2056,14 +2123,28 @@ class Brain:
         messages.append({"role": "user", "content": text})
         steps.append({"kind": "model", "title": "Думаю моделью", "detail": state.get("model") or ""})
         token = self._begin_model_turn(session)
+        voice_tts = None
+        voice_stream = None
+        if session == "voice":
+            try:
+                voice_tts = pc.SpeechQueue()
+                voice_stream = _VoiceReplyStream(voice_tts.write)
+                token.add_closer(voice_tts.stop)
+            except Exception:
+                voice_tts = None
+                voice_stream = None
         try:
             reply = model.chat(
                 messages, system=system, fmt="json", temperature=0.1,
                 timeout=min(PLAN_TIMEOUT_SEC, config.MODEL_TIMEOUT_SEC), state=state,
                 cancel=token,
+                on_stream=voice_stream.feed if voice_stream is not None else None,
             )
         finally:
             self._end_model_turn(session, token)
+            if voice_tts is not None and not token.cancelled:
+                voice_tts.close()
+        streamed_chars = int(voice_stream.count if voice_stream is not None else 0)
         if reply.get("cancelled"):
             steps.append({"kind": "model", "title": "Модель", "detail": "генерация остановлена человеком"})
             return self._reply(
@@ -2080,7 +2161,8 @@ class Brain:
         if not answer:
             # Модель ответила прозой вопреки режиму — это тоже ответ человеку.
             return self._reply(session, text, reply["text"][:1200], kind="answer", source="model",
-                               steps=steps, started=started)
+                               steps=steps, started=started,
+                               extra={"voice_streamed_chars": streamed_chars} if streamed_chars else None)
         ask = " ".join(str(answer.get("ask") or "").split())
         name = str(answer.get("skill") or "").strip().casefold()
         said = " ".join(str(answer.get("reply") or "").split())
@@ -2088,7 +2170,8 @@ class Brain:
             return self._reply(session, text, ask, kind="clarify", source="model", steps=steps, started=started)
         if not name:
             return self._reply(session, text, said or "Не знаю, что ответить.", kind="answer", source="model",
-                               steps=steps, started=started)
+                               steps=steps, started=started,
+                               extra={"voice_streamed_chars": streamed_chars} if streamed_chars else None)
         skill = skills.get(name, self.runner.learned())
         if skill is None:
             steps.append({"kind": "check", "title": "Проверка реестром", "detail": f"навыка {name} нет"})

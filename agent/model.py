@@ -123,7 +123,8 @@ class CancellationToken:
 
 
 def _post_stream(url: str, payload: dict[str, Any], timeout: float,
-                 cancel: CancellationToken | None = None) -> tuple[bool, dict[str, Any], str]:
+                 cancel: CancellationToken | None = None,
+                 on_chunk: Callable[[str], None] | None = None) -> tuple[bool, dict[str, Any], str]:
     """Read Ollama NDJSON stream and allow another thread to close it immediately."""
     local, why = loopback_ok(url)
     if not local:
@@ -155,6 +156,11 @@ def _post_stream(url: str, payload: dict[str, Any], timeout: float,
             chunk = str(message.get("content") or item.get("response") or "")
             if chunk:
                 parts.append(chunk)
+                if callable(on_chunk):
+                    try:
+                        on_chunk("".join(parts))
+                    except Exception:
+                        pass
             if item.get("done"):
                 break
         if cancel is not None and cancel.cancelled:
@@ -331,7 +337,8 @@ def chat(messages: list[dict[str, Any]], *, system: str = "", fmt: str | dict | 
          temperature: float = 0.2, images: list[bytes] | None = None,
          max_chars: int = MAX_REPLY_CHARS,
          state: dict[str, Any] | None = None,
-         cancel: CancellationToken | None = None) -> dict[str, Any]:
+         cancel: CancellationToken | None = None,
+         on_stream: Callable[[str], None] | None = None) -> dict[str, Any]:
     """Диалог с моделью: системная роль, история, JSON-режим, картинки.
 
     `messages` — список `{role, content}` (роли user/assistant); `system`
@@ -367,7 +374,9 @@ def chat(messages: list[dict[str, Any]], *, system: str = "", fmt: str | dict | 
         body["format"] = fmt
     request_timeout = float(timeout if timeout is not None else config.MODEL_TIMEOUT_SEC)
     if cancel is not None:
-        ok, payload, reason = _post_stream(f"{state['url']}/api/chat", body, request_timeout, cancel)
+        ok, payload, reason = _post_stream(
+            f"{state['url']}/api/chat", body, request_timeout, cancel, on_stream
+        )
     else:
         ok, payload, reason = _post(f"{state['url']}/api/chat", body, request_timeout)
     if cancel is not None and cancel.cancelled:

@@ -6,6 +6,7 @@ on:
       - "agent/config.py"
       - "agent/speech.py"
       - "agent/model.py"
+      - "agent/pc.py"
       - "agent/brain.py"
       - "agent/server.py"
       - "agent/voice_runtime.py"
@@ -17,6 +18,7 @@ on:
       - "connector/tests/test_native_ui.py"
       - "docs/VOICE-ENGINE-3.md"
       - "docs/VOICE-ENGINE-3-PHASE2.md"
+      - "docs/VOICE-ENGINE-3-PHASE3.md"
       - "docs/NOZZA-NEXT-HANDOFF.md"
       - ".github/workflows/voice-engine-3.yml"
   push:

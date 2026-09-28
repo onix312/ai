@@ -280,7 +280,8 @@ class Agent:
             if panel.get("ok") and panel.get("reply"):
                 reply = str(panel["reply"])
                 answer = {**answer, "reply": reply, "source": "panel", "kind": panel.get("kind") or "answer"}
-        if reply and self.capabilities.get("speech_out", True):
+        streamed = int(answer.get("voice_streamed_chars") or 0)
+        if reply and self.capabilities.get("speech_out", True) and not streamed:
             pc.speak(reply[:600])
         self.state.last_phrase = phrase[:500]
         return answer
