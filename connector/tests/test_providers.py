@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from agent import browser, executor
+from agent import browser, executor, skills
 from agent.panel_client import Client
 from agent.providers import registry
 from agent.store import Store
@@ -24,6 +24,20 @@ class ProviderRegistryTests(unittest.TestCase):
         self.assertEqual("personal", registry.for_skill("reminder.list").spec.name)
         self.assertEqual("personal", registry.for_skill("habit.add").spec.name)
         self.assertIsNone(registry.for_skill("system.volume"))
+
+    def test_provider_metadata_does_not_leak_to_unowned_or_learned_skills(self):
+        system = skills.payload({"name": "system.volume", **skills.SKILLS["system.volume"]}, {})
+        browser_skill = skills.payload({"name": "browser.page", **skills.SKILLS["browser.page"]}, {})
+        self.assertEqual("", system["provider"])
+        self.assertEqual("browser", browser_skill["provider"])
+
+        learned, reason = skills.learn({
+            "name": "my.safe",
+            "title": "Мой навык",
+            "steps": [{"skill": "system.volume", "params": {"level": 20}}],
+        })
+        self.assertIsNotNone(learned, reason)
+        self.assertFalse(learned.get("provider"))
 
     def test_catalog_reports_capability_reasons_and_contracts(self):
         rows = registry.catalog({
