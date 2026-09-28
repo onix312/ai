@@ -695,6 +695,8 @@ class AgentHandler(BaseHTTPRequestHandler):
             return self._json(200, agent.skills_payload())
         if path == "/providers":
             return self._json(200, agent.providers_payload())
+        if path == "/persona":
+            return self._json(200, agent.persona.payload())
         if path == "/journal":
             query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
             limit = int((query.get("limit") or ["30"])[0] or 30)
@@ -821,6 +823,13 @@ class AgentHandler(BaseHTTPRequestHandler):
             return self._json(200, agent.plan_op(body))
         if path == "/replans":
             return self._json(200, agent.replan_op(body))
+        if path == "/persona":
+            op = str(body.get("op") or "update").strip().casefold()
+            if op == "reset":
+                return self._json(200, agent.persona.reset())
+            if op == "update":
+                return self._json(200, agent.persona.update(body.get("profile") or {}))
+            return self._json(200, {"ok": False, "reason": f"Неизвестная persona-операция «{op}»"})
         if path == "/memory":
             store = agent.runner.store
             op = str(body.get("op") or "remember")
