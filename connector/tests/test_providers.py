@@ -60,6 +60,10 @@ class ProviderRegistryTests(unittest.TestCase):
         self.assertEqual("read", browser_skills["browser.page"]["risk"])
         self.assertFalse(browser_skills["browser.page"]["confirm"])
         self.assertTrue(browser_skills["browser.page"]["reversible"])
+        self.assertFalse(browser_skills["browser.page"]["danger"])
+        panel_skills = {row["name"]: row for row in by_name["printflow"]["skills"]}
+        self.assertTrue(panel_skills["panel.do"]["danger"])
+        self.assertTrue(panel_skills["panel.do"]["confirm"])
 
 
 class ProviderImplementationTests(unittest.TestCase):
