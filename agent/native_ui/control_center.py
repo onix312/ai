@@ -99,6 +99,8 @@ class TasksPage(QWidget):
     command = Signal(int, str)
     plan_preview = Signal(str)
     plan_command = Signal(str, str)
+    replan_preview = Signal(int)
+    replan_command = Signal(str, str)
     refresh_requested = Signal()
 
     def __init__(self) -> None:
@@ -153,10 +155,11 @@ class TasksPage(QWidget):
     def set_payload(self, payload: dict[str, Any]) -> None:
         self._clear()
         plans = list(payload.get("plans") or [])
+        replans = list(payload.get("replans") or [])
         tasks = list(payload.get("tasks") or [])
         pending = list(payload.get("pending") or [])
         notifications = list(payload.get("notifications") or [])
-        if not plans and not tasks and not pending and not notifications:
+        if not plans and not replans and not tasks and not pending and not notifications:
             self.host.addWidget(QLabel("Ничего не ждёт."))
             return
         for plan in plans:
@@ -194,6 +197,47 @@ class TasksPage(QWidget):
             approve.clicked.connect(lambda _=False, i=plan_id: self.plan_command.emit(i, "approve"))
             buttons.addStretch(1)
             buttons.addWidget(discard)
+            buttons.addWidget(approve)
+            box.addLayout(buttons)
+            self.host.addWidget(card)
+
+        for replan in replans:
+            card = QFrame()
+            card.setStyleSheet("QFrame { background:#172033; border:1px solid #f59e0b; border-radius:12px; }")
+            box = QVBoxLayout(card)
+            heading = QLabel(f"Новый маршрут для задачи #{replan.get('task_id')}")
+            heading.setObjectName("pageTitle")
+            box.addWidget(heading)
+            for field in ("reason", "summary"):
+                if replan.get(field):
+                    label = QLabel(str(replan[field]))
+                    label.setWordWrap(True)
+                    box.addWidget(label)
+            old = list(replan.get("old_tail") or [])
+            new = list(replan.get("steps") or [])
+            for title, rows in (("Текущие незавершённые шаги", old),
+                                ("Предлагаемые шаги", new)):
+                box.addWidget(QLabel(title))
+                for step in rows:
+                    risk = str(step.get("risk") or "")
+                    confirm = " · требует подтверждения" if step.get("confirm") else ""
+                    details = f"{int(step.get('seq') or 0) + 1}. {step.get('title') or step.get('skill')}"
+                    if risk:
+                        details += f" · риск: {risk}{confirm}"
+                    if step.get("verification", {}).get("status"):
+                        details += f" · проверка: {step['verification']['status']}"
+                    line = QLabel(details)
+                    line.setWordWrap(True)
+                    box.addWidget(line)
+            buttons = QHBoxLayout()
+            replan_id = str(replan.get("id") or "")
+            keep = QPushButton("Сохранить текущий маршрут")
+            keep.clicked.connect(lambda _=False, i=replan_id: self.replan_command.emit(i, "discard"))
+            approve = QPushButton("Принять новый маршрут")
+            approve.setObjectName("primary")
+            approve.clicked.connect(lambda _=False, i=replan_id: self.replan_command.emit(i, "approve"))
+            buttons.addStretch(1)
+            buttons.addWidget(keep)
             buttons.addWidget(approve)
             box.addLayout(buttons)
             self.host.addWidget(card)
@@ -241,6 +285,11 @@ class TasksPage(QWidget):
                 run = QPushButton("Продолжить" if status == "paused" else "Запустить")
                 run.clicked.connect(lambda _=False, i=task_id, action=op: self.command.emit(i, action))
                 buttons.addWidget(run)
+            if status in ("paused", "failed") and any(
+                    step.get("status") != "done" for step in steps):
+                replan = QPushButton("Предложить новый маршрут")
+                replan.clicked.connect(lambda _=False, i=task_id: self.replan_preview.emit(i))
+                buttons.addWidget(replan)
             if status in ("running", "waiting"):
                 pause = QPushButton("Пауза")
                 pause.clicked.connect(lambda _=False, i=task_id: self.command.emit(i, "pause"))
@@ -286,6 +335,8 @@ class ControlCenter(QMainWindow):
     task_command = Signal(int, str)
     plan_preview = Signal(str)
     plan_command = Signal(str, str)
+    replan_preview = Signal(int)
+    replan_command = Signal(str, str)
 
     NAV = [
         ("chat", "💬  Разговор"),
@@ -338,6 +389,8 @@ class ControlCenter(QMainWindow):
         tasks.command.connect(self.task_command)
         tasks.plan_preview.connect(self.plan_preview)
         tasks.plan_command.connect(self.plan_command)
+        tasks.replan_preview.connect(self.replan_preview)
+        tasks.replan_command.connect(self.replan_command)
         self.pages["tasks"] = tasks
         self.stack.addWidget(tasks)
 
