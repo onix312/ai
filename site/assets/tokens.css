@@ -1,9 +1,9 @@
 /* PrintFlow 17.0 — единый файл дизайн-токенов.
    Палитра, геометрия, тени, типографика и компонентные токены всей панели.
    Подключается ПЕРВЫМ (до app.css / theme.css / more.css): остальные файлы
-   ссылаются на эти переменные и не переопределяют их. Тёмная тема — тот же
-   набор токенов через html[data-theme="dark"]; по умолчанию (решение 17.0 №1)
-   интерфейс тёмный. Шрифты Inter / JetBrains Mono — локальные (fonts.css). */
+   ссылаются на эти переменные. Тёмная тема — тот же набор токенов через
+   html[data-theme="dark"]; по умолчанию светлая тема.
+   Шрифты Inter / JetBrains Mono — локальные (fonts.css). */
 @import url("fonts.css");
 
 /* ============================================================ токены */
@@ -38,7 +38,7 @@
   --accent-glow: rgba(79, 70, 229, .18);
 
   /* поверхности */
-  --bg: #f3f5fa;
+  --bg: #f5f7fb;
   /* лёгкий «воздух» сверху: две едва заметные акцентные засветки */
   --bg-grad:
     radial-gradient(1200px 500px at 12% -10%, rgba(79, 70, 229, .07), transparent 64%),
@@ -46,79 +46,83 @@
   --panel: #ffffff;
   --panel-2: #f8fafc;            /* мягкая подложка внутри карточек */
   --panel-3: #edf2f7;            /* ховеры, заполнения */
-  --line: #e2e8f0;
-  --line-soft: #edf2f7;
-  --line-strong: #cbd5e1;
+  --line: #e4e9f1;
+  --line-soft: #edf1f6;
+  --line-strong: #d5deea;
 
   /* текст */
-  --text: #0f172a;
-  --text-2: #334155;
-  --muted: #64748b;
+  --text: #182230;
+  --text-2: #3e4c5f;
+  --muted: #617186;
 
   /* статусы */
-  --ok: #10b981;
-  --ok-soft: rgba(16, 185, 129, .12);
-  --warn: #d97706;
-  --warn-soft: rgba(217, 119, 6, .14);
-  --bad: #ef4444;
-  --bad-soft: rgba(239, 68, 68, .12);
-  --info: #0284c7;
-  --info-soft: rgba(2, 132, 199, .12);
+  --ok: #116e55;
+  --ok-soft: #e9f7f1;
+  --warn: #99570a;
+  --warn-soft: #fff5e8;
+  --bad: #b93f52;
+  --bad-soft: #fff0f2;
+  --info: #326bb2;
+  --info-soft: #eaf3ff;
 
   /* геометрия — чуть круглее: интерфейс мягче, «плиточность» уходит */
   --r-xs: 7px;
   --r-sm: 10px;
-  --r: 13px;
-  --r-lg: 18px;
+  --r: 12px;
+  --r-lg: 14px;
   --r-xl: 22px;
   --shadow-1: 0 1px 3px rgba(15, 23, 42, .04), 0 4px 12px -4px rgba(15, 23, 42, .08);
   --shadow-2: 0 4px 12px -2px rgba(15, 23, 42, .08), 0 16px 32px -8px rgba(15, 23, 42, .14);
   --shadow-3: 0 24px 60px -16px rgba(15, 23, 42, .28);
-  --side-w: 252px;
-  --top-h: 60px;
+  --side-w: 218px;
+  --top-h: 62px;
   --ease: cubic-bezier(.4, 0, .2, 1);
 }
 
 html[data-theme="dark"] {
   color-scheme: dark;
-  --accent: #6366f1;
+  --accent: #a3a0ff;
   --accent-2: #8b5cf6;
-  --accent-ink: #ffffff;
-  --accent-soft: rgba(99, 102, 241, .16);
-  --accent-line: rgba(99, 102, 241, .36);
-  --accent-glow: rgba(99, 102, 241, .25);
-  --bg: #0b0f19;
-  --bg-grad:
-    radial-gradient(1200px 500px at 12% -10%, rgba(99, 102, 241, .09), transparent 64%),
-    radial-gradient(1000px 460px at 108% 2%, rgba(139, 92, 246, .07), transparent 60%);
-  --panel: #111827;
-  --panel-2: #161f33;
-  --panel-3: #1e293b;
-  --line: #1e293b;
-  --line-soft: #182234;
-  --line-strong: #334155;
-  --text: #f8fafc;
-  --text-2: #cbd5e1;
-  --muted: #8191aa;
-  --ok: #10b981;
-  --ok-soft: rgba(16, 185, 129, .15);
-  --warn: #f59e0b;
-  --warn-soft: rgba(245, 158, 11, .15);
-  --bad: #f87171;
-  --bad-soft: rgba(248, 113, 113, .15);
-  --info: #38bdf8;
-  --info-soft: rgba(56, 189, 248, .15);
-  --shadow-1: 0 1px 3px rgba(0, 0, 0, .45), 0 4px 12px -4px rgba(0, 0, 0, .55);
-  --shadow-2: 0 8px 24px -6px rgba(0, 0, 0, .65);
+  --accent-ink: #0c121b;
+  --accent-soft: #30325a;
+  --accent-line: #595ca0;
+  --accent-glow: rgba(163, 160, 255, .25);
+  --bg: #0c121b;
+  --bg-grad: none;
+  --panel: #16212e;
+  --panel-2: #1c2938;
+  --panel-3: #26384a;
+  --line: #2d4052;
+  --line-soft: #263747;
+  --line-strong: #4b6175;
+  --text: #f2f6fb;
+  --text-2: #d4deea;
+  --muted: #a0b2c5;
+  --ok: #55d1a6;
+  --ok-soft: #143d37;
+  --warn: #ffc375;
+  --warn-soft: #493324;
+  --bad: #ff9daa;
+  --bad-soft: #4c2935;
+  --info: #8dc5ff;
+  --info-soft: #213a57;
+  --shadow-1: 0 8px 24px -20px rgba(0, 0, 0, .72);
+  --shadow-2: 0 16px 36px -20px rgba(0, 0, 0, .65);
   --shadow-3: 0 24px 64px -16px rgba(0, 0, 0, .85);
 }
 
 /* акценты (те же токены перекрашиваются) */
 html[data-accent="violet"]  { --accent: #7c3aed; --accent-2: #a855f7; --accent-soft: rgba(124,58,237,.14); --accent-line: rgba(124,58,237,.34); }
 html[data-accent="blue"]    { --accent: #2563eb; --accent-2: #0ea5e9; --accent-soft: rgba(37,99,235,.14);  --accent-line: rgba(37,99,235,.34); }
-html[data-accent="emerald"] { --accent: #059669; --accent-2: #14b8a6; --accent-soft: rgba(5,150,105,.14);  --accent-line: rgba(5,150,105,.34); }
-html[data-accent="amber"]   { --accent: #d97706; --accent-2: #f59e0b; --accent-soft: rgba(217,119,6,.16);  --accent-line: rgba(217,119,6,.36); }
+html[data-accent="emerald"] { --accent: #087b5b; --accent-2: #14b8a6; --accent-soft: rgba(8,123,91,.14);  --accent-line: rgba(8,123,91,.34); }
+html[data-accent="amber"]   { --accent: #99570a; --accent-2: #f59e0b; --accent-soft: rgba(153,87,10,.16);  --accent-line: rgba(153,87,10,.36); }
 html[data-accent="rose"]    { --accent: #e11d48; --accent-2: #f43f5e; --accent-soft: rgba(225,29,72,.14);  --accent-line: rgba(225,29,72,.34); }
+
+html[data-theme="dark"][data-accent="violet"]  { --accent: #c4a5ff; --accent-2: #a855f7; --accent-soft: #3b2d53; --accent-line: #775894; }
+html[data-theme="dark"][data-accent="blue"]    { --accent: #9ac2ff; --accent-2: #0ea5e9; --accent-soft: #203c59; --accent-line: #4e7090; }
+html[data-theme="dark"][data-accent="emerald"] { --accent: #72dfb5; --accent-2: #14b8a6; --accent-soft: #193e36; --accent-line: #477a67; }
+html[data-theme="dark"][data-accent="amber"]   { --accent: #ffc375; --accent-2: #f59e0b; --accent-soft: #493324; --accent-line: #84613f; }
+html[data-theme="dark"][data-accent="rose"]    { --accent: #ffa8b8; --accent-2: #f43f5e; --accent-soft: #4c2935; --accent-line: #87596a; }
 
 /* ================================================= глобальная плотность
    «Компактно» (Б8): меньше воздуха, больше строк на экран. Включается

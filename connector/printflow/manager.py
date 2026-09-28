@@ -163,9 +163,12 @@ class PrinterManager:
                     self.guard.seed_maintenance(pid)
                 except Exception:
                     continue
-            # Виртуальный принтер (идея 7): демо-P1S не живёт в таблице
-            # printers, его жизненным циклом управляет demo_printer_enabled.
-            from .virtual import VirtualPrinter
+            self.sync_virtual_printer()
+
+    def sync_virtual_printer(self) -> None:
+        """Применить переключатель демо-P1S без перезапуска станков фермы."""
+        from .virtual import VIRTUAL_ID, VirtualPrinter
+        with self.lock:
             demo_on = bool(self.db.setting("demo_printer_enabled", False))
             existing = self.printers.get(VIRTUAL_ID)
             demo_record = {"id": VIRTUAL_ID, "name": "P1S (виртуальный)",

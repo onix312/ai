@@ -218,7 +218,9 @@ class Client:
         """Разговор с мозгом панели (18.21): вопрос цеха отвечает панель, не агент."""
         ok, payload, reason = _request(f"{self.url}/api/assistant/chat",
                                        payload={"text": str(text), "session": str(session),
-                                                "source": str(source), "delegate": False},
+                                                "source": str(source), "delegate": False,
+                                                "contract_version": 1,
+                                                "request_id": uuid.uuid4().hex},
                                        timeout=self.timeout)
         if not ok or not isinstance(payload, dict):
             return {"ok": False, "reason": reason or "панель не ответила"}

@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="ru" data-theme="dark" data-accent="indigo"><head>
+<html lang="ru" data-theme="light" data-accent="indigo"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="light dark">
@@ -7,17 +7,18 @@
 <link rel="icon" href="assets/brand/favicon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="assets/brand/nozza-mark.svg">
 <link rel="manifest" href="/manifest.webmanifest">
-<meta name="theme-color" content="#0b0f19">
+<meta name="theme-color" content="#f5f7fb">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="PrintFlow">
-<script src="assets/theme-init.js?v=18.21.0"></script>
-<link rel="stylesheet" href="assets/tokens.css?v=18.6.0">
-<link rel="stylesheet" href="assets/fonts.css?v=17.0.1">
-<link rel="stylesheet" href="assets/theme.css?v=18.6.0">
-<link rel="stylesheet" href="assets/app.css?v=18.6.0">
-<link rel="stylesheet" href="assets/more.css?v=18.21.0">
-<link rel="stylesheet" href="assets/controls.css?v=18.21.0">
+<script src="assets/theme-init.js?v=18.23.1"></script>
+<link rel="stylesheet" href="assets/tokens.css?v=18.23.1">
+<link rel="stylesheet" href="assets/fonts.css?v=18.23.1">
+<link rel="stylesheet" href="assets/theme.css?v=18.23.1">
+<link rel="stylesheet" href="assets/app.css?v=18.23.1">
+<link rel="stylesheet" href="assets/more.css?v=18.23.1">
+<link rel="stylesheet" href="assets/controls.css?v=18.23.1">
+<link rel="stylesheet" href="assets/refine.css?v=18.23.1">
 </head><body>
 <a class="skip-link" href="#views" id="skip_link">Перейти к содержимому</a>
 <div class="top-load" id="top_load" hidden aria-hidden="true"></div>
@@ -39,37 +40,40 @@
  <label class="nav-find"><span>⌕</span><input id="nav_find" type="search" placeholder="Найти раздел…" autocomplete="off"></label>
  <div class="side-scroll" id="nav_scroll">
   <div class="nav-group">
-  <div class="nav-group-title">Цех</div>
-  <a class="nav-link" href="#dashboard" data-view="dashboard" data-find="обзор сегодня панель дашборд"><span class="ic" data-icon="dashboard">◈</span>Обзор</a>
-  <a class="nav-link" href="#printers" data-view="printers" data-find="принтер камера ams пауза стоп bambu"><span class="ic" data-icon="printer">◉</span>Принтеры<span class="tag" id="nav_printers_tag" hidden></span></a>
-  <a class="nav-link nav-link-ext" href="/control.html" data-find="пульт цеха телефон планшет парк принтеров очередь ams камера киоск"><span class="ic" data-icon="layout">▤</span><span>Пульт цеха</span><small>телефон →</small></a>
-  <a class="nav-link" href="#queue" data-view="queue" data-find="очередь печать задание журнал старт"><span class="ic" data-icon="queue">≡</span>Очередь<span class="tag" id="nav_queue_tag" hidden></span></a>
-  <a class="nav-link" href="#conveyor" data-view="conveyor" data-find="конвейер farmloop farm loop снятие детали серия цикл допуск датчик камера автоматика"><span class="ic" data-icon="refresh">↻</span><span>Конвейер</span><small>FarmLoop</small></a>
-  <a class="nav-link" href="#orders" data-view="orders" data-find="заказ канбан выдать срок клиент"><span class="ic" data-icon="kanban">▦</span>Заказы<span class="tag" id="nav_orders_tag" hidden></span></a>
-  <a class="nav-link" href="#ops10" data-view="ops10" data-find="центр 10.0 смена inbox воронка автоматизация правила dry run производство"><span class="ic" data-icon="hexagon">◆</span><span>Центр 10.0</span><small>Смена</small></a>
+   <div class="nav-group-title">Рабочее место</div>
+   <a class="nav-link" href="#dashboard" data-view="dashboard" data-find="обзор сегодня панель дашборд"><span class="ic" data-icon="dashboard">◈</span>Сегодня</a>
+   <a class="nav-link" href="#orders" data-view="orders" data-find="заказ канбан выдать срок клиент"><span class="ic" data-icon="kanban">▦</span>Заказы<span class="tag" id="nav_orders_tag" hidden></span></a>
+   <a class="nav-link" href="#customers" data-view="customers" data-find="клиент crm телефон повторный отзыв пожелание"><span class="ic" data-icon="users">◎</span>Клиенты</a>
   </div>
   <div class="nav-group">
-  <div class="nav-group-title">Продажи</div>
-  <a class="nav-link" href="#products" data-view="products" data-views="products batches documents warehouses shelf inventory" data-find="товар номенклатура sku партия документ склад стеллаж пластик катушка инвентарь"><span class="ic" data-icon="box">▩</span>Склад<span class="tag warn" id="nav_products_tag" hidden></span><span class="tag" id="nav_shelf_tag" hidden></span><span class="tag" id="nav_inventory_tag" hidden></span></a>
-  <a class="nav-link" href="#calc" data-view="calc" data-find="калькулятор цена себестоимость наценка"><span class="ic" data-icon="calculator">⌁</span>Калькулятор</a>
-  <a class="nav-link" href="#customers" data-view="customers" data-find="клиент crm телефон повторный отзыв пожелание"><span class="ic" data-icon="users">◎</span><span>Клиенты</span><small>CRM</small></a>
-  <a class="nav-link" href="#niches" data-view="niches" data-find="ниша гипотеза спрос конверсия прибыль тест"><span class="ic" data-icon="target">◫</span><span>Ниши</span><small>Тесты</small></a>
-  <a class="nav-link nav-link-featured" href="#print" data-view="print" data-find="печать формы ценники стикеры наклейки таблички визитки гарантия отчёт бланк штрихкод бумага"><span class="ic" data-icon="page">▤</span><span>Печать</span><small>Формы</small></a>
+   <div class="nav-group-title">Производство</div>
+   <a class="nav-link" href="#printers" data-view="printers" data-find="принтер камера ams пауза стоп bambu"><span class="ic" data-icon="printer">◉</span>Принтеры<span class="tag" id="nav_printers_tag" hidden></span></a>
+   <a class="nav-link" href="#queue" data-view="queue" data-find="очередь печать задание журнал старт"><span class="ic" data-icon="queue">≡</span>Очередь<span class="tag" id="nav_queue_tag" hidden></span></a>
+   <a class="nav-link" href="#products" data-view="products" data-views="products batches documents warehouses shelf inventory" data-find="товар номенклатура sku партия документ склад стеллаж пластик катушка инвентарь"><span class="ic" data-icon="box">▩</span>Склад<span class="tag warn" id="nav_products_tag" hidden></span><span class="tag" id="nav_shelf_tag" hidden></span><span class="tag" id="nav_inventory_tag" hidden></span></a>
   </div>
   <div class="nav-group">
-  <div class="nav-group-title">Касса</div>
-  <a class="nav-link" href="#finance" data-view="finance" data-find="финансы учёт налог прибыль долг проводка доход расход"><span class="ic" data-icon="ruble">₽</span>Финансы</a>
-  <a class="nav-link nav-link-ext" href="/sbp.html" data-find="сбп входящие qr платёж оплата банк"><span class="ic" data-icon="qr">▦</span><span>СБП · входящие</span><small>страница →</small></a>
-  <a class="nav-link nav-link-ext" href="/cashier.html" data-find="касса мобильная продажа телефон чек выручка"><span class="ic" data-icon="cart">🛒</span><span>Мобильная касса</span><small>страница →</small></a>
-  <a class="nav-link nav-link-ext" href="/bank.html" data-find="банк поступления выписка сопоставление"><span class="ic" data-icon="bank">▤</span><span>Банк</span><small>поступления →</small></a>
+   <div class="nav-group-title">Управление</div>
+   <a class="nav-link" href="#finance" data-view="finance" data-find="финансы учёт налог прибыль долг проводка доход расход"><span class="ic" data-icon="ruble">₽</span>Финансы</a>
+   <a class="nav-link nav-link-ext" href="/assistant.html" target="_blank" rel="noopener" data-find="помощник ассистент модель ollama разговор голос каталог действий" aria-label="Открыть панель помощника в отдельной вкладке"><span class="ic" data-icon="sparkles">✦</span><span>Помощник</span><small>отдельная панель ↗</small></a>
   </div>
   <div class="nav-group">
-  <div class="nav-group-title">Система</div>
-  <a class="nav-link" href="#clientbot" data-view="clientbot" data-find="клиентский бот telegram покупатель витрина заказ статус каталог"><span class="ic" data-icon="send">✈</span><span>Клиент-бот</span><small>Telegram</small></a>
-  <a class="nav-link" href="#library" data-view="library" data-find="библиотека инструкция faq помощь материалы чеклист"><span class="ic" data-icon="book">▤</span><span>Библиотека</span><small>Гайды</small></a>
-  <a class="nav-link" href="#pages" data-view="pages" data-find="страницы хаб касса трек полка tv ярлыки ценники ссылки qr телефоны lan"><span class="ic" data-icon="grid">▦</span><span>Страницы</span><small>хаб</small></a>
-  <a class="nav-link nav-link-ext" href="/assistant.html" target="_blank" rel="noopener" data-find="помощник ассистент модель ollama разговор голос каталог действий" aria-label="Открыть панель помощника в отдельной вкладке"><span class="ic" data-icon="sparkles">✦</span><span>Помощник</span><small>отдельная панель ↗</small></a>
-  <a class="nav-link" href="#settings" data-view="settings" data-find="настройки налог тема облако telegram тариф данные касса сбп банк"><span class="ic" data-icon="sliders">⚙</span><span>Настройки</span><small>Цех</small></a>
+   <details class="nav-more" id="nav_more"><summary class="nav-group-title">Все разделы</summary>
+    <div class="nav-more-section">
+     <a class="nav-link nav-link-ext" href="/control.html" data-find="пульт цеха телефон планшет парк принтеров очередь ams камера киоск"><span class="ic" data-icon="layout">▤</span><span>Пульт цеха</span><small>страница →</small></a>
+     <a class="nav-link" href="#conveyor" data-view="conveyor" data-find="конвейер farmloop farm loop снятие детали серия цикл допуск датчик камера автоматика"><span class="ic" data-icon="refresh">↻</span>Конвейер</a>
+     <a class="nav-link" href="#ops10" data-view="ops10" data-find="центр 10.0 смена inbox воронка автоматизация правила dry run производство"><span class="ic" data-icon="hexagon">◆</span>Центр смены</a>
+     <a class="nav-link" href="#calc" data-view="calc" data-find="калькулятор цена себестоимость наценка"><span class="ic" data-icon="calculator">⌁</span>Калькулятор</a>
+     <a class="nav-link" href="#niches" data-view="niches" data-find="ниша гипотеза спрос конверсия прибыль тест"><span class="ic" data-icon="target">◫</span>Ниши</a>
+     <a class="nav-link nav-link-featured" href="#print" data-view="print" data-find="печать формы ценники стикеры наклейки таблички визитки гарантия отчёт бланк штрихкод бумага"><span class="ic" data-icon="page">▤</span>Печатные формы</a>
+     <a class="nav-link nav-link-ext" href="/sbp.html" data-find="сбп входящие qr платёж оплата банк"><span class="ic" data-icon="qr">▦</span>СБП · входящие</a>
+     <a class="nav-link nav-link-ext" href="/cashier.html" data-find="касса мобильная продажа телефон чек выручка"><span class="ic" data-icon="cart">🛒</span>Мобильная касса</a>
+     <a class="nav-link nav-link-ext" href="/bank.html" data-find="банк поступления выписка сопоставление"><span class="ic" data-icon="bank">▤</span>Банк</a>
+     <a class="nav-link" href="#clientbot" data-view="clientbot" data-find="клиентский бот telegram покупатель витрина заказ статус каталог"><span class="ic" data-icon="send">✈</span>Клиент-бот</a>
+     <a class="nav-link" href="#library" data-view="library" data-find="библиотека инструкция faq помощь материалы чеклист"><span class="ic" data-icon="book">▤</span>Библиотека</a>
+     <a class="nav-link" href="#pages" data-view="pages" data-find="страницы хаб касса трек полка tv ярлыки ценники ссылки qr телефоны lan"><span class="ic" data-icon="grid">▦</span>Страницы</a>
+     <a class="nav-link" href="#settings" data-view="settings" data-find="настройки налог тема облако telegram тариф данные касса сбп банк"><span class="ic" data-icon="sliders">⚙</span>Настройки</a>
+    </div>
+   </details>
   </div>
   <p class="nav-empty" id="nav_empty" hidden>Нет такого раздела. Попробуйте «принтер», «касса», «пластик».</p>
  </div>
@@ -80,7 +84,7 @@
 
 <div id="main">
  <header id="topbar">
-  <button id="burger" type="button" aria-label="Меню"><span class="ic" data-icon="menu">☰</span></button>
+  <button id="burger" type="button" aria-label="Меню" aria-controls="side" aria-expanded="false"><span class="ic" data-icon="menu">☰</span></button>
   <div class="top-title"><b id="top_title">Обзор</b><span id="top_sub">Производство, деньги и принтеры в одном месте</span></div>
   <div class="top-spacer"></div>
   <button class="cmd-trigger" id="cmd_open" type="button"><span class="ic" data-icon="search">⌕</span><span class="label">Команда или поиск…</span><kbd>Ctrl K</kbd></button>
@@ -123,7 +127,7 @@
   <span class="cb-item" title="Связь с коннектором"><a href="#settings" data-view="settings">система →</a></span>
  </div>
  <main id="views">
-   <div id="offline-bar"><span>⚠</span><span><b>Коннектор недоступен.</b> Данные не сохраняются. Запустите PrintFlow командой <code>python pf.py</code> или ярлыком «PrintFlow».</span></div>
+   <div id="offline-bar" role="status"><span>⚠</span><span><b>Коннектор недоступен.</b> Данные не сохраняются. Запустите PrintFlow командой <code>python pf.py</code> или ярлыком «PrintFlow».</span><button type="button" class="btn sm" id="offline_retry">Повторить</button></div>
    <div id="channel-bar"><span>📡</span><span id="channel_bar_text">MQTT · FTPS · диск</span></div>
 
 <!-- ================================================== ОБЗОР -->
@@ -146,7 +150,7 @@
      <span class="eyebrow">Живой цех</span>
      <span class="hero-live-dot pulse" id="dash_hero_dot"></span>
     </div>
-    <h2>Hero-пульт станка</h2>
+    <h2>Панель принтера</h2>
     <p id="dash_active_sub">—</p>
    </div>
    <div class="hero-pult-printers" id="dash_hero_printers"></div>
@@ -240,13 +244,18 @@
 <!-- ================================================== ПРИНТЕРЫ -->
 <section class="view" id="view-printers">
  <div class="view-head">
-  <div><span class="eyebrow">Bambu Lab · Live</span><h1>Принтеры</h1><p id="pr_sub">Мониторинг, управление и файлы принтера по локальной сети.</p></div>
+  <div><span class="eyebrow">Bambu Lab · парк</span><h1>Принтеры</h1><p id="pr_sub">Мониторинг, управление и файлы принтера по локальной сети.</p></div>
   <div class="head-actions">
-   <button class="btn ghost" id="pr_density" type="button" title="Компактная или просторная раскладка карточек">⇥ Компактно</button>
-   <button class="btn" id="pr_wall" type="button">▦ Стена</button>
-   <button class="btn" id="pr_reconnect" type="button">⟳ Переподключить</button>
-   <button class="btn" id="pr_edit" type="button">⚙ Настроить</button>
    <button class="btn primary" id="pr_add" type="button">+ Принтер</button>
+   <button class="btn" id="pr_edit" type="button">⚙ Настроить</button>
+   <button class="btn" id="pr_reconnect" type="button">⟳ Переподключить</button>
+   <details class="view-options">
+    <summary class="btn">Вид ▾</summary>
+    <div class="view-options-pop">
+     <button class="btn ghost" id="pr_density" type="button" title="Компактная или просторная раскладка карточек">⇥ Компактно</button>
+     <button class="btn ghost" id="pr_wall" type="button">▦ Стена</button>
+    </div>
+   </details>
   </div>
  </div>
  <div class="printer-park" id="pr_park" role="group" aria-label="Парк принтеров"></div>
@@ -523,16 +532,21 @@
   </div>
  </div>
  <div class="toolbar">
-  <div class="search-box"><input id="orders_search" type="search" placeholder="Изделие, клиент, номер, файл…"></div>
+  <div class="search-box"><input id="orders_search" type="search" placeholder="Изделие, клиент, номер, файл…" aria-label="Поиск заказов"></div>
   <select id="orders_preset" title="Сохранённый вид доски"><option value="all">Все заказы</option></select>
   <button class="btn sm ghost" id="orders_preset_del" type="button" title="Удалить этот вид" hidden>✕</button>
   <select id="orders_filter_status"><option value="">Все статусы</option></select>
-  <select id="orders_filter_niche"><option value="">Все ниши</option></select>
-  <select id="orders_sort" title="Порядок заказов"><option value="new">Сначала новые</option><option value="due">По сроку</option><option value="debt">По долгу</option><option value="stale">Забытые сверху</option></select>
-  <div class="seg" id="orders_chan" role="group" aria-label="Канал продаж"><button type="button" data-chan="" class="on">Все каналы</button><button type="button" data-chan="telegram"><i data-icon="telegram">✈</i> Telegram</button><button type="button" data-chan="no-tg">Без TG</button></div>
   <div class="seg" id="orders_view"><button data-mode="kanban" class="on">Канбан</button><button data-mode="table">Таблица</button></div>
   <div class="seg" id="orders_box" role="group" aria-label="Доска или архив" title="Архив — снятые с доски заказы: данные, платежи и история на месте"><button type="button" data-box="" class="on">На доске</button><button type="button" data-box="archived">⌸ В архиве</button></div>
-  <button class="btn sm ghost" id="orders_density" type="button" title="Компактные карточки канбана">⇥ Компактно</button>
+  <details class="orders-more-filters" id="orders_more_filters">
+   <summary class="btn sm">Доп. фильтры</summary>
+   <div class="orders-more-filter-grid">
+    <label>Ниша <select id="orders_filter_niche"><option value="">Все ниши</option></select></label>
+    <label>Порядок <select id="orders_sort" title="Порядок заказов"><option value="new">Сначала новые</option><option value="due">По сроку</option><option value="debt">По долгу</option><option value="stale">Забытые сверху</option></select></label>
+    <div><span>Канал продаж</span><div class="seg" id="orders_chan" role="group" aria-label="Канал продаж"><button type="button" data-chan="" class="on">Все каналы</button><button type="button" data-chan="telegram"><i data-icon="telegram">✈</i> Telegram</button><button type="button" data-chan="no-tg">Без TG</button></div></div>
+    <button class="btn sm ghost" id="orders_density" type="button" title="Компактные карточки канбана">⇥ Компактно</button>
+   </div>
+  </details>
  </div>
  <div class="toolbar" id="bulk_bar" hidden>
   <span class="chip" id="bulk_count">Выбрано 0</span>
@@ -917,9 +931,14 @@
  <div class="view-head">
   <div><span class="eyebrow">Материалы</span><h1>Склад пластика</h1><p>Расход списывается автоматически с той катушки, что стояла в AMS.</p></div>
   <div class="head-actions">
-   <a class="btn" href="/labels.html?kind=spool" target="_blank" rel="noopener" id="spool_labels">QR всех катушек</a>
-   <a class="btn" href="/api/spools/bambu-export" download="bambu_filament_presets.zip" id="spool_bambu_export" title="Скачать ZIP-архив JSON-профилей катушек склада для Bambu Studio / OrcaSlicer">🐼 Экспорт в Bambu Studio</a>
-   <button class="btn" id="spool_cleanup" type="button" title="Убрать дубли и фантомы AMS со склада">🧹 Очистить фантомы AMS</button>
+   <details class="spool-more-actions">
+    <summary class="btn" aria-label="Дополнительные действия со складом">Ещё</summary>
+    <div class="spool-more-menu">
+     <a class="btn" href="/labels.html?kind=spool" target="_blank" rel="noopener" id="spool_labels">QR всех катушек</a>
+     <a class="btn" href="/api/spools/bambu-export" download="bambu_filament_presets.zip" id="spool_bambu_export" title="Скачать ZIP-архив JSON-профилей катушек склада для Bambu Studio / OrcaSlicer">🐼 Экспорт в Bambu Studio</a>
+     <button class="btn" id="spool_cleanup" type="button" title="Убрать дубли и фантомы AMS со склада">🧹 Очистить фантомы AMS</button>
+    </div>
+   </details>
    <button class="btn" id="filament_receipt_btn" type="button">📦 Приход пластика</button>
    <button class="btn primary" id="spool_add" type="button">+ Катушка</button>
   </div>
@@ -939,6 +958,9 @@
    <label class="check"><span class="switch"><input type="checkbox" id="spool_filter_low"><i></i></span>Только низкий остаток</label>
   </div>
   <div class="spool-grid" id="spool_grid"></div>
+ <details class="inventory-extra">
+  <summary><span><b>Инструменты и аналитика</b><small>Смена, поставщики, закупки, расход и база изделий</small></span></summary>
+  <div class="inventory-extra-content">
   <div class="grid g2" style="margin-top:16px">
    <div class="card" id="workshop_shift_card">
     <div class="card-head"><div><h2>Чек-лист смены</h2><p>Перед стартом дня</p></div><button class="btn sm" type="button" id="shift_refresh">↻</button></div>
@@ -973,6 +995,8 @@
   <div class="card-head"><div><h2>База изделий</h2><p>Вес, часы и цена — подставляются в калькулятор и заказы</p></div><div><button class="btn sm ghost" id="cat_recalc" type="button">Пересчитать цены</button> <button class="btn sm" id="cat_add" type="button">+ Позиция</button></div></div>
   <div class="table-wrap"><table class="data"><thead><tr><th>Название</th><th>Материал</th><th class="right">Граммы</th><th class="right">Часы</th><th class="right">На стол</th><th class="right">Цена</th><th class="right">₽/час</th><th></th></tr></thead><tbody id="cat_tbody"></tbody></table></div>
  </div>
+  </div>
+ </details>
 </section>
 
 <!-- ================================================== НИШИ -->
@@ -1140,78 +1164,106 @@
 <!-- ================================================== ПЕЧАТЬ -->
 <section class="view print-workspace" id="view-print">
  <div class="view-head print-head">
-  <div><span class="eyebrow">Цех · бумага, наклейки и бланки</span><h1>Печать</h1><p>Что печатаем, на какой бумаге и каким размером. Лист собирает сервер — на бумаге форма одинаковая с любого устройства в цехе.</p></div>
-  <div class="head-actions"><span id="pr_tag" class="tag" hidden></span><button class="btn" id="pr_refresh" type="button">↻ Обновить каталог</button></div>
+  <div><span class="eyebrow">Документы · этикетки · модели</span><h1>Печать</h1><p>Подготовьте лист, нарежьте модель или проверьте штрихкод — каждый инструмент теперь на своей вкладке.</p></div>
+  <div class="head-actions"><span id="pr_tag" class="tag" hidden></span><button class="btn" id="pr_refresh" type="button" title="Обновить каталог форм">↻ Обновить</button></div>
  </div>
  <div class="notice error pr-error" id="pr_error" role="alert" hidden><span class="pr-error-mark" aria-hidden="true">!</span><span id="pr_error_text">Не удалось загрузить каталог форм.</span><button class="btn sm" id="pr_error_retry" type="button">Повторить</button></div>
- <div class="kpi-grid print-kpis" id="pr_kpis" aria-live="polite"></div>
- <div class="pr-forms" id="pr_forms" aria-live="polite"><div class="pr-loading"><div class="skeleton" style="height:190px"></div><span>Загружаем каталог форм…</span></div></div>
- <a class="card pr-farmloop-card pr-farmloop-link" id="pr_farmloop" href="#conveyor" data-view="conveyor" aria-live="polite">
-  <div class="pr-farmloop-mark" aria-hidden="true">↻</div>
-  <div class="pr-farmloop-main"><div class="card-kicker">PrintFlow Farm · P1S</div><p id="pr_farmloop_text">Конвейер: снятие детали и серия — открыть вкладку «Конвейер» →</p></div>
-  <span id="pr_farmloop_tag" class="tag">Проверяем</span>
- </a>
- <section class="card pr-slicer-card" id="pr_slicer" aria-live="polite">
-  <div class="pr-slicer-top">
-   <div class="pr-slicer-mark" aria-hidden="true">◺</div>
-   <div class="pr-slicer-main"><div class="card-kicker">PrintFlow Slicer · P1S</div><h2>Свой слайсер Stage 1</h2><p id="pr_slicer_text">Проверяем движок нарезки…</p><small id="pr_slicer_meta" class="muted"></small></div>
-   <span id="pr_slicer_tag" class="tag">Проверяем</span>
-  </div>
-  <div class="pr-slicer-work">
-   <div class="pr-slicer-row">
-    <label class="sr-only" for="pr_sl_model">Модель из библиотеки</label>
-    <select id="pr_sl_model" class="field" aria-label="Модель из библиотеки"><option value="">Загружаем список моделей…</option></select>
-    <button class="btn" id="pr_sl_upload_btn" type="button">Загрузить STL…</button>
-    <input type="file" id="pr_sl_file" accept=".stl,.obj" hidden aria-hidden="true">
-    <button class="btn" id="pr_sl_models_refresh" type="button" title="Обновить список моделей из библиотеки">↻</button>
-   </div>
-   <div class="pr-slicer-row pr-slicer-conveyor">
-    <label class="pr-sl-check"><input type="checkbox" id="pr_sl_farm">Для конвейера (FarmLoop)</label>
-    <label class="sr-only" for="pr_sl_cycles">Циклов в серии</label>
-    <input type="number" id="pr_sl_cycles" class="field pr-sl-num" min="1" max="100" value="1" aria-label="Циклов в серии" title="Сколько одинаковых заданий поставит кнопка «В конвейер»">
-    <label class="sr-only" for="pr_sl_spool">Катушка со склада пластика</label>
-    <select id="pr_sl_spool" class="field" aria-label="Катушка со склада пластика"><option value="">Катушка: как в настройках</option></select>
-   </div>
-   <div class="pr-slicer-row">
-    <button class="btn" id="pr_sl_sections" type="button" disabled title="Разрезать модель на слои прямо в браузере (WebGPU или процессор) и показать слои, свесы, тонкие места и оценку пластика — без нарезки на сервере">Сечения</button>
-    <button class="btn primary" id="pr_sl_plan" type="button" disabled>План</button>
-    <button class="btn" id="pr_sl_slice" type="button" disabled>Нарезать</button>
-    <small id="pr_sl_status" class="muted"></small>
-   </div>
-   <div id="pr_sl_gpu" class="pr-sl-gpu" hidden></div>
-   <div id="pr_sl_result" hidden></div>
-   <div id="pr_sl_actions" class="pr-slicer-row" hidden></div>
-  </div>
- </section>
- <section class="card pr-watch-card" id="pr_watch" aria-live="polite">
-  <div class="pr-watch-top">
-   <div class="pr-watch-mark" aria-hidden="true">⇪</div>
-   <div class="pr-watch-main"><div class="card-kicker">Bambu Studio / OrcaSlicer → PrintFlow</div><h2>Watch Folder — экспорт слайсера</h2><p id="pr_watch_text">Проверяем папку…</p><small id="pr_watch_meta" class="muted"></small></div>
-   <span id="pr_watch_tag" class="tag">Проверяем</span>
-  </div>
-  <div class="pr-slicer-row">
-   <button class="btn primary" id="pr_watch_enable" type="button" hidden>Включить папку</button>
-   <button class="btn" id="pr_watch_disable" type="button" hidden>Выключить</button>
-   <button class="btn" id="pr_watch_ensure" type="button" hidden>Создать папку</button>
-   <small id="pr_watch_status" class="muted"></small>
-  </div>
- </section>
- <div class="pr-grid">
-  <section class="card pr-barcode-card">
-   <div class="card-head"><div><span class="card-kicker">Ценники и касса</span><h2>Штрихкод Code 128</h2><p>Проверить артикул до тиража: режим, число символов и контрольная сумма.</p></div></div>
-   <div class="pr-row"><label class="sr-only" for="pr_bc_text">Текст штрихкода</label><input id="pr_bc_text" class="field" placeholder="Артикул, код или цена — например 199.90" aria-label="Текст штрихкода"><button class="btn primary" id="pr_bc_gen" type="button">Построить</button></div>
-   <div id="pr_bc_out" class="pr-barcode-out" aria-live="polite">Введите текст — построим штрихкод и покажем его размеры.</div>
-  </section>
-  <section class="card pr-hint-card">
-   <div class="card-head"><div><span class="card-kicker">Чтобы миллиметры совпали</span><h2>Перед тиражом</h2></div></div>
-   <ul class="pr-checklist">
-    <li>Масштаб печати — <b>100 %</b>. «Вписать в страницу» ужимает лист, и размеры на бумаге перестают совпадать с подписями.</li>
-    <li>На каждом листе снизу есть <b>линейка 100 мм</b>: приложите к первому листу обычную линейку и проверьте.</li>
-    <li>Отсканируйте QR с бумаги телефоном: читается — можно печатать тираж.</li>
-    <li>Самоклеящаяся бумага и плёнка сохнут 10–15 минут после печати.</li>
-   </ul>
-  </section>
+ <div class="pr-workspace-tabs" id="pr_tabs" role="tablist" aria-label="Инструменты печати">
+  <button class="pr-workspace-tab" id="pr_tab_forms" type="button" role="tab" aria-controls="pr_panel_forms" aria-selected="true" data-pr-tab="forms"><span aria-hidden="true">▤</span> Формы <small id="pr_tab_forms_count">…</small></button>
+  <button class="pr-workspace-tab" id="pr_tab_slicer" type="button" role="tab" aria-controls="pr_panel_slicer" aria-selected="false" tabindex="-1" data-pr-tab="slicer"><span aria-hidden="true">◺</span> 3D-печать</button>
+  <button class="pr-workspace-tab" id="pr_tab_tools" type="button" role="tab" aria-controls="pr_panel_tools" aria-selected="false" tabindex="-1" data-pr-tab="tools"><span aria-hidden="true">⌗</span> Штрихкод и тираж</button>
  </div>
+
+ <section class="pr-panel" id="pr_panel_forms" role="tabpanel" aria-labelledby="pr_tab_forms" data-pr-panel="forms">
+  <div class="pr-catalog-toolbar">
+   <div class="pr-catalog-heading"><span class="card-kicker">ГОТОВЫЕ ДОКУМЕНТЫ</span><h2>Бланки и этикетки</h2><p>Выберите форму, укажите параметры и проверьте лист перед печатью.</p></div>
+   <label class="pr-search"><span aria-hidden="true">⌕</span><span class="sr-only">Поиск формы</span><input id="pr_search" type="search" class="field" placeholder="Найти бланк или этикетку…" autocomplete="off"></label>
+  </div>
+  <div class="pr-catalog-meta"><div class="pr-summary-strip" id="pr_kpis" aria-live="polite"></div><span class="pr-result-count" id="pr_result_count" aria-live="polite"></span></div>
+  <div class="pr-category-filters" id="pr_category_filters" role="toolbar" aria-label="Фильтр по разделам">
+   <button class="pr-filter-chip on" type="button" data-pr-filter="all" aria-pressed="true">Все формы <span id="pr_filter_all_count">0</span></button>
+  </div>
+  <div class="pr-forms" id="pr_forms" aria-live="polite"><div class="pr-loading"><div class="skeleton" style="height:190px"></div><span>Загружаем каталог форм…</span></div></div>
+  <div class="pr-filter-empty" id="pr_filter_empty" hidden><b>Ничего не найдено</b><span>Измените запрос или сбросьте фильтр.</span><button class="btn sm" type="button" id="pr_filter_clear">Сбросить поиск и фильтр</button></div>
+ </section>
+
+ <section class="pr-panel" id="pr_panel_slicer" role="tabpanel" aria-labelledby="pr_tab_slicer" data-pr-panel="slicer" hidden>
+  <div class="pr-section-intro"><div><span class="card-kicker">МОДЕЛЬ → ПРОВЕРКА → ОЧЕРЕДЬ</span><h2>Подготовка 3D-печати</h2><p>Загрузите STL, проверьте расчёт и отправьте готовое задание в очередь. Сам запуск всегда остаётся отдельным действием.</p></div><a class="btn sm ghost" href="#queue" data-view="queue">Открыть очередь →</a></div>
+  <div class="pr-slicer-layout">
+   <section class="card pr-slicer-card" id="pr_slicer" aria-live="polite">
+    <div class="pr-slicer-top">
+     <div class="pr-slicer-mark" aria-hidden="true">◺</div>
+     <div class="pr-slicer-main"><div class="card-kicker">PRINTFLOW SLICER · P1S</div><h2>Слайсер</h2><p id="pr_slicer_text">Проверяем движок нарезки…</p><small id="pr_slicer_meta" class="muted"></small></div>
+     <span id="pr_slicer_tag" class="tag">Проверяем</span>
+    </div>
+    <div class="pr-slicer-work">
+     <div class="pr-slicer-row pr-model-row">
+      <label class="sr-only" for="pr_sl_model">Модель из библиотеки</label>
+      <select id="pr_sl_model" class="field" aria-label="Модель из библиотеки"><option value="">Загружаем список моделей…</option></select>
+      <button class="btn" id="pr_sl_upload_btn" type="button">Загрузить модель</button>
+      <input type="file" id="pr_sl_file" accept=".stl,.obj" hidden aria-hidden="true">
+      <button class="btn" id="pr_sl_models_refresh" type="button" title="Обновить модели из библиотеки" aria-label="Обновить список моделей">↻</button>
+     </div>
+     <div class="pr-slicer-row pr-slicer-conveyor">
+      <label class="pr-sl-check"><input type="checkbox" id="pr_sl_farm">Для конвейера (FarmLoop)</label>
+      <label class="sr-only" for="pr_sl_cycles">Циклов в серии</label>
+      <input type="number" id="pr_sl_cycles" class="field pr-sl-num" min="1" max="100" value="1" aria-label="Циклов в серии" title="Сколько одинаковых заданий поставить в конвейер">
+      <label class="sr-only" for="pr_sl_spool">Катушка со склада пластика</label>
+      <select id="pr_sl_spool" class="field" aria-label="Катушка со склада пластика"><option value="">Катушка: как в настройках</option></select>
+     </div>
+     <div class="pr-slicer-actions">
+      <button class="btn" id="pr_sl_sections" type="button" disabled title="Показать слои модели в браузере">Сечения</button>
+      <button class="btn" id="pr_sl_plan" type="button" disabled>Проверить модель</button>
+      <button class="btn primary" id="pr_sl_slice" type="button" disabled>Нарезать</button>
+      <small id="pr_sl_status" class="muted"></small>
+     </div>
+     <div id="pr_sl_gpu" class="pr-sl-gpu" hidden></div>
+     <div id="pr_sl_result" hidden></div>
+     <div id="pr_sl_actions" class="pr-slicer-row" hidden></div>
+    </div>
+   </section>
+   <div class="pr-slicer-side">
+    <a class="card pr-farmloop-card pr-farmloop-link" id="pr_farmloop" href="#conveyor" data-view="conveyor" aria-live="polite">
+     <div class="pr-farmloop-mark" aria-hidden="true">↻</div>
+     <div class="pr-farmloop-main"><div class="card-kicker">FARMLOOP · СЕРИЙНАЯ ПЕЧАТЬ</div><h3>Конвейер</h3><p id="pr_farmloop_text">Проверяем профиль и готовность…</p></div>
+     <span id="pr_farmloop_tag" class="tag">Проверяем</span>
+    </a>
+    <section class="card pr-watch-card" id="pr_watch" aria-live="polite">
+     <div class="pr-watch-top">
+      <div class="pr-watch-mark" aria-hidden="true">⇪</div>
+      <div class="pr-watch-main"><div class="card-kicker">BAMBU STUDIO / ORCASLICER</div><h3>Импорт в очередь</h3><p id="pr_watch_text">Проверяем папку…</p><small id="pr_watch_meta" class="muted"></small></div>
+      <span id="pr_watch_tag" class="tag">Проверяем</span>
+     </div>
+     <div class="pr-slicer-row">
+      <button class="btn primary" id="pr_watch_enable" type="button" hidden>Включить импорт</button>
+      <button class="btn" id="pr_watch_disable" type="button" hidden>Выключить</button>
+      <button class="btn" id="pr_watch_ensure" type="button" hidden>Создать папку</button>
+      <small id="pr_watch_status" class="muted"></small>
+     </div>
+    </section>
+   </div>
+  </div>
+ </section>
+
+ <section class="pr-panel" id="pr_panel_tools" role="tabpanel" aria-labelledby="pr_tab_tools" data-pr-panel="tools" hidden>
+  <div class="pr-section-intro"><div><span class="card-kicker">МАРКИРОВКА</span><h2>Штрихкод и подготовка тиража</h2><p>Проверьте код и настройки масштаба перед печатью партии.</p></div></div>
+  <div class="pr-tools-layout">
+   <section class="card pr-barcode-card">
+    <div class="card-head"><div><span class="card-kicker">CODE 128</span><h2>Проверка штрихкода</h2><p>Введите артикул, номер или цену — панель проверит код и покажет его вид.</p></div></div>
+    <div class="pr-row"><label class="sr-only" for="pr_bc_text">Текст штрихкода</label><input id="pr_bc_text" class="field" placeholder="Например, 199.90 или SKU-042" aria-label="Текст штрихкода"><button class="btn primary" id="pr_bc_gen" type="button">Построить</button></div>
+    <div id="pr_bc_out" class="pr-barcode-out" aria-live="polite">Введите код, чтобы проверить сканирование и контрольную сумму.</div>
+   </section>
+   <details class="card pr-hint-card">
+    <summary><span><span class="card-kicker">ПЕРЕД ПЕЧАТЬЮ</span><b>Проверка масштаба и бумаги</b></span><span class="pr-hint-toggle" aria-hidden="true">＋</span></summary>
+    <ul class="pr-checklist">
+     <li>Печатайте в масштабе <b>100 %</b>, без «вписать в страницу».</li>
+     <li>На листе есть линейка <b>100 мм</b> — сверьте её после первого отпечатка.</li>
+     <li>Проверьте QR телефоном, прежде чем печатать весь тираж.</li>
+     <li>Самоклеящаяся бумага и плёнка сохнут 10–15 минут.</li>
+    </ul>
+   </details>
+  </div>
+ </section>
 </section>
 
 <!-- ============================================== КОНВЕЙЕР (FarmLoop) -->
@@ -4168,6 +4220,13 @@
 </section>
 
  </main>
+ <nav id="mobile_nav" aria-label="Основные разделы">
+  <a href="#dashboard" data-view="dashboard">Сегодня</a>
+  <a href="#orders" data-view="orders">Заказы</a>
+  <a href="#printers" data-view="printers">Принтеры</a>
+  <a href="/assistant.html">Помощник</a>
+  <button type="button" id="mobile_more" aria-controls="side" aria-expanded="false">Ещё</button>
+ </nav>
 </div>
 </div>
 
@@ -5635,37 +5694,37 @@
 
 <div id="toasts"></div>
 
-<script src="assets/qr.js?v=17.0.1"></script>
-<script src="assets/core.js?v=18.21.0"></script>
-<script src="assets/colors.js?v=18.6.0"></script>
-<script src="assets/icons.js?v=18.21.0"></script>
-<script src="assets/sound.js?v=18.21.0"></script>
-<script src="assets/knob.js?v=18.21.0"></script>
-<script src="assets/amspath.js?v=18.21.0"></script>
-<script src="assets/layers.js?v=18.21.0"></script>
-<script src="assets/incidents.js?v=18.21.0"></script>
-<script src="assets/gpuslice.js?v=18.21.0"></script>
-<script src="assets/printer.js?v=18.21.0"></script>
-<script src="assets/ams-autopilot.js?v=18.21.0"></script>
-<script src="assets/queue.js?v=17.0.1"></script>
-<script src="assets/ops.js?v=18.6.0"></script>
-<script src="assets/money.js?v=18.7.0"></script>
-<script src="assets/finance.js?v=17.0.6"></script>
-<script src="assets/shelf.js?v=17.0.2"></script>
-<script src="assets/products.js?v=18.6.0"></script>
-<script src="assets/bridge.js?v=17.0.1"></script>
+<script src="assets/qr.js?v=18.23.1"></script>
+<script src="assets/core.js?v=18.23.1"></script>
+<script src="assets/colors.js?v=18.23.1"></script>
+<script src="assets/icons.js?v=18.23.1"></script>
+<script src="assets/sound.js?v=18.23.1"></script>
+<script src="assets/knob.js?v=18.23.1"></script>
+<script src="assets/amspath.js?v=18.23.1"></script>
+<script src="assets/layers.js?v=18.23.1"></script>
+<script src="assets/incidents.js?v=18.23.1"></script>
+<script src="assets/gpuslice.js?v=18.23.1"></script>
+<script src="assets/printer.js?v=18.23.1"></script>
+<script src="assets/ams-autopilot.js?v=18.23.1"></script>
+<script src="assets/queue.js?v=18.23.1"></script>
+<script src="assets/ops.js?v=18.23.1"></script>
+<script src="assets/money.js?v=18.23.1"></script>
+<script src="assets/finance.js?v=18.23.1"></script>
+<script src="assets/shelf.js?v=18.23.1"></script>
+<script src="assets/products.js?v=18.23.1"></script>
+<script src="assets/bridge.js?v=18.23.1"></script>
 <!-- 14.0 (47): print.js грузится лениво при первом входе в раздел -->
 <!-- 14.0 (47): clientbot.js грузится лениво при первом входе в раздел -->
-<script src="assets/workshop.js?v=18.7.0"></script>
-<script src="assets/app.js?v=18.21.0"></script>
-<script type="module" src="assets/dist/printflow-app.js?v=17.0.1"></script>
+<script src="assets/workshop.js?v=18.23.1"></script>
+<script src="assets/app.js?v=18.23.1"></script>
+<script type="module" src="assets/dist/printflow-app.js?v=18.23.1"></script>
 <!-- 14.0 (47): ops10.js грузится лениво при первом входе в раздел -->
 <script>
 /* Служебный воркер: мгновенный старт панели и работа при мигании сети.
    Регистрируется только там, где браузер это разрешает (localhost/HTTPS). */
 if ('serviceWorker' in navigator && window.isSecureContext) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js').catch(() => {});
+    navigator.serviceWorker.register('/sw.js?v=18.23.1').catch(() => {});
   });
 }
 </script>
@@ -5686,3 +5745,5 @@ if ('serviceWorker' in navigator && window.isSecureContext) {
  </div>
 </dialog>
 </body></html>
+
+

@@ -28,20 +28,33 @@ function hoursText(h) {
   return hh ? `${hh} ч ${mm ? mm + ' мин' : ''}`.trim() : `${mm} мин`;
 }
 function minutesText(m) { return hoursText(num(m) / 60); }
+function parseDate(iso) {
+  if (iso === null || iso === undefined || iso === '') return new Date(NaN);
+  const numeric = typeof iso === 'number'
+    || (typeof iso === 'string' && /^\d{9,13}(?:\.\d+)?$/.test(iso.trim()));
+  if (numeric) {
+    const value = Number(iso);
+    if (!Number.isFinite(value)) return new Date(NaN);
+    return new Date(Math.abs(value) < 1e12 ? value * 1000 : value);
+  }
+  return new Date(iso);
+}
 function dateText(iso) {
   if (!iso) return '—';
-  const d = new Date(iso.length <= 10 ? iso + 'T00:00:00' : iso);
+  const d = typeof iso === 'string' && iso.length <= 10
+    ? new Date(iso + 'T00:00:00') : parseDate(iso);
   return isNaN(d) ? String(iso) : d.toLocaleDateString('ru-RU', { day: '2-digit', month: 'short' });
 }
 function dateTimeText(iso) {
   if (!iso) return '—';
-  const d = new Date(iso);
+  const d = parseDate(iso);
   return isNaN(d) ? String(iso) : d.toLocaleString('ru-RU',
     { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
 }
 function agoText(iso) {
   if (!iso) return 'нет данных';
-  const sec = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
+  const d = parseDate(iso);
+  const sec = Math.max(0, (Date.now() - d.getTime()) / 1000);
   if (!Number.isFinite(sec)) return '—';
   if (sec < 10) return 'только что';
   if (sec < 60) return `${Math.round(sec)} сек. назад`;
@@ -75,8 +88,12 @@ const debounce = (fn, ms = 260) => { let t; return (...a) => { clearTimeout(t); 
    составные («3 ч 20 мин») и отключенная анимация — значение ставится сразу. */
 const MOTION_OFF = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)');
 const NUM_WITH_TAIL = /^([\d\u00a0\u202f\s.,\-]+)(\D*)$/;
+const countUpFrames = new WeakMap();
 function countUp(el, prevText, nextText, duration = 480) {
   if (!el) return;
+  const previousFrame = countUpFrames.get(el);
+  if (previousFrame) cancelAnimationFrame(previousFrame);
+  countUpFrames.delete(el);
   const a = NUM_WITH_TAIL.exec(String(prevText || '').trim());
   const b = NUM_WITH_TAIL.exec(String(nextText || '').trim());
   if (!a || !b) return;
@@ -91,10 +108,13 @@ function countUp(el, prevText, nextText, duration = 480) {
     const k = Math.min(1, (t - t0) / duration);
     const eased = 1 - Math.pow(1 - k, 3);           // easeOutCubic: старт живой, финиш спокойный
     el.textContent = fmt(from + (to - from) * eased);
-    if (k < 1) requestAnimationFrame(step);
-    else el.textContent = nextText;                 // финал — ровно серверное значение
+    if (k < 1) countUpFrames.set(el, requestAnimationFrame(step));
+    else {
+      countUpFrames.delete(el);
+      el.textContent = nextText;                    // финал — ровно серверное значение
+    }
   };
-  requestAnimationFrame(step);
+  countUpFrames.set(el, requestAnimationFrame(step));
 };
 
 /** Безопасный доступ к localStorage: файл:// и приватный режим его блокируют. */
@@ -691,6 +711,7 @@ PF.on = (name, fn) => PF.bus.addEventListener(name, (e) => fn(e.detail));
    у них не сработает никогда. PF.onReady вызывает fn сразу, если панель
    уже поднята, и честно ждёт события, если ещё нет. */
 PF.ready = false;
+PF.dataReady = false;
 PF.onReady = (fn) => {
   if (PF.ready) { fn(); return; }
   PF.on('ready', fn);
@@ -702,7 +723,7 @@ PF.onReady = (fn) => {
    регистрирует инициализацию через PF.module(name, init); загрузчик
    поднимает файл с тем же пином версии, что и остальные ассеты. */
 const ASSET_VERSION = (() => {
-  const tag = document.querySelector('script[src*="assets/"][src*="?v="]');
+  const tag = document.querySelector('script[src*="assets/core.js"][src*="?v="]');
   const match = tag && /[?&]v=([^&]+)/.exec(tag.getAttribute('src') || '');
   return match ? match[1] : '';
 })();
@@ -970,6 +991,7 @@ const VIEWS = {
   queue: { title: 'Очередь печати', sub: 'Задания парка и журнал печати' },
   conveyor: { title: 'Конвейер', sub: 'FarmLoop Stage 1: допуски, датчики и история серии' },
   orders: { title: 'Заказы', sub: 'Канбан, сроки и экономика заказов' },
+  ops10: { title: 'Центр смены', sub: 'Обращения, производство и безопасные правила' },
   customers: { title: 'Клиенты', sub: 'История покупок и сегменты' },
   products: { title: 'Товары', sub: 'Номенклатура, остатки, цены и экономика' },
   batches: { title: 'Партии печати', sub: 'Производство на склад и автоприход' },
@@ -1042,13 +1064,18 @@ function showView(name, sub) {
       if (more) more.open = true;
     }
   });
+  $$('#mobile_nav a[data-view]').forEach((a) => {
+    if (a.dataset.view === name) a.setAttribute('aria-current', 'page');
+    else a.removeAttribute('aria-current');
+  });
+  const mobileMore = $('mobile_more');
+  if (mobileMore) mobileMore.classList.toggle('on', !['dashboard', 'orders', 'printers'].includes(name));
   syncStockTabs(name);
   $('top_title').textContent = VIEWS[name].title;
   $('top_sub').textContent = VIEWS[name].sub;
   document.title = `${VIEWS[name].title} · NOZZA`;
   resetViewScroll();
-  $('side').classList.remove('show');
-  const scrim = $('scrim'); if (scrim) scrim.remove();
+  closeSide();
   PF.emit('view', { view: name, sub });
   // Идея 47: раздел может жить в отдельном файле, который грузится при
   // первом входе. После загрузки повторяем событие — модуль отрисуется.
@@ -1110,7 +1137,7 @@ if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
 window.addEventListener('hashchange', routeFromHash);
 
 /* ============================================================== тема
-   17.0 (решение №1): по умолчанию ТЁМНАЯ. Выбор пользователя живёт в
+   D01: по умолчанию СВЕТЛАЯ. Выбор пользователя живёт в
    настройках (theme) и зеркалируется в localStorage('pf_theme'), чтобы
    единая тема действовала на всех LAN-страницах (theme-init.js в <head>). */
 function themePref() {
@@ -1118,7 +1145,7 @@ function themePref() {
   if (s === 'system' || s === 'light' || s === 'dark') return s;
   const ls = store.get('pf_theme', '');
   if (ls === 'system' || ls === 'light' || ls === 'dark') return ls;
-  return 'dark';                              // дефолт 17.0 — тёмная
+  return 'light';                             // дефолт D01 — светлая
 }
 function applyTheme() {
   const pref = themePref();
@@ -1369,13 +1396,37 @@ document.addEventListener('click', (e) => {
 });
 $('burger').addEventListener('click', () => {
   const side = $('side');
-  side.classList.toggle('show');
-  if (side.classList.contains('show')) {
+  if (side.classList.contains('show')) { closeSide(); return; }
+  side.classList.add('show');
+  $('burger').setAttribute('aria-expanded', 'true');
+  const more = $('mobile_more'); if (more) more.setAttribute('aria-expanded', 'true');
+  if (!$('scrim')) {
     const scrim = document.createElement('div');
     scrim.id = 'scrim';
-    scrim.addEventListener('click', () => { side.classList.remove('show'); scrim.remove(); });
+    scrim.addEventListener('click', closeSide);
     document.body.appendChild(scrim);
-  } else { const s = $('scrim'); if (s) s.remove(); }
+  }
+  $('nav_find').focus();
+});
+function closeSide() {
+  $('side').classList.remove('show');
+  $('burger').setAttribute('aria-expanded', 'false');
+  const more = $('mobile_more'); if (more) more.setAttribute('aria-expanded', 'false');
+  const scrim = $('scrim'); if (scrim) scrim.remove();
+}
+const mobileMore = $('mobile_more');
+if (mobileMore) mobileMore.addEventListener('click', () => $('burger').click());
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && $('side').classList.contains('show')) {
+    closeSide();
+    (window.innerWidth <= 700 ? mobileMore : $('burger')).focus();
+    return;
+  }
+  const orderFilters = $('orders_more_filters');
+  if (e.key === 'Escape' && orderFilters && orderFilters.open) {
+    orderFilters.open = false;
+    orderFilters.querySelector('summary').focus();
+  }
 });
 const STOCK_TABS = [
   { id: 'products', label: 'Товары', icon: '📦' },
@@ -1440,7 +1491,12 @@ if (navFind) {
   navFind.addEventListener('keydown', (e) => {
     if (e.key !== 'Enter') return;
     const first = $$('#side .nav-link').find((a) => !a.hidden);
-    if (first) { e.preventDefault(); PF.go(first.dataset.view); navFind.value = ''; filterNav(''); }
+    if (first) {
+      e.preventDefault();
+      if (first.dataset.view) PF.go(first.dataset.view);
+      else first.click();
+      navFind.value = ''; filterNav('');
+    }
   });
 }
 
@@ -1479,6 +1535,7 @@ async function refreshCore() {
   PF.state.nomenclature = nomenclature.items || [];
   PF.state.groups = nomenclature.groups || [];
   PF.state.warehouses = nomenclature.warehouses || [];
+  PF.dataReady = true;
   PF.emit('data');
 }
 PF.refreshCore = refreshCore;
@@ -1642,6 +1699,14 @@ PF.poll = poll;
 
 /* ============================================================== старт */
 async function start() {
+  const retry = $('offline_retry');
+  if (retry) retry.addEventListener('click', async () => {
+    retry.disabled = true;
+    retry.textContent = 'Проверяем…';
+    try { await bootstrap(); await refreshCore(); }
+    catch (e) { setOffline(true, 'Проверьте соединение и повторите'); }
+    finally { retry.disabled = false; retry.textContent = 'Повторить'; }
+  });
   routeFromHash();
   try {
     await bootstrap();

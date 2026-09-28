@@ -12,10 +12,10 @@
    по обычному http с телефона браузер его не разрешает — это ограничение
    браузеров, а не PrintFlow. Панель на телефоне работает и без него. */
 
-const CACHE = 'printflow-shell-v92';
+const CACHE = 'printflow-shell-v105';
 /* Оболочка панели: всё, без чего интерфейс не соберётся офлайн.
-   Список сверяется с index.html тестом test_pwa_shell — если в разметку
-   добавили скрипт или стиль, проверка упадёт и напомнит внести его сюда.
+   Список сверяется с index.html проверкой scripts/check.py — если в разметку
+   добавили скрипт или стиль, проверка напомнит внести его сюда.
    Раньше список вёлся вручную и разошёлся: bridge.js, ops10.js,
    workshop.js и gcode-viewer.js не кэшировались, и офлайн-панель падала
    на первом же незагруженном модуле. */
@@ -46,6 +46,7 @@ const SHELL = [
   '/assets/app.css',
   '/assets/more.css',
   '/assets/controls.css',
+  '/assets/refine.css',
   '/assets/core.js',
   '/assets/colors.js',
   '/assets/icons.js',
@@ -84,8 +85,8 @@ const SHELL = [
 self.addEventListener('install', (event) => {
   event.waitUntil((async () => {
     const cache = await caches.open(CACHE);
-    // Один недоступный файл не должен рушить установку целиком.
-    await Promise.all(SHELL.map((url) => cache.add(url).catch(() => {})));
+    // Пока новая оболочка неполная, старый воркер продолжает обслуживать панель.
+    await Promise.all(SHELL.map((url) => cache.add(url)));
     await self.skipWaiting();
   })());
 });
@@ -93,7 +94,8 @@ self.addEventListener('install', (event) => {
 self.addEventListener('activate', (event) => {
   event.waitUntil((async () => {
     const names = await caches.keys();
-    await Promise.all(names.filter((name) => name !== CACHE).map((name) => caches.delete(name)));
+    await Promise.all(names.filter((name) => name.startsWith('printflow-shell-') && name !== CACHE)
+      .map((name) => caches.delete(name)));
     await self.clients.claim();
   })());
 });
@@ -117,10 +119,12 @@ self.addEventListener('fetch', (event) => {
       }
       return response;
     } catch (error) {
-      const cached = await caches.match(request);
+      const cache = await caches.open(CACHE);
+      // SHELL хранит /assets/app.css, а HTML просит /assets/app.css?v=… .
+      const cached = await cache.match(url.pathname) || await cache.match(request);
       if (cached) return cached;
       if (request.mode === 'navigate') {
-        const shell = await caches.match('/index.html');
+        const shell = await cache.match('/index.html');
         if (shell) return shell;
       }
       throw error;

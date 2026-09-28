@@ -391,7 +391,7 @@ class I4PageTests(unittest.TestCase):
         scripts = re.findall(r"<script>(.*?)</script>", self.page, re.S)
         inline = max(scripts, key=len)
         with tempfile.NamedTemporaryFile("w", suffix=".js",
-                                         delete=False) as tmp:
+                                         delete=False, encoding="utf-8") as tmp:
             tmp.write(inline)
             name = tmp.name
         try:

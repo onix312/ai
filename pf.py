@@ -128,6 +128,13 @@ class Style:
 def say(text: str = "", *codes: str) -> None:
     # flush обязателен: вывод часто уходит в трубу (окно лаунчера, журнал),
     # а пользователь должен видеть адреса сразу, а не после остановки.
+    # Windows может выбрать cp1251/cp866, где не помещаются символы панели.
+    # Подменяем только неподдерживаемые знаки, не меняя язык вывода.
+    if hasattr(sys.stdout, "reconfigure"):
+        try:
+            sys.stdout.reconfigure(errors="replace")
+        except (OSError, ValueError):
+            pass
     print(Style.paint(text, *codes), flush=True)
 
 

@@ -180,9 +180,11 @@ def assistant_phrase(api: Any, ctx: Ctx):
     from . import assistant as service
 
     body = ctx.body if isinstance(ctx.body, dict) else {}
-    text = " ".join(str(body.get("text") or "").split())[:1000]
+    text = " ".join(str(body.get("text") or "").split())
     if not text:
         return 400, {"ok": False, "error": "Пустая фраза"}
+    if len(text) > 1000:
+        return 400, {"ok": False, "error": "Фраза слишком длинная: не больше 1000 символов"}
     source = str(body.get("source") or "agent")[:60]
     event = service.journal(api.db, "phrase", "Фраза голосом", "heard", text,
                             {"source": source})
@@ -213,12 +215,21 @@ def assistant_chat(api: Any, ctx: Ctx):
     from . import assistant_brain as brain
 
     body = ctx.body if isinstance(ctx.body, dict) else {}
-    text = " ".join(str(body.get("text") or body.get("question") or "").split())[:1000]
+    if body.get("contract_version", 1) != 1:
+        return 400, {"ok": False, "error": "Неподдерживаемая версия контракта помощника"}
+    text = " ".join(str(body.get("text") or body.get("question") or "").split())
     if not text:
         return 400, {"ok": False, "error": "Пустая фраза"}
+    if len(text) > 1000:
+        return 400, {"ok": False, "error": "Сообщение слишком длинное: не больше 1000 символов. "
+                                         "Большой текст загрузите как документ."}
+    request_id = str(body.get("request_id") or "").strip()
+    if not request_id or len(request_id) > 80 or not all(c.isalnum() or c in "_.:-" for c in request_id):
+        request_id = ""
     return brain.chat(api, text, session=str(body.get("session") or "main"),
                       source=str(body.get("source") or "panel")[:40],
-                      delegate=body.get("delegate", True) is not False)
+                      delegate=body.get("delegate", True) is not False,
+                      request_id=request_id)
 
 
 @router.get("/api/assistant/memory", doc="Помощник: что помнит помощник")

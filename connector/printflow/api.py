@@ -230,7 +230,8 @@ class Api:
             listen_port=int(getattr(self, "listen_port", DEFAULT_PORT) or DEFAULT_PORT))
 
     def _ams_slot_num(self, tray: dict) -> int:
-        return int(num(tray.get("unit"))) * 4 + int(num(tray.get("slot")))
+        from .ams_sync import slot_number
+        return slot_number(tray)
 
     def suggest_spool_slot(self, spool: dict) -> dict:
         """Свободный или активный слот AMS — чтобы с телефона не угадывать номер."""
@@ -2630,6 +2631,13 @@ class Api:
             # превращается в 0 молча, а значение вне диапазона режется.
             from . import settings_schema
             patch, schema_warnings, unknown_keys = settings_schema.validate(patch)
+            if patch.get("demo_printer_enabled") in (False, 0, "0"):
+                virtual_jobs = self.db.one(
+                    "SELECT COUNT(*) AS n FROM print_jobs WHERE printer_id='virtual' "
+                    "AND state IN ('queued','starting','running')") or {}
+                if int(virtual_jobs.get("n") or 0):
+                    return 409, {"error": "Сначала завершите или отмените задания "
+                                 "очереди виртуального принтера P1S."}
             if unknown_keys:
                 from .logging_setup import log
                 log().warning("Настройки: проигнорированы неизвестные ключи: %s",
@@ -2643,6 +2651,8 @@ class Api:
             if set(patch) & {"ftps_timeout", "ftps_retries", "ftps_block_kb",
                              "mqtt_keepalive", "mqtt_backoff"}:
                 self.manager.reload()
+            if "demo_printer_enabled" in patch:
+                self.manager.sync_virtual_printer()
             studio_keys = {
                 "studio_gateway_enabled", "studio_gateway_name", "studio_gateway_mode",
                 "studio_gateway_autostart", "studio_gateway_serial",

@@ -116,6 +116,10 @@ class StudioGatewayTests(unittest.TestCase):
         self.assertEqual(DEV_MODELS["P1S"], "C12")
         self.assertEqual(DEV_MODELS["X1C"], "BL-P001")
 
+    def test_legacy_printer_mode_keeps_queue_behavior(self):
+        self.db.set_settings({"studio_gateway_mode": "printer"})
+        self.assertEqual(self.gw._mode(), "queue")
+
     def test_library_schema_on_fresh_db(self):
         tables = {r["name"] for r in self.db.query(
             "SELECT name FROM sqlite_master WHERE type='table'")}
@@ -268,13 +272,14 @@ class StudioGatewayTests(unittest.TestCase):
 
     def test_slicer_honest_refusal(self):
         from connector.printflow.slicer import SlicerError, slice_file, status
-        st = status("/no/such/orca-slicer")
-        self.assertFalse(st["available"])
-        self.assertIn("не найден", st["error"].lower())
-        stl = self.tmp / "part.stl"
-        stl.write_bytes(b"solid x\nendsolid x\n")
-        with self.assertRaises(SlicerError):
-            slice_file(stl, explicit_bin="/no/such/orca-slicer")
+        with mock.patch("connector.printflow.slicer.find_slicer_bin", return_value=""):
+            st = status("/no/such/orca-slicer")
+            self.assertFalse(st["available"])
+            self.assertIn("не найден", st["error"].lower())
+            stl = self.tmp / "part.stl"
+            stl.write_bytes(b"solid x\nendsolid x\n")
+            with self.assertRaises(SlicerError):
+                slice_file(stl, explicit_bin="/no/such/orca-slicer")
 
     def test_api_studio_library_slicer(self):
         from connector.printflow.library import FileLibrary

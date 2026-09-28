@@ -294,6 +294,69 @@ class VirtualPrinterTests(unittest.TestCase):
         self.assertEqual(trays[0]["slot"], 2)
         vp.shutdown()
 
+    def test_virtual_commands_validate_and_update_snapshot(self):
+        vp = self._vp([])
+        vp.command("light", "on")
+        self.assertEqual(vp.snapshot()["light"], "on")
+        vp.command("light", "off")
+        self.assertEqual(vp.snapshot()["light"], "off")
+        vp.command("speed", 4)
+        self.assertEqual(vp.snapshot()["printer"]["speed_label"], "Ludicrous")
+        self.assertEqual(vp.snapshot()["printer"]["speed_percent"], 166)
+        vp.command("nozzle_temp", 230)
+        vp.command("part_fan", 40)
+        self.assertEqual(vp.snapshot()["temperature"]["nozzle_target"], 230.0)
+        self.assertEqual(vp.snapshot()["fans"]["part"], 40)
+        vp.command("nozzle_temp", 0)
+        self.assertEqual(vp.snapshot()["temperature"]["nozzle"], 25.0)
+        with self.assertRaises(ValueError):
+            vp.command("speed", 5)
+        self.assertFalse(vp.command("home")["ok"])
+        vp.shutdown()
+
+    def test_finish_state_survives_job_finalization(self):
+        vp = self._vp([])
+        vp.start_print("test.3mf")
+        vp._started_ts = time.time() - 1  # noqa: SLF001
+        vp._tick()
+        self.assertEqual(vp._state, "FINISH")  # noqa: SLF001
+        self.db.execute("UPDATE print_jobs SET state='done' WHERE id='job1'")
+        vp._tick()
+        self.assertEqual(vp.snapshot()["printer"]["state"], "FINISH")
+        vp._finish_at = time.time() - 4  # noqa: SLF001
+        vp._tick()
+        self.assertEqual(vp.snapshot()["printer"]["state"], "IDLE")
+        vp.shutdown()
+
+
+class DemoPrinterSettingsTests(unittest.TestCase):
+    def setUp(self):
+        self.db = make_db()
+        self.api = make_api(self.db)
+        self.api.manager = types.SimpleNamespace(printers={}, bot=None,
+                                                 reload=mock.Mock(), sync_virtual_printer=mock.Mock(),
+                                                 studio=None)
+
+    def tearDown(self):
+        self.db.close()
+
+    def test_enable_is_live_and_disable_protects_queued_jobs(self):
+        code, payload = self.api.post("/api/settings", {"demo_printer_enabled": True}, {})
+        self.assertEqual(code, 200)
+        self.assertTrue(payload["settings"]["demo_printer_enabled"])
+        self.api.manager.sync_virtual_printer.assert_called_once_with()
+        self.db.upsert("print_jobs", {"id": "virtual-queued", "printer_id": "virtual",
+                                       "state": "queued", "name": "Тестовая печать"})
+        code, payload = self.api.post("/api/settings", {"demo_printer_enabled": False}, {})
+        self.assertEqual(code, 409)
+        self.assertIn("отмените задания", payload["error"])
+        self.assertTrue(self.db.setting("demo_printer_enabled"))
+        self.db.execute("UPDATE print_jobs SET state='cancelled' WHERE id='virtual-queued'")
+        code, payload = self.api.post("/api/settings", {"demo_printer_enabled": False}, {})
+        self.assertEqual(code, 200)
+        self.assertFalse(payload["settings"]["demo_printer_enabled"])
+        self.assertEqual(self.api.manager.sync_virtual_printer.call_count, 2)
+
 
 class SpaghettiExtTests(unittest.TestCase):
     def test_first_layer_decision(self):

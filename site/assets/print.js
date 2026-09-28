@@ -26,6 +26,7 @@ const GPU_AUTO_MB = 30;       // модели до этого размера р�
 let slicerModels = [];        // модели STL из библиотеки
 let slicerSpools = [];        // 18.8: катушки склада пластика для нарезки
 let slicerLast = null;        // результат последней нарезки: {output, stem, report, machine}
+let formGroupFilter = 'all';
 
 /* ============================================================ окно печати */
 /* Печать серверного листа. Своё окно, а не iframe: браузер печатает его
@@ -68,7 +69,7 @@ function sourceField(name, spec) {
   }
   // Заказ выбирается по номеру: в цехе его называют именно так.
   const list = (PF.state.orders || []).map((o) =>
-    `<option value="${esc(o.id)}">№${esc(o.number || o.id)} · ${esc(o.title || o.item || '')}</option>`).join('');
+    `<option value="${esc(o.id)}">№${esc(o.number || o.id)} · ${esc(o.product || o.title || o.item || '')}</option>`).join('');
   return `<label class="pr-field"><span>${esc(spec.title || name)}</span>`
     + `<select class="field" data-opt="${esc(name)}" data-source="orders"${spec.required ? ' data-required="1"' : ''}>`
     + `<option value="">— выберите заказ —</option>${list}</select></label>`;
@@ -92,6 +93,8 @@ function cardHtml(form) {
   const options = form.options || {};
   const controls = Object.keys(options).map((name) => fieldHtml(name, options[name])).join('');
   const isApi = form.kind === 'api' && form.api;
+  const searchText = [form.title, form.group, form.note, form.size, form.paper, form.source, form.api]
+    .filter(Boolean).join(' ').toLowerCase();
   // Кнопка, путь к форме и блок полей — уже готовая разметка: экранируем
   // значения внутри, а сюда подставляем через raw(), иначе шаблон ядра
   // заэкранирует сам тег.
@@ -99,9 +102,8 @@ function cardHtml(form) {
     ? `<button class="btn primary" type="button" data-print="${esc(form.id)}">Печать листа</button>`
     : `<a class="btn" href="${esc(form.page || '#print')}" target="_blank" rel="noopener">Открыть страницу →</a>`;
   const controlsBlock = controls ? `<div class="pr-card-controls">${controls}</div>` : '';
-  const pathBlock = isApi ? `<span class="pr-card-path">${esc(form.api)}</span>` : '';
   return html`
-   <article class="pr-card" data-form="${form.id}">
+   <article class="pr-card" data-form="${esc(form.id)}" data-search="${esc(searchText)}">
     <div class="pr-card-head">
      <div><span class="card-kicker">${form.group}</span><h2>${form.title}</h2></div>
      <span class="tag">${form.size}</span>
@@ -113,9 +115,7 @@ function cardHtml(form) {
      <div><dt>Данные</dt><dd>${form.source}</dd></div>
     </dl>
     ${raw(controlsBlock)}
-    <div class="pr-card-foot">${raw(action)}
-     ${raw(pathBlock)}
-    </div>
+    <div class="pr-card-foot">${raw(action)}</div>
    </article>`;
 }
 
@@ -568,14 +568,54 @@ function renderKpis() {
   const stickers = forms.find((f) => f.id === 'stickers');
   const kinds = stickers && stickers.options && stickers.options.kind
     ? Math.max(0, (stickers.options.kind.choices || []).length - 1) : 0;
-  const sizes = stickers && stickers.options && stickers.options.size
-    ? (stickers.options.size.choices || []).length : 0;
   render(host, [
-    ['Форм в каталоге', forms.length, groups.length + ' групп цеха'],
-    ['Шаблонов стикеров', kinds, sizes + ' размеров наклейки'],
-    ['На листе A4', '100 %', 'линейка для проверки масштаба'],
-  ].map(([label, value, sub]) =>
-    `<div class="kpi"><small>${esc(label)}</small><b class="value">${typeof value === 'number' ? nfmt(value) : esc(value)}</b><span class="sub">${esc(sub)}</span></div>`).join(''));
+    `<span class="pr-stat"><b>${nfmt(forms.length)}</b><span>форм</span></span>`,
+    `<span class="pr-stat"><b>${nfmt(groups.length)}</b><span>разделов</span></span>`,
+    `<span class="pr-stat"><b>${nfmt(kinds)}</b><span>шаблонов стикеров</span></span>`,
+    '<span class="pr-stat pr-stat-note"><b>100 %</b><span>масштаб листа A4</span></span>',
+  ].join(''));
+}
+
+function renderGroupFilters() {
+  const host = $('pr_category_filters');
+  if (!host) return;
+  const counts = new Map(groups.map((group) => [group, forms.filter((form) => form.group === group).length]));
+  if (formGroupFilter !== 'all' && !counts.has(formGroupFilter)) formGroupFilter = 'all';
+  const filterButton = (key, label, count) =>
+    `<button class="pr-filter-chip${formGroupFilter === key ? ' on' : ''}" type="button"`
+    + ` data-pr-filter="${esc(key)}" aria-pressed="${formGroupFilter === key}">`
+    + `${esc(label)} <span>${nfmt(count)}</span></button>`;
+  host.innerHTML = filterButton('all', 'Все формы', forms.length)
+    + groups.map((group) => filterButton(group, group, counts.get(group) || 0)).join('');
+}
+
+function applyCatalogFilters() {
+  const host = $('pr_forms');
+  if (!host) return;
+  const query = String(($('pr_search') || {}).value || '').trim().toLocaleLowerCase('ru');
+  let visible = 0;
+  Array.from(host.querySelectorAll('.pr-group')).forEach((section) => {
+    let inSection = 0;
+    const groupMatches = formGroupFilter === 'all' || section.dataset.group === formGroupFilter;
+    section.querySelectorAll('.pr-card').forEach((card) => {
+      const matches = groupMatches && (!query || String(card.dataset.search || '').includes(query));
+      card.hidden = !matches;
+      if (matches) { inSection += 1; visible += 1; }
+    });
+    section.hidden = inSection === 0;
+  });
+  const count = $('pr_result_count');
+  if (count) count.textContent = forms.length
+    ? (visible === forms.length ? `Все ${nfmt(forms.length)} форм` : `Показано ${nfmt(visible)} из ${nfmt(forms.length)}`)
+    : 'Форм пока нет';
+  const empty = $('pr_filter_empty');
+  if (empty) empty.hidden = visible > 0 || forms.length === 0;
+  const filters = $('pr_category_filters');
+  if (filters) filters.querySelectorAll('[data-pr-filter]').forEach((button) => {
+    const selected = button.dataset.prFilter === formGroupFilter;
+    button.classList.toggle('on', selected);
+    button.setAttribute('aria-pressed', String(selected));
+  });
 }
 
 function renderCatalog() {
@@ -586,21 +626,27 @@ function renderCatalog() {
     tag.textContent = forms.length ? `${forms.length} форм` : '';
     tag.hidden = !forms.length;
   }
+  const tabCount = $('pr_tab_forms_count');
+  if (tabCount) tabCount.textContent = String(forms.length);
   renderKpis();
   if (!forms.length) {
     render(host, '<div class="empty pr-empty"><span class="big">▤</span><b>Каталог пока пуст</b>'
       + '<span>Сервер не отдал ни одной формы. Проверьте журнал коннектора и попробуйте ещё раз.</span>'
       + '<button class="btn sm" type="button" data-print-retry>Повторить загрузку</button></div>');
+    renderGroupFilters();
+    applyCatalogFilters();
     return;
   }
   // Группы идут в том порядке, в каком их отдал реестр: это порядок работы цеха.
   const blocks = groups.map((group) => {
     const items = forms.filter((f) => f.group === group).map(cardHtml).join('');
-    return `<section class="pr-group"><div class="pr-group-title">${esc(group)}</div>`
+    return `<section class="pr-group" data-group="${esc(group)}"><div class="pr-group-title">${esc(group)}</div>`
       + `<div class="pr-group-grid">${items}</div></section>`;
   }).join('');
   render(host, blocks);
+  renderGroupFilters();
   fillSources();
+  applyCatalogFilters();
 }
 
 /* Справочники панели живут в состоянии: если клиенты или заказы приехали
@@ -610,7 +656,7 @@ function fillSources() {
   $$('#pr_forms select[data-source="orders"]').forEach((select) => {
     const value = select.value;
     const list = (PF.state.orders || []).map((o) =>
-      `<option value="${esc(o.id)}">№${esc(o.number || o.id)} · ${esc(o.title || o.item || '')}</option>`).join('');
+      `<option value="${esc(o.id)}">№${esc(o.number || o.id)} · ${esc(o.product || o.title || o.item || '')}</option>`).join('');
     select.innerHTML = `<option value="">— выберите заказ —</option>${list}`;
     if (value) select.value = value;
   });
@@ -745,9 +791,69 @@ async function buildBarcode() {
 /* ================================================================ bind */
 let bound = false;
 
+function selectPrintPanel(name, moveFocus = false) {
+  const panels = ['forms', 'slicer', 'tools'];
+  if (!panels.includes(name)) return;
+  panels.forEach((key) => {
+    const tab = $('pr_tab_' + key);
+    const panel = $('pr_panel_' + key);
+    const selected = key === name;
+    if (tab) {
+      tab.setAttribute('aria-selected', String(selected));
+      tab.tabIndex = selected ? 0 : -1;
+      tab.classList.toggle('on', selected);
+      if (selected && moveFocus) tab.focus();
+    }
+    if (panel) panel.hidden = !selected;
+  });
+}
+
+function bindWorkspaceTabs() {
+  const tabs = $('pr_tabs');
+  if (!tabs) return;
+  tabs.addEventListener('click', (event) => {
+    const target = event.target;
+    const tab = target && target.closest ? target.closest('[data-pr-tab]') : null;
+    if (tab) selectPrintPanel(tab.dataset.prTab);
+  });
+  tabs.addEventListener('keydown', (event) => {
+    const tab = event.target && event.target.closest
+      ? event.target.closest('[data-pr-tab]') : null;
+    if (!tab) return;
+    const names = ['forms', 'slicer', 'tools'];
+    const current = names.indexOf(tab.dataset.prTab);
+    const next = event.key === 'ArrowRight' ? (current + 1) % names.length
+      : event.key === 'ArrowLeft' ? (current - 1 + names.length) % names.length
+        : event.key === 'Home' ? 0 : event.key === 'End' ? names.length - 1 : -1;
+    if (next < 0) return;
+    event.preventDefault();
+    selectPrintPanel(names[next], true);
+  });
+}
+
 function bind() {
   if (bound) return;
   bound = true;
+
+  bindWorkspaceTabs();
+
+  const search = $('pr_search');
+  if (search) search.addEventListener('input', applyCatalogFilters);
+  const filters = $('pr_category_filters');
+  if (filters) filters.addEventListener('click', (event) => {
+    const target = event.target;
+    const button = target && target.closest ? target.closest('[data-pr-filter]') : null;
+    if (!button) return;
+    formGroupFilter = button.dataset.prFilter || 'all';
+    applyCatalogFilters();
+  });
+  const clearFilters = $('pr_filter_clear');
+  if (clearFilters) clearFilters.addEventListener('click', () => {
+    if (search) search.value = '';
+    formGroupFilter = 'all';
+    applyCatalogFilters();
+    if (search) search.focus();
+  });
 
   const refresh = $('pr_refresh');
   const reload = () => loadCatalog().then(() => toast('Каталог обновлён', 'Формы взяты из реестра сервера'));

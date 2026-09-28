@@ -14,7 +14,7 @@
       var v = localStorage.getItem('pf_theme');
       if (v === 'system' || v === 'light' || v === 'dark') return v;
     } catch (e) {}
-    return 'dark';
+    return 'light';
   }
 
   function apply(pref) {

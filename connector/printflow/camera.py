@@ -3,10 +3,8 @@
 Работает только в локальной сети принтера. Кадры хранятся в памяти и
 раздаются интерфейсу как обычный JPEG или MJPEG-поток.
 
-Если принтер недоступен (например, интерфейс смотрят не из домашней сети),
-включается демонстрационный режим: вместо живого видео проигрываются
-заготовленные кадры из site/assets/demo. Это позволяет проверить интерфейс
-без принтера, но честно помечается флагом ``demo``.
+Заготовленные кадры из site/assets/demo показываются только при явно
+включённом демонстрационном режиме и помечаются флагом ``demo``.
 """
 from __future__ import annotations
 
@@ -56,6 +54,7 @@ class CameraWorker:
         self._frames_window: list[float] = []
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
+        self._socket = None
         self._subscribers: set[threading.Event] = set()
         self._lock = threading.Lock()
 
@@ -92,6 +91,13 @@ class CameraWorker:
 
     def stop(self) -> None:
         self._stop.set()
+        sock = self._socket
+        if sock is not None:
+            try:
+                sock.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+            sock.close()
 
     def subscribe(self) -> threading.Event:
         event = threading.Event()
@@ -122,9 +128,7 @@ class CameraWorker:
     def _demo_tick(self) -> bool:
         """Показать следующий демо-кадр. False, если демо выключено."""
         cfg = self.get_config() or {}
-        # Если принудительно включен демо-режим (например, камера недоступна),
-        # показываем демо-кадры независимо от настройки cfg.demo.
-        if not cfg.get("demo") and not self.demo:
+        if not cfg.get("demo"):
             return False
         frames = demo_frames()
         if not frames:
@@ -139,6 +143,12 @@ class CameraWorker:
     def _run(self) -> None:
         while not self._stop.is_set():
             cfg = self.get_config() or {}
+            if self.demo and not cfg.get("demo"):
+                self.frame = None
+                self.frame_at = 0.0
+                self.fps = 0.0
+                self._frames_window.clear()
+                self.demo = False
             host, code = cfg.get("host"), cfg.get("access_code")
             if not host or not code:
                 # Облачный режим без локального IP: камера физически работает
@@ -147,16 +157,16 @@ class CameraWorker:
                 if self._demo_tick():
                     continue
                 self.demo = False
+                self.error = "Укажите IP принтера" if not host else "Укажите Access Code принтера"
                 self._stop.wait(3)
                 continue
             self._no_lan = False
             try:
                 with socket.create_connection((host, self.PORT), timeout=8) as raw:
                     with self._tls_context().wrap_socket(raw, server_hostname=host) as sock:
+                        self._socket = sock
                         sock.settimeout(12)
                         sock.sendall(self._auth_packet(code))
-                        self.error = ""
-                        self.demo = False
                         buf = bytearray()
                         # Ограничитель FPS: камера отдаёт до ~30 к/с, для наблюдения
                         # достаточно camera_fps_max; лишние кадры отбрасываются до
@@ -189,15 +199,19 @@ class CameraWorker:
                                 now = time.monotonic()
                                 if now - last_pub >= min_interval:
                                     last_pub = now
+                                    if self.demo:
+                                        self._frames_window.clear()
+                                    self.demo = False
+                                    self.error = ""
                                     self._publish(frame)
             except Exception as exc:  # соединение восстанавливается автоматически
+                if self._stop.is_set():
+                    break
                 self.error = str(exc)
-                # Если камера недоступна, переходим в демо-режим,
-                # если пользователь не отключил демо полностью.
-                if not self.demo:
-                    self.demo = True
                 if not self._demo_tick():
                     self._stop.wait(4)
+            finally:
+                self._socket = None
 
     # ------------------------------------------------------------ снимки
     def snapshot(self, note: str = "", job_id: str = "") -> dict:
@@ -245,7 +259,7 @@ class CameraWorker:
         if not raw:
             return ""
         if "timed out" in raw or "timeout" in raw:
-            return "Принтер не отвечает по порту 6000"
+            return "Камера не прислала кадр: проверьте LAN Liveview и Access Code на принтере"
         if "refused" in raw:
             return "Камера отключена в настройках принтера"
         if "unreachable" in raw or "not known" in raw or "resolve" in raw:
@@ -290,7 +304,8 @@ def grab_frame(host: str, code: str, timeout: float = 6.0) -> tuple[bool, str]:
                     if not chunk:
                         return False, "камера закрыла соединение до кадра"
                     buf.extend(chunk)
-                    if buf.find(b"\xff\xd9") >= 0:
+                    start = buf.find(b"\xff\xd8\xff")
+                    if start >= 0 and buf.find(b"\xff\xd9", start + 3) >= 0:
                         return True, "первый кадр получен"
                 return False, "соединение есть, но кадр не пришёл за отведённое время"
     except OSError as exc:
@@ -346,7 +361,9 @@ def diagnose(printer) -> dict:
                       "text": "пропущено — не хватает IP, кода или порта"})
 
     camera = getattr(printer, "camera", None)
-    live = bool(camera and camera.frame)
+    live = bool(camera and camera.frame and not getattr(camera, "demo", False)
+                and not getattr(camera, "error", "")
+                and 0 <= time.time() - getattr(camera, "frame_at", 0) < 15)
     if live:
         steps.append({"step": "Живой поток в панели", "ok": True,
                       "text": "кадры уже идут — интерфейс показывает камеру"})

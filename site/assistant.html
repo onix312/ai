@@ -1,14 +1,14 @@
 <!DOCTYPE html>
-<html lang="ru" data-theme="dark">
+<html lang="ru" data-theme="light">
 <head>
-<script src="/assets/theme-init.js?v=18.21.0"></script>
+<script src="/assets/theme-init.js?v=18.23.1"></script>
 <meta name="theme-color" content="#4f46e5">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="color-scheme" content="light dark">
 <title>NOZZA · помощник</title>
 <link rel="icon" href="/assets/brand/favicon.svg" type="image/svg+xml">
-<link rel="stylesheet" href="assets/tokens.css?v=18.21.0">
+<link rel="stylesheet" href="assets/tokens.css?v=18.23.1">
 <style>
 /* Помощник NOZZA 18.21 — разговор главный, инструменты по вкладкам.
    Токены (цвета, радиусы, тени, шрифты) приходят из tokens.css, поэтому
@@ -1102,6 +1102,10 @@ details[open] summary::before { content: "▾ "; }
   function ask(text) {
     text = String(text || '').trim();
     if (!text || busy) return;
+    if (text.length > 1000) {
+      toast('Сообщение слишком длинное: не больше 1000 символов. Большой текст загрузите как документ.', 'bad');
+      return;
+    }
     busy = true;
     $('as_send').disabled = true;
     var hello = $('as_hello');
@@ -1915,6 +1919,10 @@ details[open] summary::before { content: "▾ "; }
   function sendComposer() {
     var text = $('as_text').value.trim();
     if (!text) return;
+    if (text.length > 1000) {
+      toast('Сообщение слишком длинное: не больше 1000 символов. Большой текст загрузите как документ.', 'bad');
+      return;
+    }
     $('as_text').value = '';
     autosize();
     ask(text);
@@ -1969,3 +1977,4 @@ details[open] summary::before { content: "▾ "; }
 </script>
 </body>
 </html>
+

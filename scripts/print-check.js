@@ -156,7 +156,7 @@ for (const file of ['assets/core.js', 'assets/print.js']) {
 
 const PF = ctx.PF;
 PF.state.customers = [{ id: 'c1', name: 'Иван Петров' }, { id: 'c2', name: 'ООО «Ромашка»' }];
-PF.state.orders = [{ id: 7, number: 1007, title: 'Ваза' }];
+PF.state.orders = [{ id: 7, number: 1007, product: 'Ваза' }];
 
 const checks = [];
 const ok = (label, cond, extra) => checks.push([label, !!cond, extra]);
@@ -171,11 +171,16 @@ const ok = (label, cond, extra) => checks.push([label, !!cond, extra]);
   ok('карточек форм = формам реестра', cards === REGISTRY.forms.length, cards + '/' + REGISTRY.forms.length);
   ok('групп = группам реестра', groups === REGISTRY.groups.length, groups + '/' + REGISTRY.groups.length);
   ok('каталог с параметрами нарисован', formsHtml.includes('data-opt="size"') && formsHtml.includes('data-opt="kind"'));
-  ok('выбор заказа из справочника', formsHtml.includes('data-source="orders"') && formsHtml.includes('№1007'));
+  ok('выбор заказа из справочника', formsHtml.includes('data-source="orders"') && formsHtml.includes('№1007 · Ваза'));
   ok('выбор клиента из справочника', formsHtml.includes('Иван Петров') && formsHtml.includes('data-source="customers"'));
   ok('период отчёта — список', formsHtml.includes('data-opt="days"') && formsHtml.includes('30 дней'));
   ok('у формы-страницы кнопка «открыть», а не «печать»', formsHtml.includes('href="/price-tags.html"') && !formsHtml.includes('data-print="price-tags"'));
-  ok('KPI посчитаны', kpiHtml.includes('Форм в каталоге') && kpiHtml.includes(String(REGISTRY.forms.length)));
+  ok('короткая сводка каталога посчитана', kpiHtml.includes('pr-stat') && kpiHtml.includes(String(REGISTRY.forms.length)));
+  ok('технические адреса API не засоряют карточки', !formsHtml.includes('pr-card-path'));
+  ok('формы содержат индекс для поиска', formsHtml.includes('data-search=') && formsHtml.includes('data-group='));
+  const categoryHtml = element('pr_category_filters').innerHTML || '';
+  ok('фильтр строится по разделам реестра', categoryHtml.includes('data-pr-filter="all"')
+    && REGISTRY.groups.every((group) => categoryHtml.includes(`data-pr-filter="${group}"`)));
   ok('путей печати в разметке столько же, сколько api-форм',
      (formsHtml.match(/data-print="/g) || []).length === REGISTRY.forms.filter((f) => f.kind === 'api').length);
 
@@ -205,6 +210,43 @@ const ok = (label, cond, extra) => checks.push([label, !!cond, extra]);
   const bcOut = element('pr_bc_out').innerHTML || '';
   ok('штрихкод строится через /api/labels/code128', requests.some((u) => u.includes('/api/labels/code128')), bcOut.slice(0, 60));
   ok('на экране режим и число символов', bcOut.includes('Code 128 C') && bcOut.includes('12 символов'));
+
+  // --- навигация инструментов, поиск и фильтр карточек
+  const tabHost = element('pr_tabs');
+  const tabs = tabHost._listeners.filter(([type]) => type === 'click');
+  const slicerTab = element('pr_tab_slicer');
+  slicerTab.dataset.prTab = 'slicer';
+  tabs.forEach(([, fn]) => fn({ target: { closest: () => slicerTab } }));
+  ok('переключатель открывает 3D-раздел и скрывает формы',
+    element('pr_panel_slicer').hidden === false && element('pr_panel_forms').hidden === true);
+  const keyHandler = tabHost._listeners.find(([type]) => type === 'keydown');
+  let prevented = false;
+  if (keyHandler) keyHandler[1]({ target: { closest: () => slicerTab }, key: 'ArrowRight', preventDefault() { prevented = true; } });
+  ok('вкладки доступны с клавиатуры', prevented && element('pr_panel_tools').hidden === false
+    && element('pr_tab_tools').tabIndex === 0);
+
+  const shelfCard = { dataset: { search: 'ценник полка 67 мм' }, hidden: false };
+  const workshopCard = { dataset: { search: 'табличка цех 92 мм' }, hidden: false };
+  const shelfGroup = { dataset: { group: REGISTRY.groups[0] }, hidden: false,
+    querySelectorAll: () => [shelfCard] };
+  const workshopGroup = { dataset: { group: REGISTRY.groups[1] }, hidden: false,
+    querySelectorAll: () => [workshopCard] };
+  element('pr_forms').querySelectorAll = (selector) => selector === '.pr-group' ? [shelfGroup, workshopGroup] : [];
+  const groupButton = { dataset: { prFilter: REGISTRY.groups[1] }, classList: { toggle() {} }, setAttribute() {} };
+  element('pr_category_filters').querySelectorAll = (selector) => selector === '[data-pr-filter]' ? [groupButton] : [];
+  const search = element('pr_search');
+  search.value = 'ценник';
+  element('pr_search')._listeners.filter(([type]) => type === 'input').forEach(([, fn]) => fn({}));
+  ok('поиск оставляет совпавшие формы', !shelfCard.hidden && workshopCard.hidden
+    && !shelfGroup.hidden && workshopGroup.hidden);
+  const filterClick = element('pr_category_filters')._listeners.find(([type]) => type === 'click');
+  if (filterClick) filterClick[1]({ target: { closest: () => groupButton } });
+  ok('поиск и раздел применяются вместе', shelfCard.hidden && workshopCard.hidden
+    && element('pr_filter_empty').hidden === false);
+  const clear = element('pr_filter_clear')._listeners.find(([type]) => type === 'click');
+  if (clear) clear[1]({});
+  ok('сброс возвращает формы и фокус в поиск', search.value === '' && !shelfCard.hidden
+    && !workshopCard.hidden && element('pr_filter_empty').hidden && element('pr_result_count').textContent === 'Показано 2 из 11');
 
   ok('ошибок выполнения нет', problems.length === 0, JSON.stringify(problems.map(([, e]) => String(e && e.message || e))).slice(0, 200));
 

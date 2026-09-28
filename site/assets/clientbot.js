@@ -4,7 +4,8 @@
 (() => {
 'use strict';
 
-const { $, esc, num, money, nfmt, toast, fail, agoText, ask, dateText } = PF.ui;
+const { $, $$, esc, num, money, nfmt, toast, fail, agoText, ask, dateText } = PF.ui;
+const U = PF.ui;
 const { get, post } = PF.api;
 
 const COMMANDS = [

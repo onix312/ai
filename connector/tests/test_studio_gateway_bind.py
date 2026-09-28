@@ -547,13 +547,17 @@ class SsdpAnnounceTests(unittest.TestCase):
         listen_binds = [addr for addr in binds if addr[0] == ""]
         self.assertEqual(1, len(listen_binds),
                          "порт свободен — вторая привязка не нужна")
-        self.assertNotIn(socket.SO_REUSEPORT, options,
-                         "SO_REUSEPORT на свободном порту делит M-SEARCH с чужаками")
+        reuse_port = getattr(socket, "SO_REUSEPORT", None)
+        if reuse_port is not None:
+            self.assertNotIn(reuse_port, options,
+                             "SO_REUSEPORT на свободном порту делит M-SEARCH с чужаками")
         self.assertIn(socket.SO_REUSEADDR, options)
         self.assertEqual("", self.gw._ssdp_note)
 
     def test_ssdp_port_is_shared_only_when_someone_else_holds_it(self):
         """1900 занят (служба SSDP Discovery) — делим порт и честно это пишем."""
+        if not hasattr(socket, "SO_REUSEPORT"):
+            self.skipTest("эта платформа не предоставляет SO_REUSEPORT")
         options: list[int] = []
         binds: list[tuple[str, int]] = []
         attempts = {"n": 0}

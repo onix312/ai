@@ -24,8 +24,8 @@ let production = null;
 
 /* ============================================================ воронка */
 function stageOptions(current) {
-  return html`${STAGE_ORDER.map((key) => html`
-    <option value="${key}"${key === (current || 'new') ? raw(' selected') : raw('')}>${STAGES[key]}</option>`)}`;
+  return STAGE_ORDER.map((key) => html`
+    <option value="${key}"${key === (current || 'new') ? raw(' selected') : raw('')}>${STAGES[key]}</option>`).join('');
 }
 
 function renderPipeline(items) {
@@ -46,7 +46,7 @@ function inboxRow(row) {
       </div>
       <p>${row.text || 'Нет текста последнего сообщения'}</p>
       <div class="ops10-actions">
-        <select data-inbox-stage="${row.chat_id}" aria-label="Стадия обращения">${stageOptions(row.pipeline_stage)}</select>
+        <select data-inbox-stage="${row.chat_id}" aria-label="Стадия обращения">${raw(stageOptions(row.pipeline_stage))}</select>
         <button class="btn sm" data-inbox-read="${row.chat_id}" type="button">Прочитано</button>
         <a class="btn sm ghost" href="#clientbot" data-view="clientbot">Открыть диалог</a>
       </div>
@@ -101,9 +101,9 @@ function renderPrinters(printers) {
         <small>${info.state_label || info.state || 'Ожидание'} · ${info.task || 'нет активной печати'}</small>
         <div class="bar"><i style="width:${progress}%"></i></div>
         <small>Печать: ${progress}% · AMS: ${trays.length ? trays.length + ' слотов' : 'нет данных'}${low ? ' · мало пластика: ' + low : ''}</small>
-        <div class="chips">${trays.length
+        <div class="chips">${raw(trays.length
           ? trays.map((t) => html`<span class="tag">${t.material || '—'} ${t.color || ''} · ${t.remain == null ? '—' : Math.round(num(t.remain)) + '%'}</span>`).join('')
-          : raw('<span class="muted">Слоты AMS пока не переданы</span>')}</div>
+          : '<span class="muted">Слоты AMS пока не переданы</span>')}</div>
       </article>`;
   }).join(''));
 }

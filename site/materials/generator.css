@@ -84,3 +84,13 @@ body {
   }
   .sheet:last-child { page-break-after: auto; }
 }
+
+@media screen {
+  body { background: #e9eef5; }
+  .panel { padding: 14px max(18px, calc((100vw - 1160px) / 2)); box-shadow: 0 8px 24px -22px #1e293b; }
+  .panel-row { gap: 10px 14px; }
+  .panel select, .panel input[type="text"], .panel input[type="number"], .btn { min-height: 36px; border-radius: 9px; }
+  .panel select:focus-visible, .panel input:focus-visible, .btn:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+  .btn.primary { background: var(--brand); }
+  .sheet { margin-block: 24px; box-shadow: 0 14px 44px -28px #223047; }
+}

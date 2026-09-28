@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import pathlib
 import sys
+import time
 import unittest
 from types import SimpleNamespace
 from unittest import mock
@@ -68,6 +69,17 @@ class DiagnoseTests(unittest.TestCase):
         self.assertEqual(link, "rtsps://bblp:ABCD1234@192.168.1.42:322/streaming/live/1")
         self.assertIsNone(camera.rtsp_link(FakePrinter(host="", code="")))
         self.assertIsNone(camera.rtsp_link(FakePrinter(code="")))
+
+    def test_demo_and_stale_frames_are_not_reported_as_live(self):
+        for demo, age, error in [(True, 0, ""), (False, 60, ""), (False, 0, "timeout")]:
+            with self.subTest(demo=demo, age=age, error=error):
+                printer = FakePrinter(frame=True)
+                printer.camera.demo = demo
+                printer.camera.frame_at = time.time() - age
+                printer.camera.error = error
+                with mock.patch.object(camera, "port_open", return_value=False):
+                    result = camera.diagnose(printer)
+                self.assertFalse(any(s["step"] == "Живой поток в панели" for s in result["steps"]))
 
 
 if __name__ == "__main__":

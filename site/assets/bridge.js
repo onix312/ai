@@ -65,7 +65,7 @@ async function renderWatchCard(pendingCount){
     if (text){
       const n = num(pendingCount);
       text.textContent = n
-        ? `${n} новый(ые) файл(а) из папки — откройте баннер выше.`
+        ? `Новые файлы: ${n} — откройте раздел «Принтеры».`
         : 'Папка на связи: слайсер сохранил 3MF или G-code — файл появится здесь сам.';
     }
     if (meta){ meta.textContent = path + (status.exists ? '' : ' · папка ещё не создана'); }
@@ -356,7 +356,7 @@ function renderHealthBadge(){
   const ports = h.ports;
   let html = '';
   if (h.needs_developer_mode) html += '<span class="chip bad">Нужен Developer Mode</span> ';
-  html += Object.entries(ports).map(([k,v])=> `<span class="chip ${v.ok?'ok':'bad'}">${esc(k)} ${v.ok?'✓':'✕'}</span>`).join(' ');
+  html += Object.entries(ports).map(([k,v])=> `<span class="chip ${v.ok?'ok':'bad'}">${esc(k === 'camera' ? 'Порт камеры' : k === 'ftps' ? 'Порт FTPS' : k)} ${v.ok?'✓':'✕'}</span>`).join(' ');
   if (h.firmware) html += `<small class="muted"> прошивка ${esc(h.firmware)}</small>`;
   // вставить под заголовок принтера если есть контейнер
   let badge = $('pr_health_line');

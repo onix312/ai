@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head>
-<script src="/assets/theme-init.js?v=17.0.1"></script>
+<script src="/assets/theme-init.js?v=18.23.1"></script>
 <style>
 /* 17.0 data-theme bridge: ручная тёмная тема действует на страницах со своей палитрой */
 :root[data-theme="dark"] { color-scheme: dark; }
@@ -318,8 +318,9 @@ dialog::backdrop { background:rgba(16,24,40,.52); backdrop-filter:blur(3px); }
   .sheet-caption { display:none; }
 }
 </style>
+<link rel="stylesheet" href="assets/refine.css?v=18.23.1">
 </head>
-<body>
+<body class="pf-public">
 <header class="topbar noprint">
   <div class="brand">
     <img src="/assets/brand/nozza-mark-1.svg" alt="NOZZA">
@@ -515,7 +516,7 @@ Content-Type: application/json
   </div>
 </dialog>
 
-<script src="/assets/qr.js"></script>
+<script src="/assets/qr.js?v=18.23.1"></script>
 <script>
 (function () {
 'use strict';
@@ -1121,6 +1122,6 @@ bindEvents();
 loadData();
 })();
 </script>
-<script src="/assets/theme-toggle.js?v=17.0.1" defer></script>
+<script src="/assets/theme-toggle.js?v=18.23.1" defer></script>
 </body>
 </html>

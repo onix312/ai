@@ -1931,7 +1931,10 @@ function bind() {
 PF.on('ready', () => { loadFilamentStats(); loadShopping(); loadCalcMaterials(); bind(); restoreCalc(); _spoolCatalogMaterials(); });
 PF.on('data', PF.whenView(['inventory', 'calc'], () => { renderStock(); renderCatalog(); }));
 PF.on('finance', PF.whenView(['inventory', 'calc', 'finance'], renderFinance));
-PF.on('view', (d) => { if (d.view === 'calc') runCalc(); });
+PF.on('view', (d) => {
+  if (d.view === 'calc') runCalc();
+  if (d.view === 'inventory' && PF.dataReady) { renderStock(); renderCatalog(); }
+});
 
 // ------------------------------------------------------- экспорт расчёта
 function exportCalc() {

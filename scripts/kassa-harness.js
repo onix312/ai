@@ -24,7 +24,7 @@ const ROOT = path.resolve(__dirname, '..');
 
 function inlineScript() {
   const html = fs.readFileSync(path.join(ROOT, 'site', 'cashier.html'), 'utf8');
-  const m = html.match(/<script>\n"use strict";([\s\S]*?)<\/script>/);
+  const m = html.match(/<script>\s*"use strict";([\s\S]*?)<\/script>/);
   if (!m) throw new Error('инлайн-скрипт кассы не найден в site/cashier.html');
   return m[1];
 }

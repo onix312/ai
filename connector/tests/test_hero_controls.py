@@ -127,7 +127,8 @@ _STATE = {
 
 def _run_harness() -> dict:
     script = "const STATE = " + json.dumps(_STATE, ensure_ascii=False) + ";\n" + _HARNESS
-    proc = subprocess.run(["node", "-e", script], capture_output=True, text=True, timeout=60, cwd=ROOT)
+    proc = subprocess.run(["node", "-e", script], capture_output=True, text=True,
+                          encoding="utf-8", timeout=60, cwd=ROOT)
     assert proc.returncode == 0, f"node упал: {proc.stderr[:800]}"
     return json.loads(proc.stdout)
 
@@ -238,9 +239,9 @@ class MarkupContractTests(unittest.TestCase):
             self.assertIn(f"'/assets/{name}'", SW_JS, f"{name} должен быть в SHELL sw.js")
         self.assertIn('<link rel="stylesheet" href="assets/controls.css?v=18.21.0">', INDEX)
         self.assertIn("'/assets/controls.css'", SW_JS)
-        self.assertIn('<script src="assets/app.js?v=18.21.0"></script>', INDEX)
-        self.assertIn('<script src="assets/core.js?v=18.21.0"></script>', INDEX)
-        self.assertIn("printflow-shell-v92", SW_JS)
+        self.assertRegex(INDEX, r'<script src="assets/app\.js\?v=\d+\.\d+\.\d+"></script>')
+        self.assertRegex(INDEX, r'<script src="assets/core\.js\?v=\d+\.\d+\.\d+"></script>')
+        self.assertRegex(SW_JS, r'printflow-shell-v\d+')
         # Порядок: модули пульта грузятся после icons.js и до app.js.
         order = [INDEX.index(f"assets/{n}?v=") for n in ("icons.js", *NEW_ASSETS, "app.js")]
         self.assertEqual(order, sorted(order))

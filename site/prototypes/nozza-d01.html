@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>NOZZA · D01 — макеты панели</title>
+  <link rel="stylesheet" href="../assets/fonts.css">
+  <link rel="stylesheet" href="nozza-d01.css?v=5">
+</head>
+<body>
+  <header class="review-bar">
+    <div class="review-title"><span class="review-kicker">D01 · МАКЕТЫ</span><strong>Новая панель NOZZA</strong><span>Примерные данные · никаких команд оборудованию</span></div>
+    <div class="review-controls" aria-label="Настройки макета">
+      <div class="segmented" role="group" aria-label="Экран">
+        <button type="button" data-review-screen="orders" aria-pressed="true">Заказы</button>
+        <button type="button" data-review-screen="printer" aria-pressed="false">Принтер</button>
+        <button type="button" data-review-screen="assistant" aria-pressed="false">Помощник</button>
+      </div>
+      <div class="segmented" role="group" aria-label="Размер">
+        <button type="button" data-device="desktop" aria-pressed="true">Компьютер</button>
+        <button type="button" data-device="mobile" aria-pressed="false">Телефон</button>
+      </div>
+      <div class="segmented" role="group" aria-label="Тема">
+        <button type="button" data-review-theme="light" aria-pressed="true">Светлая</button>
+        <button type="button" data-review-theme="dark" aria-pressed="false">Тёмная</button>
+      </div>
+      <label class="state-control">Состояние
+        <select id="review-state" aria-label="Состояние данных">
+          <option value="ready">Данные</option><option value="loading">Загрузка</option>
+          <option value="empty">Пусто</option><option value="error">Ошибка</option>
+        </select>
+      </label>
+    </div>
+  </header>
+
+  <div class="stage" id="stage" data-theme="light">
+    <div class="app desktop" id="app" data-theme="light" data-state="ready">
+      <aside class="sidebar" aria-label="Разделы панели">
+        <div class="brand"><img src="../assets/brand/nozza-mark.svg" alt=""><div><b>NOZZA</b><small>PrintFlow</small></div></div>
+        <div class="workspace-name"><span class="workspace-avatar">N</span><span>Мастерская<br><b>Основное пространство</b></span><span class="chevron">⌄</span></div>
+        <nav class="side-nav">
+          <span class="nav-caption">РАБОЧЕЕ МЕСТО</span>
+          <button type="button" data-demo="Обзор будет следующим экраном" class="nav-item"><span class="nav-icon">◫</span>Сегодня</button>
+          <button type="button" data-go="orders" class="nav-item active"><span class="nav-icon">▤</span>Заказы <span class="nav-count">4</span></button>
+          <button type="button" data-demo="Раздел клиентов показан в плане D01" class="nav-item"><span class="nav-icon">◌</span>Клиенты</button>
+          <span class="nav-caption">ПРОИЗВОДСТВО</span>
+          <button type="button" data-go="printer" class="nav-item"><span class="nav-icon">▣</span>Принтеры <span class="live-dot"></span></button>
+          <button type="button" data-demo="Очередь входит в следующий этап" class="nav-item"><span class="nav-icon">☷</span>Очередь</button>
+          <button type="button" data-demo="Раздел склада входит в следующий этап" class="nav-item"><span class="nav-icon">▦</span>Склад</button>
+          <span class="nav-caption">УПРАВЛЕНИЕ</span>
+          <button type="button" data-demo="Раздел финансов входит в следующий этап" class="nav-item"><span class="nav-icon">◈</span>Финансы</button>
+          <button type="button" data-go="assistant" class="nav-item"><span class="nav-icon">✦</span>Помощник</button>
+        </nav>
+        <div class="sidebar-foot"><span class="connection-dot"></span><span>Система работает</span><button type="button" data-demo="Диагностика находится в разделе «Система»" aria-label="Диагностика">···</button></div>
+      </aside>
+
+      <div class="workspace">
+        <div class="topbar"><div class="crumb"><span>Рабочее место</span><span class="crumb-sep">/</span><b id="crumb-title">Заказы</b></div><div class="topbar-right"><span class="sync-label"><i></i> Данные обновлены <b>14:32</b></span><button type="button" class="icon-button" data-demo="Поиск по всей панели появится после переноса разделов" aria-label="Глобальный поиск">⌕</button><button type="button" class="user-avatar" aria-label="Профиль владельца" data-demo="Настройки профиля">А</button></div></div>
+
+        <main class="content">
+          <section class="screen active" id="screen-orders" aria-labelledby="orders-title">
+            <div class="page-heading"><div><div class="eyebrow">ПРОДАЖИ <span class="eyebrow-dot"></span> 28 СЕНТЯБРЯ</div><h1 id="orders-title">Заказы</h1><p>Работа, сроки и деньги — в одном списке.</p></div><button type="button" class="button primary heading-action" data-demo="Новый заказ: следующий этап">+ Новый заказ</button></div>
+            <div class="state-slot" data-state-slot="orders" hidden></div>
+            <div class="screen-content">
+              <div class="metric-strip" aria-label="Сводка заказов"><div><span>В работе</span><strong>12</strong><small>3 ждут печати</small></div><div><span>На сегодня</span><strong>4</strong><small class="warn-text">1 требует внимания</small></div><div><span>Готовы к выдаче</span><strong>3</strong><small>2 клиента уведомлены</small></div></div>
+              <div class="orders-layout">
+                <div class="list-panel">
+                  <div class="list-top"><div><h2>Все заказы</h2><p id="order-count">Показано 4 из 12 активных</p></div><button type="button" class="text-button" id="clear-filters">Сбросить фильтры</button></div>
+                  <div class="filters"><label class="search-field"><span>⌕</span><input id="order-search" type="search" placeholder="Номер, клиент или изделие" aria-label="Поиск по заказам"></label><div class="filter-chips" role="group" aria-label="Статус заказа"><button type="button" class="chip selected" data-order-filter="all" aria-pressed="true">Все</button><button type="button" class="chip" data-order-filter="attention" aria-pressed="false">Нужны действия <b>1</b></button><button type="button" class="chip" data-order-filter="ready" aria-pressed="false">Готовы <b>1</b></button></div></div>
+                  <div class="table-scroll"><table class="order-table"><thead><tr><th>Заказ</th><th>Клиент</th><th>Срок</th><th>Сумма</th><th>Статус</th><th><span class="sr-only">Открыть</span></th></tr></thead><tbody>
+                    <tr data-order="1048" data-tags="attention" class="selected-row"><td><strong>№ 1048</strong><small>Кронштейн для полки</small></td><td>Ирина К.</td><td><b class="due-warn">Сегодня</b><small>до 18:00</small></td><td>4 200 ₽</td><td><span class="badge amber"><i></i>Ждёт печати</span></td><td><button type="button" class="row-open" data-open-order="1048" aria-label="Открыть заказ 1048">›</button></td></tr>
+                    <tr data-order="1047" data-tags="ready"><td><strong>№ 1047</strong><small>Корпус датчика</small></td><td>Михаил Р.</td><td><b>Завтра</b><small>до 12:00</small></td><td>2 800 ₽</td><td><span class="badge green"><i></i>Готов к выдаче</span></td><td><button type="button" class="row-open" data-open-order="1047" aria-label="Открыть заказ 1047">›</button></td></tr>
+                    <tr data-order="1046" data-tags="work"><td><strong>№ 1046</strong><small>Набор бирок, 20 шт.</small></td><td>Ольга М.</td><td><b>30 сен</b><small>до 17:00</small></td><td>3 600 ₽</td><td><span class="badge blue"><i></i>Печатается</span></td><td><button type="button" class="row-open" data-open-order="1046" aria-label="Открыть заказ 1046">›</button></td></tr>
+                    <tr data-order="1045" data-tags="work"><td><strong>№ 1045</strong><small>Подставка для планшета</small></td><td>Алексей Т.</td><td><b>2 окт</b><small>до 16:00</small></td><td>5 400 ₽</td><td><span class="badge neutral"><i></i>Согласование</span></td><td><button type="button" class="row-open" data-open-order="1045" aria-label="Открыть заказ 1045">›</button></td></tr>
+                  </tbody></table></div>
+                  <div class="mobile-order-list" id="mobile-order-list"></div><div id="no-order-match" class="no-order-match" hidden>По запросу ничего не найдено. Попробуйте другое слово или сбросьте фильтры.</div>
+                  <div class="list-footer"><span>Сначала ближайшие сроки</span><button type="button" data-demo="Полный список заказов">Показать все →</button></div>
+                </div>
+                <aside class="order-detail" id="order-detail" aria-label="Карточка заказа">
+                  <div class="detail-top"><button type="button" class="mobile-back" id="close-order">← Заказы</button><span>КАРТОЧКА ЗАКАЗА</span><button type="button" class="detail-more" aria-label="Дополнительные действия" data-demo="История и параметры заказа">···</button></div>
+                  <h2 id="detail-number">Заказ № 1048</h2><p class="detail-sub" id="detail-product">Кронштейн для полки</p><span class="badge amber" id="detail-badge"><i></i>Ждёт печати</span>
+                  <div class="detail-section"><span class="detail-label">КЛИЕНТ</span><strong id="detail-customer">Ирина К.</strong><small>Связь — в карточке клиента</small></div>
+                  <div class="detail-section detail-grid"><div><span class="detail-label">СРОК</span><strong id="detail-due">Сегодня, до 18:00</strong></div><div><span class="detail-label">СУММА</span><strong id="detail-price">4 200 ₽</strong></div></div>
+                  <div class="detail-section"><span class="detail-label">ПРОИЗВОДСТВО</span><div class="flow-steps" id="detail-flow"><span class="done">✓ Заказ принят</span><span class="current">2 Подготовить печать</span><span>3 Изготовить и выдать</span></div></div>
+                  <div class="detail-section"><span class="detail-label">ЧТО СДЕЛАТЬ ДАЛЬШЕ</span><p class="next-note" id="detail-next">Проверьте файл и материал. После этого заказ можно поставить в очередь.</p></div>
+                  <button type="button" class="button primary detail-action" id="order-action" data-demo="Подготовка печати заказа">Подготовить печать →</button>
+                  <button type="button" class="button secondary detail-action" data-demo="Открыть полную историю заказа">Вся история заказа</button>
+                </aside>
+              </div>
+            </div>
+          </section>
+
+          <section class="screen" id="screen-printer" aria-labelledby="printer-title">
+            <div class="page-heading"><div><div class="eyebrow">ПРОИЗВОДСТВО <span class="eyebrow-dot"></span> <span id="printer-device-count">2 УСТРОЙСТВА</span></div><h1 id="printer-title">Принтеры</h1><p>Сначала задание и состояние. Подробности — ниже.</p></div><button type="button" class="button secondary heading-action" data-demo="Проверка подключения без команды принтеру">↻ Обновить</button></div>
+            <div class="state-slot" data-state-slot="printer" hidden></div>
+            <div class="screen-content">
+              <div class="printer-tabs" role="group" aria-label="Принтер"><button type="button" class="printer-tab selected" data-printer="p1s" aria-pressed="true"><span class="tab-dot green-dot"></span><b>P1S</b><small>Печатает</small></button><button type="button" class="printer-tab" data-printer="a1" aria-pressed="false"><span class="tab-dot gray-dot"></span><b>A1</b><small>Свободен</small></button></div>
+              <div class="printer-layout">
+                <div class="printer-main">
+                  <div class="print-hero"><div class="print-top"><div><span class="overline">ТЕКУЩЕЕ ЗАДАНИЕ</span><h2 id="printer-job">Корпус датчика · заказ № 1046</h2><p id="printer-file">sensor_case_v4.3mf · PETG чёрный</p></div><span class="badge green" id="printer-status"><i></i>Печатает</span></div><div class="progress-value"><strong id="printer-percent">68%</strong><span id="printer-remaining">Осталось ≈ 1 ч 24 мин</span></div><div class="progress-track"><span id="progress-fill" style="width:68%"></span></div><div class="print-times" id="print-times"><span>Начало <b>12:18</b></span><span>Окончание ≈ <b id="printer-end">16:42</b></span></div><div class="print-actions"><button type="button" class="button primary" id="printer-main-action" data-demo="Открыть задание в очереди">Открыть задание →</button><button type="button" class="button secondary" id="pause-printer">Пауза</button><button type="button" class="button text-danger" id="stop-printer">Остановить</button></div></div>
+                  <div class="section-head"><h2>Следующее в очереди</h2><button type="button" class="text-button" data-demo="Очередь производства">Вся очередь →</button></div><div class="next-job"><span class="job-position">01</span><div><strong>Кронштейн для полки</strong><small>Заказ № 1048 · PLA белый · ≈ 2 ч 10 мин</small></div><span class="badge amber">Проверьте материал</span></div>
+                </div>
+                <div class="printer-aside"><div class="surface"><div class="section-head"><h2>Камера</h2><span class="small-muted">Нет кадра</span></div><div class="camera-placeholder"><div class="camera-symbol">◌</div><strong>Изображение недоступно</strong><span id="camera-detail">Принтер не присылает кадр. Печать продолжается.</span></div><button type="button" class="text-button camera-help" data-demo="Проверка камеры: порт и получение кадра показываются отдельно">Проверить подключение →</button></div><div class="surface telemetry"><div class="section-head"><h2>Состояние устройства</h2><span class="small-muted">14:32</span></div><div><span>Сопло</span><strong id="printer-nozzle">245 °C</strong></div><div><span>Стол</span><strong id="printer-bed">80 °C</strong></div><div><span>Материал</span><strong id="printer-material">PETG · чёрный</strong></div><div><span>Данные получены</span><strong>сейчас</strong></div></div></div>
+              </div>
+            </div>
+          </section>
+
+          <section class="screen screen-assistant" id="screen-assistant" aria-labelledby="assistant-title">
+            <div class="page-heading"><div><div class="eyebrow">РАБОЧИЙ ПОМОЩНИК <span class="eyebrow-dot"></span> ЛОКАЛЬНО</div><h1 id="assistant-title">Помощник</h1><p>Спросите о заказе или подготовьте действие.</p></div><button type="button" class="button secondary heading-action" id="new-chat">+ Новый разговор</button></div>
+            <div class="state-slot" data-state-slot="assistant" hidden></div>
+            <div class="screen-content assistant-content"><div class="assistant-layout"><div class="chat-panel"><div class="chat-top"><span class="model-indicator"><i></i> Помощник готов</span><span class="small-muted">Данные панели · 14:32</span></div><div class="chat-flow" id="chat-flow"><div class="chat-date">Сегодня</div><div class="chat-message me">Что с заказом № 1048?</div><div class="chat-message bot"><span class="bot-mark">✦</span><div><p>Заказ № 1048 ждёт печати. Срок — сегодня до 18:00. Следующий шаг — проверить файл и материал.</p><div class="source-line">Источник: карточка заказа · обновлено 14:32</div><button type="button" class="inline-link" data-go="orders">Открыть заказ № 1048 →</button></div></div><div class="chat-message me">Поставь P1S на паузу</div><div class="chat-message bot"><span class="bot-mark">✦</span><div><p>Подготовил команду. Проверьте принтер и подтвердите действие.</p><div class="proposal"><span class="proposal-kicker">ТРЕБУЕТ ПОДТВЕРЖДЕНИЯ</span><strong>Приостановить печать на P1S</strong><span>Текущее задание: «Корпус датчика» · 68%</span><div><button type="button" class="button primary" id="confirm-proposal">Подтвердить</button><button type="button" class="button secondary" id="cancel-proposal">Отменить</button></div></div></div></div></div><div class="chat-bottom"><div class="context-pills"><span>Контекст: мастерская</span><button type="button" id="context-pill" aria-label="Убрать контекст мастерской">×</button></div><label class="chat-compose"><span class="sr-only">Сообщение помощнику</span><textarea id="assistant-input" rows="2" placeholder="Напишите, что нужно сделать или узнать"></textarea><button type="button" id="assistant-send" aria-label="Отправить сообщение">↑</button></label><span class="compose-foot">Действия выполняются после проверки и подтверждения</span></div></div><aside class="context-rail"><div class="rail-title"><span class="bot-mark">✦</span><div><strong>NOZZA</strong><small>Ваш помощник в цехе</small></div></div><div class="rail-section"><span class="detail-label">СЕЙЧАС В РАБОТЕ</span><div class="rail-item"><span class="mini-dot green-dot"></span><div><b>1 принтер печатает</b><small>P1S · заказ № 1046</small></div></div><div class="rail-item"><span class="mini-dot amber-dot"></span><div><b>1 заказ ждёт действия</b><small>№ 1048 · срок сегодня</small></div></div></div><div class="rail-section"><span class="detail-label">ПОПРОБУЙТЕ СПРОСИТЬ</span><button type="button" class="suggestion" data-suggest="Какие заказы нужно выдать сегодня?">Какие заказы выдать сегодня? <span>↗</span></button><button type="button" class="suggestion" data-suggest="Что сейчас печатает P1S?">Что печатает P1S? <span>↗</span></button></div><div class="rail-note">Источник сведений — панель PrintFlow. Актуальность показана рядом с ответом.</div></aside></div></div>
+          </section>
+        </main>
+        <nav class="bottom-nav" aria-label="Основные разделы"><button type="button" data-demo="Обзор — следующий экран">Сегодня</button><button type="button" data-go="orders" class="active">Заказы</button><button type="button" data-go="printer">Принтеры</button><button type="button" data-go="assistant">Помощник</button><button type="button" id="mobile-more" aria-expanded="false" aria-controls="mobile-menu">Ещё</button></nav>
+      </div>
+
+      <div class="mobile-menu" id="mobile-menu" hidden><div class="mobile-menu-head"><strong>Разделы панели</strong><button type="button" id="close-mobile-menu" aria-label="Закрыть меню">×</button></div><div class="mobile-menu-links"><button type="button" data-demo="Клиенты — следующий этап">Клиенты <span>›</span></button><button type="button" data-demo="Очередь — следующий этап">Очередь <span>›</span></button><button type="button" data-demo="Склад — следующий этап">Склад <span>›</span></button><button type="button" data-demo="Финансы — следующий этап">Финансы <span>›</span></button><button type="button" data-demo="Настройки — следующий этап">Настройки <span>›</span></button></div></div>
+
+      <div class="confirm-backdrop" id="confirm-backdrop" hidden><div class="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="confirm-title"><span class="proposal-kicker">ПРОВЕРКА ДЕЙСТВИЯ</span><h2 id="confirm-title">Приостановить печать?</h2><p id="confirm-text">Макет показывает подтверждение. Команда принтеру не отправляется.</p><div><button type="button" class="button secondary" id="confirm-cancel">Отмена</button><button type="button" class="button primary" id="confirm-accept">Понятно</button></div></div></div>
+      <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+    </div>
+  </div>
+  <script src="nozza-d01.js?v=6"></script>
+</body>
+</html>
+
+
+

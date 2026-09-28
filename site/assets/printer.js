@@ -32,7 +32,7 @@ const DANGER = {
 };
 
 let filesCache = [], pendingFile = null, editingPrinter = null, queueLocalFile = null, filesPath = '/';
-let camStream = '', camSession = Date.now();     // ключ живого MJPEG-соединения
+let camStream = '';                               // ключ последнего JPEG-кадра
 let bedMapOn = {};        // 119: тумблер проекции плиты по printer_id
 let bedMapKey = '';       // 119: последний нарисованный набор полигонов (не перерисовывать зря)
 let bedMapBusy = false;
@@ -61,8 +61,8 @@ function text(id, value) { const el = $(id); if (el) el.textContent = value; }
    и показать детали ниже. Пока live-снимка нет, но принтеры заведены —
    показываем скелетоны, чтобы вкладка не выглядела пустой. */
 
-/** Сквозной номер слота 0–15 (совпадает с серверным _ams_slot_num). */
-function traySlotNum(t) { return num(t.unit) * 4 + num(t.slot); }
+/** Сквозной номер AMS 0–15, внешний вход — 254. */
+function traySlotNum(t) { return num(t.slot) === 254 ? 254 : num(t.unit) * 4 + num(t.slot); }
 function trayPresent(t) {
   return t.present !== false && (t.present || t.generic || t.type || t.uuid);
 }
@@ -270,7 +270,7 @@ function pslotHtml(p, x) {
     : '';
   return `<button class="${cls.join(' ')}" type="button" data-pslot="${esc(p.id)}:${slot}" title="${esc(title)}">`
     + `<span class="sw" style="background:${esc(swCss)}"></span>`
-    + `<span class="tx">${esc((x.type || (has ? 'AMS' : '—')) + ' · ' + (slot + 1))}<small>${esc(sub)}</small></span>`
+    + `<span class="tx">${esc((x.type || (has ? 'AMS' : '—')) + ' · ' + abSlotHuman(slot))}<small>${esc(sub)}</small></span>`
     + tankHtml
     + '</button>';
 }
@@ -569,6 +569,7 @@ async function startQueuedJob(pid, jobId, btn) {
 const abState = { pid: '', slot: 0, choice: '', q: '', mat: '' };
 function abSlotHuman(v) {
   const n = num(v);
+  if (n === 254) return 'внешний';
   return n > 15 ? String(v) : String(n + 1);
 }
 function openSlotPicker(pid, slot) {
@@ -817,14 +818,24 @@ function renderEtaClock(etaUnix, late) {
   host.classList.toggle('late', Boolean(late));
 }
 
-function renderLive() {
-  renderTabs();
+function renderTopPill() {
   const p = active();
   const pill = $('live_pill');
   if (!p) { pill.hidden = true; return; }
-  renderBedStatus(p);
-
   pill.hidden = false;
+  const st = p.printer.state, kind = STATE_KIND[st] || '';
+  $('live_dot').className = 'dot ' + (p.connection.connected ? (kind === 'running' ? 'busy' : 'ok') : 'bad');
+  text('live_name', p.name);
+  text('live_state', (p.printer.state_label || STATE_LABEL[st] || st)
+    + (kind === 'running' ? ` · ${Math.round(num(p.printer.progress))}%` : ''));
+}
+
+function renderLive() {
+  renderTabs();
+  renderTopPill();
+  const p = active();
+  if (!p) return;
+  renderBedStatus(p);
   const st = p.printer.state, kind = STATE_KIND[st] || '';
   // 13.1 (26): контекстные команды — «Пауза» только при печати, «Продолжить»
   // только в паузе, «Стоп» приглушён вне работы.
@@ -837,11 +848,6 @@ function renderLive() {
     if (resumeBtnEl) resumeBtnEl.hidden = !isPaused;
     if (stopBtnEl) stopBtnEl.hidden = !(isRun || isPaused);
   }
-  $('live_dot').className = 'dot ' + (p.connection.connected ? (kind === 'running' ? 'busy' : 'ok') : 'bad');
-  text('live_name', p.name);
-  text('live_state', (p.printer.state_label || STATE_LABEL[st] || st)
-    + (kind === 'running' ? ` · ${Math.round(num(p.printer.progress))}%` : ''));
-
   const dot = $('conn_dot');
   if (!$('offline-bar').classList.contains('show')) {
     dot.className = 'dot ' + (p.connection.connected ? 'ok' : 'warn');
@@ -877,10 +883,9 @@ function renderLive() {
 
   const progress = clamp(num(p.printer.progress), 0, 100);
   const progEl = $('pr_progress');
-  const progPrev = progEl ? progEl.textContent : '';
   const progNext = Math.round(progress) + '%';
   text('pr_progress', progNext);
-  U.countUp(progEl, progPrev, progNext);       // ПР2: плавный докрут процентов
+  // Телеметрия приходит часто: оставляем процент точным, без конкурирующих tween-анимаций.
   const ring = $('pr_ring');
   if (ring) ring.style.strokeDashoffset = String(283 - 283 * progress / 100);
   const layersFill = $('pr_layers_fill');       // ПР2: степпер слоёв под названием задания
@@ -1155,7 +1160,8 @@ function renderAms(p) {
   text('pr_ams_count', trays.length
     ? `${occupied.length} из ${trays.length} занято`
     : 'нет данных');
-  const hum = num(ams.humidity);
+  const rawHum = num(ams.humidity);
+  const hum = rawHum >= 1 && rawHum <= 5 ? rawHum * 20 : rawHum;
   const humZone = hum <= 20 ? { label: 'сухо', color: '#22c55e' }
     : hum <= 40 ? { label: 'норма', color: '#3b82f6' }
     : hum <= 60 ? { label: 'влажно', color: '#f59e0b' }
@@ -1163,7 +1169,7 @@ function renderAms(p) {
   const humBar = hum > 0 ? `<div style="display:inline-block;width:60px;height:8px;background:#e5e7eb;border-radius:4px;overflow:hidden;margin:0 6px;vertical-align:middle"><div style="width:${Math.min(100, hum)}%;height:100%;background:${humZone.color}"></div></div>` : '';
   const _amsEnv = $('pr_ams_env');
   if (_amsEnv) _amsEnv.innerHTML = ams.temperature != null || ams.humidity != null
-    ? `Температура ${esc(ams.temperature ?? '—')} °C · влажность ${humBar}${esc(ams.humidity ?? '—')}% (${esc(humZone.label)})`
+    ? `Температура ${esc(ams.temperature ?? '—')} °C · влажность ${humBar}${esc(ams.humidity == null ? '—' : (window.PFAmsPath ? PFAmsPath.humidityText(ams.humidity) : rawHum <= 5 ? 'уровень ' + rawHum + '/5' : rawHum + '%'))}`
     : 'Температура и влажность —';
   const pbtn = $('pr_ams_profiles');
   if (pbtn) pbtn.hidden = !trays.length;
@@ -1215,8 +1221,8 @@ function renderAms(p) {
       + `<small class="tube-tags">${generic ? 'сторонний' : (empty ? '' : 'RFID')}${spoolHint ? ' · ' + esc(spoolHint.slice(3)) : ''}</small>${spoolTag}</div>`
       + '<div class="acts">'
       + `<button class="btn sm bind" type="button" data-pslot="${esc(p.id)}:${slotNum}" title="Привязать складскую катушку к этому слоту">⇄ Склад</button>`
-      + (empty ? '' : `<button class="btn sm" type="button" data-ams-load="${esc(String(t.slot))}">Подать</button>`)
-      + `<button class="btn sm" type="button" data-ams-edit="${esc(String(t.unit))}:${esc(String(t.slot))}" data-type="${esc(t.type || '')}" data-color="${esc(t.color || '#cccccc')}" title="Изменить тип и цвет">Тип</button>`
+      + (empty || slotNum === 254 ? '' : `<button class="btn sm" type="button" data-ams-load="${esc(String(slotNum))}">Подать</button>`)
+      + (slotNum === 254 ? '<small>Внешняя подача · заправка вручную</small>' : `<button class="btn sm" type="button" data-ams-edit="${esc(String(t.unit))}:${esc(String(t.slot))}" data-type="${esc(t.type || '')}" data-color="${esc(t.color || '#cccccc')}" title="Изменить тип и цвет">Тип</button>`)
       + '</div></div>';
   }).join('') + amsMemoryHtml(p) + renderAmsSuggestion(p);
 }
@@ -1440,20 +1446,22 @@ function sparkLines(series, pts) {
     + '</svg>';
 }
 
-function camUrl(p, live) {
-  return live
-    ? `/api/printer/camera.mjpeg?printer_id=${encodeURIComponent(p.id)}&t=${camSession}`
-    : `/api/printer/camera.jpg?printer_id=${encodeURIComponent(p.id)}&t=${Date.now()}`;
+function camUrl(p) {
+  // MJPEG (multipart/x-mixed-replace) is blocked or left blank by several
+  // embedded Chromium clients. The connector already keeps the newest JPEG;
+  // use cache-busted still frames so the preview works in every supported UI.
+  return `/api/printer/camera.jpg?printer_id=${encodeURIComponent(p.id)}&t=${Date.now()}`;
 }
 
-/* Живой поток: один MJPEG-запрос вместо перекачки кадров по таймеру.
-   Переподключаем только при смене принтера, ошибке или ручном обновлении. */
+/* Получаем последний кадр из общего серверного соединения с камерой. */
 function renderCamera(p) {
   const cam = p.camera || {};
   const demo = !!cam.demo;
+  const live = !!cam.available && !demo && !cam.error && cam.age != null && num(cam.age) < 15;
   const img = $('pr_cam');
   const isCloudNoIP = p.connection && p.connection.mode === 'cloud' && !p.connection.host;
-  let statusText = cam.available ? (demo ? 'Демо-режим: заготовленные кадры' : 'Прямой эфир') : (cam.error || 'Нет сигнала');
+  let statusText = demo ? 'Демо-режим: заготовленные кадры'
+    : live ? 'Прямой эфир' : (cam.error || (cam.available ? 'Поток прерван · последний кадр' : 'Нет сигнала'));
   if (isCloudNoIP && !cam.available) statusText = 'Камера — только по локальной сети (укажите IP)';
   text('pr_cam_status', statusText);
   text('pr_cam_age', cam.available
@@ -1461,51 +1469,45 @@ function renderCamera(p) {
     : (isCloudNoIP ? 'Добавьте IP в Настройках → Принтеры' : '—'));
   $('pr_cam_demo').hidden = !demo;
   const emptyEl = $('pr_cam_empty');
+  ['pr_cam_shot', 'pr_cam_full'].forEach((id) => { if ($(id)) $(id).disabled = !cam.available; });
   if (isCloudNoIP && !cam.available) {
     emptyEl.innerHTML = '<span class="big">◉</span>Камера в облачном режиме недоступна<br><small>Принтер управляется через Bambu Cloud, а камера — только по локальной сети (порт 6000).<br>Решение: укажите IP принтера в Настройках → Принтеры → поле «IP-адрес» (посмотрите в Настройки → WLAN на экране принтера). После этого камера появится даже в облачном режиме. Или включите Демо-камеру для проверки интерфейса.</small><br><button class="btn sm" type="button" onclick="PF.modules.printer.openPrinterModal(PF.state.activePrinter)">Указать IP</button>';
     emptyEl.hidden = false;
-  } else if (!cam.available && p.connection.mode === 'cloud' && p.connection.connected) {
-    emptyEl.innerHTML = '<span class="big">◉</span>Облако подключено, камера ищет локальную сеть<br><small>порт 6000 · проверьте что ПК и принтер в одной Wi-Fi сети (192.168.x.x)</small>';
+  } else if (!cam.available && p.connection && p.connection.mode === 'cloud' && p.connection.connected) {
+    emptyEl.innerHTML = '<span class="big">◉</span>Видеопоток недоступен<br><small>' + esc(cam.error || 'Ожидаем первый кадр по локальной сети') + '</small>';
     emptyEl.hidden = false;
   } else {
-    if (emptyEl.dataset.cloudHtml) emptyEl.innerHTML = '<span class="big">◉</span>Ожидаем видеопоток<br><small>порт 6000 · только локальная сеть</small>';
+    emptyEl.innerHTML = '<span class="big">◉</span>Ожидаем видеопоток<br><small>' + esc(cam.error || 'порт 6000 · только локальная сеть') + '</small>';
     emptyEl.hidden = !!cam.available;
   }
   img.classList.toggle('on', !!cam.available);
   // ПР5: LIVE мигает чаще, когда кадр совсем свежий, и тускнеет на паузе потока
   const liveChip = img.parentElement.querySelector('.cam-live');
   if (liveChip) {
-    liveChip.classList.toggle('fresh', !!cam.available && !demo && num(cam.age) < 3);
-    liveChip.classList.toggle('stale', !!cam.available && num(cam.age) >= 30);
+    liveChip.hidden = !live;
+    liveChip.classList.toggle('fresh', live && num(cam.age) < 3);
+    liveChip.classList.toggle('stale', !live);
   }
   // 15.2: FPS потока виден рядом с LIVE — «камера живая» становится цифрой
   const fpsChip = img.parentElement.querySelector('.cam-fps');
   if (fpsChip) {
     const fpsVal = num(cam.fps);
-    fpsChip.hidden = !cam.available || demo || !fpsVal;
+    fpsChip.hidden = !live || !fpsVal;
     fpsChip.textContent = fpsVal ? fpsVal.toFixed(1) + ' к/с' : '';
   }
-  // 15.2: сторож потока. Сервер обрывает MJPEG по таймеру, а браузер при
-  // обрыве multipart не всегда дёргает onerror — картинка «замерзает».
-  // Возраст кадра приходит по SSE; вырос порог — пересобираем поток.
-  if (cam.available && !demo && camStream && num(cam.age) > 15) {
-    camSession = Date.now();
-    camStream = '';
-  }
-
   if (!cam.available) {
     if (camStream) { img.removeAttribute('src'); camStream = ''; }
     return;
   }
-  const key = p.id + ':' + camSession;
+  const refreshMs = num(cam.age) > 15 ? 10000 : 2500;
+  const key = p.id + ':' + Math.floor(Date.now() / refreshMs);
   if (camStream !== key) {
     camStream = key;
-    img.onerror = () => {                          // сорвался поток — соберём заново
+    img.onerror = () => {
       camStream = '';
-      camSession = Date.now();
     };
-    img.src = camUrl(p, true);
-    if ($('cam_modal').open) $('cam_full').src = camUrl(p, true);
+    img.src = camUrl(p, false);
+    if ($('cam_modal').open) $('cam_full').src = camUrl(p, false);
   }
   renderShots(p);
 }
@@ -1915,8 +1917,9 @@ function wallRender(data) {
       if (alarm) alarmEl.textContent = `${alarm.title}: ${alarm.reason || ''}`;
       el.querySelector('[data-demo]').hidden = !(t.camera && t.camera.demo);
       const img = el.querySelector('[data-cam]');
+      const frameBucket = Math.floor(Date.now() / (num(t.camera && t.camera.age) > 15 ? 10000 : 2500));
       const want = t.camera && t.camera.available
-        ? `/api/printer/camera.mjpeg?printer_id=${encodeURIComponent(t.id)}&t=${camSession}` : '';
+        ? `/api/printer/camera.jpg?printer_id=${encodeURIComponent(t.id)}&t=${frameBucket}` : '';
       if (want && img.dataset.src !== want) { img.dataset.src = want; img.src = want; }
       if (!want && img.dataset.src) { img.removeAttribute('src'); delete img.dataset.src; }
     });
@@ -2663,7 +2666,7 @@ function bind() {
   });
 
   $('pr_cam_reload').addEventListener('click', () => {
-    camSession = Date.now(); camStream = '';        // новый ключ — поток пересоберётся
+    camStream = '';                                // принудительно запросить свежий кадр
     PF.poll();
   });
   /* 119: разметка стола и проекция плиты */
@@ -3102,7 +3105,9 @@ function bindLinkOrder() {
 PF.on('ready', () => { bindAmsProfiles(); bindSchedule(); bindAmsMemory();
   bind();
   bindLinkOrder();
-  renderTabs();
+  // Bootstrap уже содержит первый снимок. Отрисовываем детали сразу:
+  // иначе до следующего SSE/опроса карточка живая, а обзор пустой.
+  renderLive();
   $('queue_auto').checked = !!PF.state.settings.auto_queue;
   const tag = $('nav_printers_tag');
   const total = PF.state.printers.length;
@@ -3110,7 +3115,8 @@ PF.on('ready', () => { bindAmsProfiles(); bindSchedule(); bindAmsMemory();
   tag.textContent = String(total);
   loadBedReference();
 });
-PF.on('live', PF.whenView('printers', () => { renderLive(); }));
+PF.on('live', () => { if (PF.viewOn('printers')) renderLive(); else renderTopPill(); });
+PF.on('data', PF.whenView('printers', () => { renderLive(); }));
 PF.on('printers', PF.whenView('printers', () => { renderTabs(); }));
 PF.on('view', (d) => {
   if (d.view === 'printers') { loadFiles(); loadEvents(); loadAmsMemory(PF.state.activePrinter); }

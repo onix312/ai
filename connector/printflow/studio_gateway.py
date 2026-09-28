@@ -429,7 +429,10 @@ class StudioGateway:
 
     def _mode(self) -> str:
         try:
-            return str(self.db.setting("studio_gateway_mode", "confirm") or "confirm").strip().lower()
+            mode = str(self.db.setting("studio_gateway_mode", "confirm") or "confirm").strip().lower()
+            # Старое значение «printer» осталось в базах после удаления
+            # режима из интерфейса; сохраняем ожидаемую постановку в очередь.
+            return "queue" if mode == "printer" else mode
         except Exception:
             return "confirm"
 

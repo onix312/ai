@@ -21,7 +21,7 @@ import time
 from typing import Any, Callable
 
 from .accounting import num
-from .bambu import STATE_NAMES, CameraWorker
+from .bambu import SPEED_LEVELS, STATE_NAMES, CameraWorker
 from .db import Database
 
 VIRTUAL_ID = "virtual"
@@ -90,6 +90,11 @@ class VirtualPrinter:
         self._est_grams = 0.0
         self._speed_level = 2
         self._light = "off"
+        self._nozzle_target: int | None = None
+        self._bed_target: int | None = None
+        self._fans: dict[str, int | None] = {"part": None, "aux": None, "chamber": None}
+        self._flow = 100
+        self._speed_pct = 100
         self._finish_at = 0.0
         self._accumulated = 0.0  # минут печати, накопленных до текущей паузы
         self.session: dict[str, Any] | None = None
@@ -149,7 +154,17 @@ class VirtualPrinter:
 
     def _tick(self) -> None:
         with self._lock:
-            if self._state in ("PRINTING", "FINISH"):
+            if self._state == "FINISH":
+                # Завершение сразу переводит задание в финальное состояние БД,
+                # поэтому искать active job здесь уже нельзя.
+                if time.time() - self._finish_at > 3:
+                    self._state = "IDLE"
+                    self._filename = ""
+                    self._subtask_name = ""
+                    self._started_ts = 0.0
+                    self._task_id = ""
+                return
+            if self._state == "PRINTING":
                 job = self._active_job()
                 if not job:
                     # Задание отменили или убрали — станок останавливаем молча:
@@ -169,17 +184,12 @@ class VirtualPrinter:
                         self.on_event("complete", "Печать завершена",
                                       self._display_name(), self._session_data())
                         return
-                elif self._state == "FINISH":
-                    # Как у реального принтера: FINISH держим пару секунд, потом IDLE.
-                    if time.time() - self._finish_at > 3:
-                        self._state = "IDLE"
-                        self._filename = ""
 
     def start_print(self, filename: str, plate: int = 1, use_ams: bool = True,
                     ams_mapping=None, bed_level: bool = True, flow_cali: bool = False,
                     timelapse: bool = False, subtask_name: str = "") -> dict:
         with self._lock:
-            if self._state == "PRINTING":
+            if self._state in ("PRINTING", "PAUSE", "FINISH"):
                 raise ValueError("Виртуальный принтер уже печатает")
             self._state = "PRINTING"
             self._filename = filename
@@ -222,12 +232,39 @@ class VirtualPrinter:
                 self._filename = ""
                 return {"ok": True}
             if name in ("light", "light_toggle"):
-                self._light = "on" if self._light == "off" else "off"
+                if value is None or name == "light_toggle":
+                    self._light = "off" if self._light == "on" else "on"
+                else:
+                    self._light = "on" if value in (True, "on", 1, "1") else "off"
                 return {"ok": True}
             if name in ("speed", "speed_level") and value is not None:
-                self._speed_level = int(num(value, 2))
+                level = int(num(value, 2))
+                if level not in SPEED_LEVELS:
+                    raise ValueError("Режим скорости: 1–4")
+                self._speed_level = level
                 return {"ok": True}
-        return {"ok": True, "virtual": True}
+            if name in ("nozzle_temp", "bed_temp"):
+                temp = int(num(value, -1))
+                limit = 300 if name == "nozzle_temp" else 110
+                if not 0 <= temp <= limit:
+                    raise ValueError(f"Температура должна быть от 0 до {limit} °C")
+                if name == "nozzle_temp":
+                    self._nozzle_target = temp
+                else:
+                    self._bed_target = temp
+                return {"ok": True}
+            if name in ("part_fan", "aux_fan", "chamber_fan"):
+                self._fans[name.removesuffix("_fan")] = max(0, min(100, int(num(value))))
+                return {"ok": True}
+            if name == "flow":
+                self._flow = max(50, min(150, int(num(value, 100))))
+                return {"ok": True}
+            if name == "speed_pct":
+                self._speed_pct = max(10, min(400, int(num(value, 100))))
+                return {"ok": True}
+        if name == "refresh":
+            return {"ok": True, "virtual": True}
+        return {"ok": False, "virtual": True, "error": f"Команда не поддерживается виртуальным принтером: {name}"}
 
     # ------------------------------------------------------------- телеметрия
     def _ams_trays(self) -> list[dict[str, Any]]:
@@ -310,8 +347,10 @@ class VirtualPrinter:
                     "layer": layer,
                     "total_layers": self._total_layers,
                     "speed_level": self._speed_level,
-                    "speed_label": "Standard",
-                    "speed_percent": 100,
+                    "speed_label": SPEED_LEVELS.get(self._speed_level, SPEED_LEVELS[2]),
+                    "speed_percent": {1: 50, 2: 100, 3: 124, 4: 166}.get(self._speed_level, 100)
+                    * self._speed_pct / 100,
+                    "flow": self._flow,
                     "wifi": "virtual", "firmware": "8.5.0-virtual",
                     "print_error": 0, "hms": [], "problems": [], "severity": "",
                     "sdcard": False, "weight": round(weight, 1),
@@ -319,14 +358,19 @@ class VirtualPrinter:
                     "elapsed_min": round(elapsed, 1),
                 },
                 "temperature": {
-                    "nozzle": 218.0 if running else 25.0,
-                    "nozzle_target": 215.0 if running else 0.0,
-                    "bed": 60.0 if running else 25.0,
-                    "bed_target": 60.0 if running else 0.0,
+                    "nozzle": (max(25.0, min(218.0, float(self._nozzle_target)))
+                               if self._nozzle_target is not None else 218.0 if running else 25.0),
+                    "nozzle_target": (float(self._nozzle_target) if self._nozzle_target is not None
+                                      else 215.0 if running else 0.0),
+                    "bed": (max(25.0, min(60.0, float(self._bed_target)))
+                            if self._bed_target is not None else 60.0 if running else 25.0),
+                    "bed_target": (float(self._bed_target) if self._bed_target is not None
+                                   else 60.0 if running else 0.0),
                     "chamber": 30.0,
                 },
-                "fans": {"part": 100 if running else 0,
-                         "aux": 50 if running else 0, "chamber": 0},
+                "fans": {"part": self._fans["part"] if self._fans["part"] is not None else 100 if running else 0,
+                         "aux": self._fans["aux"] if self._fans["aux"] is not None else 50 if running else 0,
+                         "chamber": self._fans["chamber"] if self._fans["chamber"] is not None else 0},
                 "light": self._light,
                 "ams": {
                     "units": 1, "humidity": 35.0, "temperature": 25.0,

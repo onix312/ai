@@ -79,7 +79,7 @@ function renderDashboard() {
     kpi('Очередь печати', hoursText(needHours), `${nfmt(queuedJobs.length)} заданий · ${pct(load)} от ${nfmt(capacity)} ч в неделю`,
       load > 100 ? 'bad' : load > 85 ? 'warn' : '',
       `<div class="bar ${load > 100 ? 'bad' : load > 85 ? 'warn' : ''}"><i style="width:${clamp(load, 0, 100)}%"></i></div>`),
-    kpi('Активные заказы', String(activeOrders.length), `${nfmt(farm.queued)} заданий в производстве`),
+    kpi('Активные заказы', String(activeOrders.length), `В очереди запуска: ${nfmt(farm.queued)}`),
     kpi('Прибыль за период', money(s.profit), `маржа ${pct(s.margin)}` + (farm.today_hours ? ` · сегодня ${nfmt(farm.today_hours, 1)} ч` : ''), num(s.profit) >= 0 ? 'ok' : 'bad'),
   ].join(''));
   animateKpis();
@@ -223,7 +223,7 @@ function renderOperatorFocus() {
     return !Number.isFinite(at) || Date.now() - at <= 48 * 60 * 60 * 1000;
   }).slice(0, 3);
   if (failed.length) {
-    add(1, '✕', `${failed.length} печать${failed.length === 1 ? '' : 'и'} завершилась браком`,
+    add(1, '✕', `Брак печати · ${failed.length}`,
       failed.map((j) => j.name || j.file || 'Без имени').join(' · '), 'Открыть журнал', route('queue'));
   }
 
@@ -522,6 +522,24 @@ function heroReleaseWidgets(host) {
   if (lay && lay._layers) lay._layers.destroy();
 }
 
+function refreshHeroCamera(host, printer) {
+  const img = host && host.querySelector('.hero-cam-img');
+  if (!img) return;
+  const camera = printer.camera || {};
+  const age = num(camera.age);
+  const live = !!camera.available && !camera.demo && !camera.error && camera.age != null && age < 15;
+  const badge = host.querySelector('.hero-cam-badge');
+  if (badge) badge.textContent = camera.demo ? 'ДЕМО' : live ? 'LIVE' : 'ПОСЛЕДНИЙ КАДР';
+  const period = age > 15 ? 10000 : 2500;
+  const bucket = String(Math.floor(Date.now() / period));
+  if (img.dataset.frameBucket === bucket) return;
+  img.dataset.frameBucket = bucket;
+  img.onerror = () => {
+    img.dataset.frameBucket = '';
+  };
+  img.src = `/api/printer/camera.jpg?printer_id=${encodeURIComponent(printer.id)}&t=${Date.now()}`;
+}
+
 function renderActivePrint() {
   const host = $('dash_active');
   const live = PF.state.live;
@@ -593,7 +611,7 @@ function renderActivePrint() {
       $('dash_active_sub').textContent = `${esc(p.name)} · ${esc(isConn ? (info.state_label || 'Готов к печати') : 'Нет связи')}`;
     }
     const queue = (PF.state.jobs && PF.state.jobs.queue) || [];
-    const queuedJobs = queue.filter((j) => !['done', 'failed', 'cancelled'].includes(j.state));
+    const queuedJobs = queue.filter((j) => j.state === 'queued' && (!j.printer_id || j.printer_id === p.id));
     const nextJob = queuedJobs[0];
     const key = ['idle', p.id, isConn ? 1 : 0, info.state_label || '', nextJob ? nextJob.id : '', nextJob ? nextJob.name : ''].join('|');
     if (host && host.dataset.heroKey === key && host.querySelector('[data-hf="telemetry"]')) {
@@ -672,7 +690,7 @@ function renderActivePrint() {
     $('dash_active_sub').textContent = `${esc(p.name)} · ${esc(info.state_label || 'Печать')}`;
   }
 
-  const camAvailable = p.camera && p.camera.available !== false;
+  const camAvailable = !!(p.camera && p.camera.available);
   const speedLvl = num(info.speed_level, 2) || 2;
   const remHtml = remaining ? `Осталось <b>${minutesText(remaining)}</b>` : (info.state === 'PAUSE' ? 'На паузе' : '');
   const key = ['run', p.id, camAvailable ? 1 : 0, info.state === 'PAUSE' ? 1 : 0, order.number || '', order.id || '', info.task || '', PF.state.camSession || ''].join('|');
@@ -689,16 +707,15 @@ function renderActivePrint() {
     if (knobEl && knobEl._knob) knobEl._knob.set(speedLvl);
     const layEl = host.querySelector('[data-hf="layers"]');
     if (layEl && layEl._layers) layEl._layers.update({ layer: info.layer, total: info.total_layers });
+    refreshHeroCamera(host, p);
     return;
   }
 
-  const camUrl = `/api/printer/camera.mjpeg?printer_id=${encodeURIComponent(p.id)}&t=${PF.state.camSession || Date.now()}`;
   const camHtml = camAvailable ? `
     <div class="hero-cam-col">
       <div class="hero-cam-wrap">
         <span class="hero-cam-badge"><i class="live-red"></i> LIVE</span>
-        <img class="hero-cam-img" src="${camUrl}" alt="Камера ${esc(p.name)}"
-             onerror="this.parentElement.innerHTML='<div class=\\'hero-cam-fallback\\'><span class=\\'ic\\'>📷</span><span>Камера принтера временно недоступна</span></div>'">
+        <img class="hero-cam-img" alt="Камера ${esc(p.name)}">
       </div>
     </div>` : `
     <div class="hero-cam-col">
@@ -766,8 +783,9 @@ function renderActivePrint() {
           <div class="hero-block-head"><b>Тракт AMS</b><small>подсвечена трубка, из которой станок печатает сейчас</small></div>
           <div data-hf="ams"></div>
         </div>
-        <div class="hero-layers-block" data-hf="layers"></div>
-      </div>`;
+      <div class="hero-layers-block" data-hf="layers"></div>
+    </div>`;
+    refreshHeroCamera(host, p);
     if (window.PFAmsPath) PFAmsPath.mount(host.querySelector('[data-hf="ams"]'), p.ams, { compact: true });
     const knobEl = host.querySelector('[data-hf="knob"]');
     if (knobEl && window.PFKnob) {
@@ -1431,7 +1449,7 @@ const WATCH = [
 // Группа FarmLoop (18.8) переехала в раздел «Конвейер» (conveyor.js):
 // настройки живут там, где конвейер настраивают, а не в свалке «Настройки».
 const STUDIO = [
-  ['studio_gateway_enabled', 'Шлюз Bambu Studio (Studio Gateway)', 'Studio находит PrintFlow как принтер в LAN. Slice/Print падает в очередь с preflight и AMS-map.', 'bool'],
+  ['studio_gateway_enabled', 'Подключить Bambu Studio', 'PrintFlow появится в Studio как виртуальный принтер. Задания проходят preflight и попадают в выбранную очередь.', 'bool'],
   ['studio_gateway_mode', 'Режим обработки заданий', 'confirm — подтверждение на пульте/ПК; queue — сразу в очередь; autostart — печать сразу', 'select', [
     ['confirm', 'confirm — Окно подтверждения на пульте/ПК (безопасно)'],
     ['queue', 'queue — Сразу отправлять в очередь печати'],
@@ -1492,7 +1510,7 @@ const PHASE11 = [
   ['first_layer_watch_min', 'Смотреть первый слой, мин', 'Первые N минут после старта сверяем кадр со столом (0 = выключено)', 'num', 1],
   ['bed_watch_enabled', 'Проверка «деталь на столе»', 'После финиша кадр сравнивается с эталоном пустого стола', 'bool'],
   ['bed_watch_threshold', 'Порог пустого стола, %', 'Разница кадров, выше которой «стол не пуст»', 'num', 1],
-  ['demo_printer_enabled', 'Виртуальный принтер P1S', 'Симулятор для тестов и демо: очередь, телеметрия, камера-демо', 'bool'],
+  ['demo_printer_enabled', 'Виртуальный принтер P1S', 'Изолированный симулятор очереди и телеметрии — физические принтеры не затрагиваются.', 'bool'],
   ['demo_speed', 'Скорость демо, мин/с', 'Насколько быстрее реального времени идёт виртуальная печать', 'num', 1],
 ];
 const SYSTEM2 = [
@@ -2133,6 +2151,8 @@ function renderSettings() {
         + `</select>`;
 
       put('set_studio', settingGroup(STUDIO)
+        + settingRow('studio_gateway_printer_id', 'Безопасная проверка очереди',
+          'Включите «Виртуальный принтер P1S», выберите его ниже и поставьте режим queue. Задания из Studio пройдут в тестовую очередь без команд физическому станку.', '')
         + settingRow('studio_gateway_printer_id', 'Принтер по умолчанию для шлюза', 'На какой принтер направлять печать из Studio', printerSelect)
         + settingRow('studio_gateway_access_code', 'Access Code для Studio',
           s.has_studio_gateway_access_code
@@ -2645,6 +2665,12 @@ async function saveSettings() {
   try {
     const res = await post('/api/settings', payload);
     PF.setSettings(res.settings);
+    // Переключение виртуального P1S меняет состав парка. Сначала перечитываем
+    // его, чтобы свежий принтер сразу появился в выборе цели Studio.
+    if (Object.prototype.hasOwnProperty.call(payload, 'demo_printer_enabled')
+        && PF.refreshBootstrapPrinters) {
+      await PF.refreshBootstrapPrinters();
+    }
     // Не теряем правки, сделанные уже во время запроса.
     draftSnapshot.forEach((draft, key) => {
       if (settingsDraft.get(key) === draft) settingsDraft.delete(key);

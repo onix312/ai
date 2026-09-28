@@ -51,6 +51,12 @@ class _Printer:
 
 
 class PrinterRouteTests(unittest.TestCase):
+    def test_external_and_second_ams_slot_numbers(self):
+        from connector.printflow.api import Api
+        self.assertEqual(254, Api._ams_slot_num(None, {"unit": 255, "slot": 254}))
+        self.assertEqual(6, Api._ams_slot_num(None, {"unit": 1, "slot": 2}))
+        self.assertEqual(6, Api._ams_slot_num(None, {"slot": 6}))
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
@@ -68,7 +74,7 @@ class PrinterRouteTests(unittest.TestCase):
             printers=lambda: [{"id": "p1", "name": "P1S"}])
         self.guard = _Guard()
         self.printer = _Printer(health=lambda: {"ok": True, "nozzle": 12})
-        self.api.manager = types.SimpleNamespace(guard=self.guard)
+        self.api.manager = types.SimpleNamespace(guard=self.guard, printers={})
         self.api.printer_or_fail = lambda printer_id="": (
             self.printer if printer_id == "p1"
             else (_ for _ in ()).throw(ValueError("Принтер не настроен.")))
@@ -77,6 +83,19 @@ class PrinterRouteTests(unittest.TestCase):
         code, payload = self.api.get("/api/printers", {})
         self.assertEqual(200, code)
         self.assertEqual([{"id": "p1", "name": "P1S"}], payload["printers"])
+
+    def test_enabled_virtual_printer_appears_in_target_lists(self):
+        self.api.manager.printers["virtual"] = types.SimpleNamespace(
+            id="virtual", record={"name": "P1S (виртуальный)", "model": "P1S"},
+            mode="virtual")
+        self.db.set_settings({"demo_printer_enabled": True})
+        code, payload = self.api.get("/api/printers", {})
+        self.assertEqual(200, code)
+        virtual = next(row for row in payload["printers"] if row["id"] == "virtual")
+        self.assertTrue(virtual["virtual"])
+        self.assertEqual("virtual", virtual["host"])
+        self.assertEqual("P1S", virtual["model"])
+        self.assertFalse(virtual["has_access_code"])
 
     def test_telemetry_keeps_default_window(self):
         code, payload = self.api.get("/api/printer/telemetry", {"printer_id": ["p1"]})

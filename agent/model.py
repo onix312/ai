@@ -192,36 +192,79 @@ def visible_text(text: str) -> str:
     return "\n".join(line for line in lines if line).strip()
 
 
+def _prompt_messages(messages: list[dict[str, Any]], system: str) -> tuple[list[dict[str, str]], str]:
+    """Keep the latest request whole and fit all textual turns in one budget."""
+    turns = []
+    for turn in messages or []:
+        if not isinstance(turn, dict):
+            continue
+        role = str(turn.get("role") or "")
+        content = str(turn.get("content") or "").strip()
+        if role in ("user", "assistant", "tool") and content:
+            turns.append({"role": role, "content": content})
+    if not any(turn["role"] == "user" for turn in turns):
+        return [], "Пустой запрос к модели"
+    latest = turns[-1]
+    if latest["role"] != "user":
+        return [], "Последняя реплика должна быть запросом человека"
+    if len(latest["content"]) > MAX_PROMPT_CHARS:
+        return [], f"Запрос слишком длинный: не больше {MAX_PROMPT_CHARS} символов"
+
+    clean: list[dict[str, str]] = []
+    system_text = system.strip()
+    if system_text:
+        # The agent's generated skill catalog can be long. Preserve both its
+        # opening rules and closing constraints when shortening the middle.
+        limit = min(8000, MAX_PROMPT_CHARS - len(latest["content"]))
+        if limit < 256:
+            return [], "Запрос слишком длинный для правил помощника; сократите текст"
+        if len(system_text) > limit:
+            marker = "\n…\n"
+            head = (limit - len(marker)) // 2
+            system_text = system_text[:head] + marker + system_text[-(limit - len(marker) - head):]
+        clean.append({"role": "system", "content": system_text})
+
+    remaining = MAX_PROMPT_CHARS - sum(len(turn["content"]) for turn in clean) - len(latest["content"])
+    recent: list[dict[str, str]] = []
+    for turn in reversed(turns[:-1]):
+        length = len(turn["content"])
+        if length > remaining:
+            break
+        recent.append(turn)
+        remaining -= length
+    clean.extend(reversed(recent))
+    clean.append(latest)
+    return clean, ""
+
+
 def chat(messages: list[dict[str, Any]], *, system: str = "", fmt: str | dict | None = None,
          url: str = "", name: str = "", timeout: float | None = None,
          temperature: float = 0.2, images: list[bytes] | None = None,
-         max_chars: int = MAX_REPLY_CHARS) -> dict[str, Any]:
+         max_chars: int = MAX_REPLY_CHARS,
+         state: dict[str, Any] | None = None) -> dict[str, Any]:
     """Диалог с моделью: системная роль, история, JSON-режим, картинки.
 
     `messages` — список `{role, content}` (роли user/assistant); `system`
     ставится первым сообщением. `fmt="json"` включает режим Ollama, в котором
     ответ обязан быть JSON — планировщик не разбирает прозу регулярками.
     `images` прикладываются к последнему сообщению человека (base64), и только
-    для модели, которая их видит (`vision_ok`).
+    для модели, которая их видит (`vision_ok`). `state` — уже проверенный
+    результат `status()`, чтобы вызывающий, который сначала выбирал маршрут,
+    не делал второй сетевой запрос перед тем же вызовом.
     """
-    state = status(url, name)
+    # Вызывающий мог уже проверить модель перед выбором маршрута; используем
+    # этот результат и не опрашиваем `/api/tags` повторно.
+    state = dict(state) if isinstance(state, dict) else status(url, name)
+    if state.get("ok"):
+        local, why = loopback_ok(str(state.get("url") or ""))
+        if not local:
+            return {"ok": False, "text": "", "reason": f"Адрес рантайма должен быть этим компьютером: {why}",
+                    "model": str(state.get("model") or "")}
     if not state["ok"]:
         return {"ok": False, "text": "", "reason": state["reason"], "model": state["model"]}
-    clean: list[dict[str, Any]] = []
-    if system.strip():
-        clean.append({"role": "system", "content": system[:MAX_PROMPT_CHARS]})
-    budget = MAX_PROMPT_CHARS
-    for turn in messages or []:
-        if not isinstance(turn, dict):
-            continue
-        role = str(turn.get("role") or "")
-        content = str(turn.get("content") or "").strip()
-        if role not in ("user", "assistant", "tool") or not content:
-            continue
-        clean.append({"role": role, "content": content[:budget]})
-        budget = max(400, budget - len(content))
-    if not any(turn["role"] == "user" for turn in clean):
-        return {"ok": False, "text": "", "reason": "Пустой запрос к модели", "model": state["model"]}
+    clean, problem = _prompt_messages(messages, system)
+    if problem:
+        return {"ok": False, "text": "", "reason": problem, "model": state["model"]}
     if images:
         for turn in reversed(clean):
             if turn["role"] == "user":
@@ -249,7 +292,7 @@ def chat(messages: list[dict[str, Any]], *, system: str = "", fmt: str | dict | 
 def complete(prompt: str, url: str = "", name: str = "",
              timeout: float | None = None) -> dict[str, Any]:
     """Один запрос к модели одной строкой. Пустой ответ и мусор — отказ с причиной."""
-    text = str(prompt or "")[:MAX_PROMPT_CHARS]
+    text = str(prompt or "")
     if not text.strip():
         state = status(url, name)
         if not state["ok"]:

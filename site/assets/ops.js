@@ -161,6 +161,11 @@ function syncFilterControls() {
   $$('#orders_chan button').forEach((b) => b.classList.toggle('on', b.dataset.chan === filters.chan));
   const sort = $('orders_sort');
   if (sort) sort.value = filters.sort;
+  const extraLabel = document.querySelector('#orders_more_filters > summary');
+  if (extraLabel) {
+    const count = Number(!!filters.niche) + Number(!!filters.chan) + Number(filters.sort !== 'new');
+    extraLabel.textContent = count ? `Доп. фильтры · ${count}` : 'Доп. фильтры';
+  }
   const ps = $('orders_preset');
   if (ps && activePreset !== '__save') {
     // Ручные фильтры — честная подпись вместо чужого имени вида.
@@ -4533,7 +4538,13 @@ PF.on('data', PF.whenView(['orders', 'customers'], () => {
   if (PF.viewOn('customers')) renderCustomers();
 }));
 PF.on('finance', PF.whenView('niches', () => { renderNiches(); }));
-PF.on('view', (detail) => { if (detail.view === 'customers') loadAftercare(); });
+PF.on('view', (detail) => {
+  if (detail.view === 'orders' && PF.dataReady) { fillSelectors(); renderOrders(); }
+  if (detail.view === 'customers') {
+    if (PF.dataReady) renderCustomers();
+    loadAftercare();
+  }
+});
 
 PF.modules.ops = { openOrder, openOrderFulfillment, openOrderStock, openNiche, renderOrders, fillSelectors, loadAftercare };
 /* 14.0 (идея 57): #orders/<id> открывает карточку заказа. */

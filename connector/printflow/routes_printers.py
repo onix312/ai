@@ -41,7 +41,27 @@ def printer_links(api: Any, ctx: Ctx):
 
 @router.get("/api/printers", doc="Список принтеров без секретов")
 def printers(api: Any, ctx: Ctx):
-    return {"printers": api.repo.printers()}
+    rows = api.repo.printers()
+    # Виртуальный P1S живёт только в памяти менеджера и не может попадать в
+    # таблицу физических устройств. Но UI очереди и привязка Studio берут
+    # варианты именно из этого эндпоинта.
+    try:
+        from .virtual import VIRTUAL_ID
+        demo = api.manager.printers.get(VIRTUAL_ID)
+        if demo and bool(api.db.setting("demo_printer_enabled", False)):
+            rows.append({
+                "id": VIRTUAL_ID,
+                "name": demo.record.get("name") or "P1S (виртуальный)",
+                "model": demo.record.get("model") or "P1S",
+                "host": "virtual", "serial": "", "access_code": "",
+                "enabled": 1, "has_ams": 1, "position": 99999,
+                "notes": "Безопасный симулятор", "mode": "virtual",
+                "has_access_code": False, "virtual": True,
+            })
+    except Exception:
+        # Не ломаем основной список реальных принтеров при проблеме демо-модуля.
+        pass
+    return {"printers": rows}
 
 
 @router.get("/api/pult/summary", doc="Сводка для пульта цеха: парк, очередь, AMS, катушки")

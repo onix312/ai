@@ -103,6 +103,9 @@ class _FakeSSLSock:
     def close(self):
         self._stop.set()
 
+    def shutdown(self, how):
+        self._stop.set()
+
     def __enter__(self):
         return self
 
@@ -176,6 +179,53 @@ class FpsConfigTests(unittest.TestCase):
         self.assertEqual(int(opts.get("min", -1)), 0)
         self.assertEqual(int(opts.get("max", -1)), 30)
         self.assertIn(group, GROUPS)               # группа описана в справочнике
+
+
+class CameraFailureTests(unittest.TestCase):
+    def test_connection_failure_never_enables_demo(self):
+        worker = CameraWorker(lambda: {"host": "printer.lan", "access_code": "code"})
+        worker._stop.wait = lambda seconds: worker._stop.set()
+        with mock.patch("connector.printflow.camera.socket.create_connection",
+                        side_effect=TimeoutError("timed out")):
+            worker._run()
+        self.assertFalse(worker.state()["demo"])
+        self.assertFalse(worker.state()["available"])
+        self.assertIn("LAN Liveview", worker.state()["error"])
+
+    def test_stale_demo_flag_does_not_override_setting(self):
+        worker = CameraWorker(lambda: {"demo": False})
+        worker.demo = True
+        self.assertFalse(worker._demo_tick())
+
+    def test_explicit_demo_is_labelled(self):
+        worker = CameraWorker(lambda: {"demo": True})
+        worker._stop.set()
+        with mock.patch("connector.printflow.camera.demo_frames", return_value=[JPEG]):
+            self.assertTrue(worker._demo_tick())
+        self.assertTrue(worker.state()["demo"])
+        self.assertEqual(worker.frame, JPEG)
+
+    def test_tls_alone_does_not_clear_failure(self):
+        worker = CameraWorker(lambda: {"host": "printer.lan", "access_code": "code"})
+        worker.error = "previous failure"
+        sock = mock.MagicMock()
+        sock.__enter__.return_value = sock
+        def no_frame(_size):
+            self.assertEqual(worker.error, "previous failure")
+            worker._stop.set()
+            raise TimeoutError("timed out")
+        sock.recv.side_effect = no_frame
+        worker._tls_context = lambda: mock.Mock(wrap_socket=lambda *a, **k: sock)
+        with mock.patch("connector.printflow.camera.socket.create_connection"):
+            worker._run()
+        self.assertIsNone(worker.frame)
+
+    def test_stop_closes_active_socket(self):
+        worker = CameraWorker(lambda: {})
+        worker._socket = mock.Mock()
+        worker.stop()
+        worker._socket.shutdown.assert_called_once()
+        worker._socket.close.assert_called_once()
 
 
 if __name__ == "__main__":

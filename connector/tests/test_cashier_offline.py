@@ -280,7 +280,7 @@ class FrontendContractTests(unittest.TestCase):
         # «открыть банк», и «отправить ссылку» покупателю, а не только показывать код.
         self.assertIn("function payLink(tpl,total){", self.js)
         self.assertIn('if(t.indexOf("{amount")<0)return "";', self.js)
-        self.assertIn('t.replace(/\{amount_kop\}/g,String(Math.round(v*100)))', self.js)
+        self.assertIn(r't.replace(/\{amount_kop\}/g,String(Math.round(v*100)))', self.js)
         self.assertIn("function qrOpenUrl(url,link){", self.js)
         self.assertIn("bOpen.textContent=\"Открыть банк\"", self.js)
         # после офлайна подпись кнопки обязана возвращаться к онлайн-смыслу

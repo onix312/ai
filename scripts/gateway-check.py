@@ -881,6 +881,10 @@ def main(argv: list[str] | None = None) -> int:
                         help="добавить входящие правила брандмауэра (Windows, права админа)")
     parser.add_argument("--json", action="store_true", help="машинночитаемый вывод")
     args = parser.parse_args(argv)
+    # JSON-строка остаётся ASCII, поэтому корректно проходит через любую
+    # системную кодовую страницу Windows; обычный отчёт не падает на стрелках.
+    if not args.json and hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(errors="replace")
 
     site_hosts = get_local_ips()
     host = args.host.strip() or (site_hosts[0] if site_hosts else "127.0.0.1")
@@ -981,7 +985,7 @@ def main(argv: list[str] | None = None) -> int:
             "results": [{k: v for k, v in item.items() if k != "payload"}
                         for _name, item in results],
             "advice": advice,
-        }, ensure_ascii=False, indent=2, default=str))
+        }, ensure_ascii=True, indent=2, default=str))
     else:
         print_report(host, results, advice, passed, CHECKS_TOTAL)
     return 0 if passed == CHECKS_TOTAL and not any(

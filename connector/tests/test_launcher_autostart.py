@@ -224,6 +224,7 @@ class AutostartOperationsTests(unittest.TestCase):
             with mock.patch.object(Path, "home", return_value=home), \
                  mock.patch.object(pf, "DATA_DIR", home / "data"), \
                  mock.patch.object(pf, "RUN_LOG", home / "data/launcher.log"), \
+                 mock.patch.object(pf.os, "getuid", return_value=501, create=True), \
                  mock.patch.object(pf.subprocess, "run",
                                    side_effect=[succeeded, succeeded, failed, succeeded]) as run:
                 success, mechanism, _ = pf._enable_macos_autostart(self.args())

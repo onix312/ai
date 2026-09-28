@@ -631,10 +631,16 @@ class AgentHandler(BaseHTTPRequestHandler):
             return self._json(200, agent.confirm_action(str(body.get("id") or ""),
                                                         bool(body.get("confirmed"))))
         if path == "/chat":
+            if body.get("contract_version", 1) != 1:
+                return self._json(400, {"ok": False, "error": "Неподдерживаемая версия контракта помощника"})
             plan = body.get("plan") if isinstance(body.get("plan"), dict) else None
             mode = "pc" if str(body.get("mode") or "") == "pc" else "full"
-            return self._json(200, agent.chat(str(body.get("text") or ""),
-                                              str(body.get("session") or "main"), mode, plan))
+            request_id = str(body.get("request_id") or "").strip()
+            if not request_id or len(request_id) > 80 or not all(c.isalnum() or c in "_.:-" for c in request_id):
+                request_id = uuid.uuid4().hex
+            answer = agent.chat(str(body.get("text") or ""),
+                                str(body.get("session") or "main"), mode, plan)
+            return self._json(200, {**answer, "contract_version": 1, "request_id": request_id})
         if path == "/chat/clear":
             session = brain_mod.session_key(str(body.get("session") or "main"))
             cleared = agent.runner.store.clear_dialog(session)
