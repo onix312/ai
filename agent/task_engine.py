@@ -268,6 +268,28 @@ class TaskEngine:
                 "SELECT id FROM assistant_tasks ORDER BY id DESC LIMIT ?", (limit,))
         return [task for row in rows if (task := self.get(int(row["id"]))) is not None]
 
+    def _autonomy_preflight(self, task: dict[str, Any], mode: str = "task") -> tuple[bool, str, dict[str, Any] | None]:
+        policy = getattr(self.agent, "autonomy", None)
+        if policy is None:
+            return True, "", None
+        learned = {}
+        runner = getattr(self.agent, "runner", None)
+        if runner is not None and callable(getattr(runner, "learned", None)):
+            try:
+                learned = runner.learned()
+            except Exception:
+                learned = {}
+        for step in task.get("steps") or []:
+            if step.get("status") == "done":
+                continue
+            skill = skills.get(str(step.get("skill") or ""), learned)
+            if skill is None:
+                continue
+            ok, reason = policy.check_skill(skill, mode)
+            if not ok:
+                return False, reason, policy.payload()
+        return True, "", policy.payload()
+
     def start(self, task_id: int) -> dict[str, Any]:
         allowed, why, policy = autonomy.check_agent(self.agent, "operator", "core")
         if not allowed:
@@ -280,6 +302,10 @@ class TaskEngine:
             if task["status"] not in STARTABLE:
                 return {"ok": False, "reason": f"Задачу в статусе {task['status']} нельзя запустить",
                         "task": task}
+            allowed_steps, why_steps, policy_steps = self._autonomy_preflight(task, "task")
+            if not allowed_steps:
+                return {"ok": False, "reason": why_steps, "task": task,
+                        "autonomy_blocked": True, "autonomy": policy_steps}
             if int(task_id) in self._running:
                 return {"ok": True, "started": False, "reason": "Задача уже выполняется", "task": task}
             self._running.add(int(task_id))
