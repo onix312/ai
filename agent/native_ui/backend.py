@@ -61,6 +61,9 @@ class BackendClient:
     def post(self, path: str, body: dict[str, Any] | None = None) -> dict[str, Any]:
         return self._request(self.agent_url, path, "POST", body or {})
 
+    def speech_get(self, path: str) -> dict[str, Any]:
+        return self._request(self.speech_url, path)
+
     def speech_post(self, path: str, body: dict[str, Any] | None = None) -> dict[str, Any]:
         return self._request(self.speech_url, path, "POST", body or {})
 
@@ -107,3 +110,15 @@ class BackendClient:
 
     def disarm_mic(self) -> dict[str, Any]:
         return self.speech_post("/mic/disarm", {})
+
+    def voice_status(self) -> dict[str, Any]:
+        return self.speech_get("/voice/status")
+
+    def enable_voice(self) -> dict[str, Any]:
+        return self.speech_post("/voice/enable", {})
+
+    def disable_voice(self) -> dict[str, Any]:
+        return self.speech_post("/voice/disable", {})
+
+    def stop_voice(self) -> dict[str, Any]:
+        return self.speech_post("/voice/stop", {})
