@@ -1,5 +1,12 @@
 # NOZZA — handoff и roadmap после Verification Engine 1.0
 
+> **Актуализация 29.09.2026, Voice 3 Phase 4:** Phase 3 уже в `main`.
+> Текущая ветка добавляет Dynamic Vocabulary: локальные имена приложений,
+> проектов, принтеров, клиентов, целей и выученных команд мягко корректируют
+> финальный ASR без hard grammar. Неизвестная обычная речь остаётся open-vocabulary.
+> Следом: усиление wake-word/echo suppression → optional HQ local TTS.
+
+
 > **Актуализация 29.09.2026, Voice 3 Phase 3:** Phase 2 уже в `main`.
 > Текущая ветка добавляет sentence-level streaming TTS для свободных voice
 > ответов. Ранний TTS разрешён только при пустом `skill`, поэтому NOZZA не
