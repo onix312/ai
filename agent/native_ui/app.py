@@ -466,7 +466,9 @@ class NativeApp:
         self._save_geometry()
         args = [sys.executable, "-m", "agent.native_ui", *sys.argv[1:]]
         if self._hotkey_registered:
-            unregister(0)
+            unregister(0, QUICK_HOTKEY_ID)
+        if self._stop_hotkey_registered:
+            unregister(0, STOP_HOTKEY_ID)
         os.execv(sys.executable, args)
 
     def quit(self) -> None:
