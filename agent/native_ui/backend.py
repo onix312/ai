@@ -135,6 +135,15 @@ class BackendClient:
     def persona_reset(self) -> dict[str, Any]:
         return self.post("/persona", {"op": "reset"})
 
+    def autonomy(self) -> dict[str, Any]:
+        return self.get("/autonomy")
+
+    def autonomy_update(self, level: str, providers: dict[str, str]) -> dict[str, Any]:
+        return self.post("/autonomy", {"op": "update", "level": level, "providers": providers})
+
+    def autonomy_reset(self) -> dict[str, Any]:
+        return self.post("/autonomy", {"op": "reset"})
+
     def arm_mic(self, seconds: float = 25.0) -> dict[str, Any]:
         return self.speech_post("/mic/arm", {"seconds": float(seconds)})
 
