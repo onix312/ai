@@ -762,7 +762,7 @@ def run() -> int:
     print(f"  Речь:      http://127.0.0.1:{config.SPEECH_PORT}/health")
     print(f"  Компьютер: http://127.0.0.1:{config.AGENT_PORT}/status")
     print(f"  Панель:    {config.PRINTFLOW_URL}")
-    print(f"  Стоп-слово: «{config.WAKE_WORD}» (микрофон закрыт до включения)")
+    print(f"  Стоп-слово: «{config.WAKE_WORD}»")
     print(f"  Ассистент: {window.url(config.AGENT_PORT)}")
     for line in capabilities.missing(agent.capabilities):
         print(f"  ⚠ {line}")
