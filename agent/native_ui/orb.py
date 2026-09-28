@@ -43,7 +43,7 @@ class VoiceOrb(QWidget):
             self._hide_timer.start(auto_hide_ms)
 
     def show_near_bottom(self) -> None:
-        screen = self.screen() or self.windowHandle().screen() if self.windowHandle() else None
+        screen = self.screen()
         if screen:
             geo = screen.availableGeometry()
             self.move(geo.center().x() - self.width() // 2, geo.bottom() - self.height() - 48)
