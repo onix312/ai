@@ -34,7 +34,7 @@ jobs:
       - name: Compile voice engine
         run: python -m compileall -q agent/voice_runtime.py agent/speech.py agent/server.py agent/config.py agent/pc.py agent/native_ui
       - name: Voice state machine tests
-        run: python -m unittest connector.tests.test_voice_runtime connector.tests.test_native_ui
+        run: python -m unittest connector.tests.test_voice_runtime connector.tests.test_agent_os.SpeechRuntimeTests connector.tests.test_native_ui
 
   windows-native:
     runs-on: windows-latest
