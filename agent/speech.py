@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import json
+import pathlib
 import queue
 import threading
 import time
@@ -86,6 +87,28 @@ def _words(text: str) -> list[str]:
     return [_clean(word) for word in str(text or "").split()]
 
 
+def discover_vosk_model() -> str:
+    """Найти локальную Vosk-модель без скачиваний и сетевых запросов."""
+    explicit = str(getattr(config, "SPEECH_MODEL_PATH", "") or "").strip()
+    if explicit:
+        path = pathlib.Path(explicit).expanduser()
+        if path.is_dir():
+            return str(path)
+    candidates = (
+        pathlib.Path("models"),
+        pathlib.Path.home() / ".printflow" / "models",
+        pathlib.Path(__file__).resolve().parent / "models",
+    )
+    for folder in candidates:
+        try:
+            for child in sorted(folder.glob("*")):
+                if child.is_dir() and (child / "am").is_dir():
+                    return str(child)
+        except OSError:
+            continue
+    return ""
+
+
 class Recognizer:
     """Один рантайм речи на процессоре. Модель грузится при первом обращении."""
 
@@ -114,13 +137,13 @@ class Recognizer:
                 from vosk import Model, SetLogLevel  # type: ignore
 
                 SetLogLevel(-1)
-                if not self.model_path:
-                    self.reason = "Не указан путь к модели vosk"
-                    return False
-                self._model = Model(self.model_path)
-                self._engine = "vosk"
-                self.reason = ""
-                return True
+                model_path = self.model_path or discover_vosk_model()
+                if model_path:
+                    self.model_path = model_path
+                    self._model = Model(model_path)
+                    self._engine = "vosk"
+                    self.reason = ""
+                    return True
             except ImportError:
                 pass
             except OSError as exc:
