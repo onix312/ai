@@ -73,6 +73,24 @@ class BackendClientTests(unittest.TestCase):
             ("POST", "http://127.0.0.1:8791/voice/disable"),
         ], calls)
 
+    def test_stop_all_uses_agent_safety_routes(self):
+        seen = []
+        client = BackendClient()
+
+        def fake(req, timeout=0):
+            seen.append((req.get_method(), req.full_url))
+            return _Response({"ok": True, "stopped": True, "latched": True})
+
+        with patch("urllib.request.urlopen", side_effect=fake):
+            self.assertTrue(client.safety_stop()["stopped"])
+            client.safety_status()
+            client.safety_resume()
+        self.assertEqual(seen, [
+            ("POST", "http://127.0.0.1:8799/safety/stop"),
+            ("GET", "http://127.0.0.1:8799/safety/status"),
+            ("POST", "http://127.0.0.1:8799/safety/resume"),
+        ])
+
     def test_task_api_uses_agent_port(self):
         client = BackendClient()
         calls = []
@@ -223,6 +241,15 @@ class UiStateTests(unittest.TestCase):
         self.assertTrue(state.armed)
         self.assertEqual(state.pending[0]["id"], "1")
         self.assertEqual(state.last_error, "")
+
+    def test_status_keeps_stop_all_latch(self):
+        state = UiState()
+        state.apply_status({
+            "ok": True,
+            "voice": {"enabled": False, "state": "idle"},
+            "safety": {"stopped": True, "latched": True},
+        })
+        self.assertTrue(state.safety_stopped)
 
     def test_voice_runtime_state_is_authoritative(self):
         state = UiState()
