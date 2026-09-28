@@ -1,0 +1,39 @@
+name: browser-provider
+
+on:
+  pull_request:
+    paths:
+      - "agent/browser.py"
+      - "agent/config.py"
+      - "agent/capabilities.py"
+      - "agent/skills.py"
+      - "agent/executor.py"
+      - "agent/brain.py"
+      - "agent/requirements.txt"
+      - "connector/tests/test_browser_provider.py"
+      - "docs/BROWSER-PROVIDER.md"
+      - "docs/НАВЫКИ.md"
+      - ".github/workflows/browser-provider.yml"
+  push:
+    branches:
+      - "feature/nozza-browser-provider-v1"
+
+jobs:
+  core:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install browser transport
+        run: python -m pip install "websocket-client>=1.8,<2"
+      - name: Compile Browser Provider
+        run: python -m compileall -q agent/browser.py agent/config.py agent/capabilities.py agent/skills.py agent/executor.py agent/brain.py
+      - name: Browser Provider tests
+        run: >-
+          python -m unittest
+          connector.tests.test_browser_provider
+          connector.tests.test_assistant_skills.RegistryShapeTests
+          connector.tests.test_assistant_skills.AvailabilityTests
+          connector.tests.test_agent_brain.BrainRuleTests
