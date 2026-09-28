@@ -351,6 +351,7 @@ class Agent:
     def plan_op(self, body: dict[str, Any]) -> dict[str, Any]:
         op = str(body.get("op") or "list").strip().casefold()
         if op == "preview":
+            self.runner.refresh_capabilities()
             return self.planner.preview(str(body.get("goal") or ""))
         if op == "approve":
             return self.planner.approve(str(body.get("id") or ""))
