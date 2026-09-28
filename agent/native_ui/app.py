@@ -151,6 +151,7 @@ class NativeApp:
         voice_state = self.state.assistant_state
         if voice_state in ("listening", "thinking", "speaking", "error"):
             self.orb.set_state(voice_state, 1800 if voice_state == "error" else 0)
+            self.orb.set_activity(self.state.audio_level, self.state.voice_partial)
         elif self.orb.isVisible() and not self._busy_chat:
             self.orb.hide()
 
