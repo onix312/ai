@@ -6,7 +6,7 @@ from typing import Any
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
-    QFrame, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem,
+    QComboBox, QFrame, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem,
     QMainWindow, QPushButton, QScrollArea, QStackedWidget, QTextBrowser,
     QVBoxLayout, QWidget,
 )
@@ -101,6 +101,8 @@ class TasksPage(QWidget):
     plan_command = Signal(str, str)
     replan_preview = Signal(int)
     replan_command = Signal(str, str)
+    persona_save = Signal(object)
+    persona_reset = Signal()
     refresh_requested = Signal()
 
     def __init__(self) -> None:
@@ -419,6 +421,41 @@ class ControlCenter(QMainWindow):
         self.mic_button = QPushButton("🎤 Включить wake word")
         self.mic_button.clicked.connect(self.mic_toggle)
         sl.addWidget(self.mic_button)
+        persona_title = QLabel("Persona NOZZA")
+        persona_title.setStyleSheet("font-size:16px; font-weight:700; margin-top:12px;")
+        sl.addWidget(persona_title)
+        self.persona_boxes: dict[str, QComboBox] = {}
+        persona_fields = (
+            ("address", "Обращение"),
+            ("verbosity", "Подробность"),
+            ("humor", "Юмор"),
+            ("initiative", "Инициативность"),
+            ("relationship", "Тон отношений"),
+        )
+        for key, label_text in persona_fields:
+            row = QHBoxLayout()
+            label = QLabel(label_text)
+            label.setMinimumWidth(130)
+            combo = QComboBox()
+            combo.setObjectName("persona_" + key)
+            row.addWidget(label)
+            row.addWidget(combo, 1)
+            sl.addLayout(row)
+            self.persona_boxes[key] = combo
+        persona_buttons = QHBoxLayout()
+        save_persona = QPushButton("Сохранить стиль")
+        save_persona.setObjectName("persona_save")
+        save_persona.clicked.connect(self._emit_persona_save)
+        reset_persona = QPushButton("По умолчанию")
+        reset_persona.setObjectName("persona_reset")
+        reset_persona.clicked.connect(self.persona_reset)
+        persona_buttons.addWidget(save_persona)
+        persona_buttons.addWidget(reset_persona)
+        persona_buttons.addStretch(1)
+        sl.addLayout(persona_buttons)
+        self.persona_status = QLabel("Загрузка профиля…")
+        self.persona_status.setObjectName("muted")
+        sl.addWidget(self.persona_status)
         providers_title = QLabel("Providers")
         providers_title.setStyleSheet("font-size:16px; font-weight:700; margin-top:12px;")
         sl.addWidget(providers_title)
@@ -481,6 +518,33 @@ class ControlCenter(QMainWindow):
             self.footer.setText("Агент недоступен" + (f": {error}" if error else ""))
             self.settings_status.setText("Backend: недоступен" + (f" · {error}" if error else ""))
         self.mic_button.setText("🎤 Выключить wake word" if armed else "🎤 Включить wake word")
+
+    def _emit_persona_save(self) -> None:
+        profile = {
+            key: str(combo.currentData() or "")
+            for key, combo in self.persona_boxes.items()
+        }
+        self.persona_save.emit(profile)
+
+    def set_persona_payload(self, payload: dict[str, Any]) -> None:
+        profile = dict(payload.get("profile") or {})
+        options = dict(payload.get("options") or {})
+        labels = dict(payload.get("labels") or {})
+        for key, combo in self.persona_boxes.items():
+            current = str(profile.get(key) or "")
+            combo.blockSignals(True)
+            combo.clear()
+            for value in options.get(key) or []:
+                title = str((labels.get(key) or {}).get(value) or value)
+                combo.addItem(title, value)
+            index = combo.findData(current)
+            if index >= 0:
+                combo.setCurrentIndex(index)
+            combo.blockSignals(False)
+        self.persona_status.setText("Стиль влияет только на форму ответа, не на права и подтверждения.")
+
+    def set_persona_message(self, text: str) -> None:
+        self.persona_status.setText(str(text or ""))
 
     def set_providers_payload(self, payload: dict[str, Any]) -> None:
         rows = list(payload.get("providers") or [])
