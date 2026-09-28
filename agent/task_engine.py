@@ -23,6 +23,7 @@ class TaskEngine:
         self._lock = threading.RLock()
         self._running: set[int] = set()
         self._ensure_schema()
+        self._recover_interrupted()
 
     def _ensure_schema(self) -> None:
         for statement in (
@@ -53,6 +54,46 @@ class TaskEngine:
             "CREATE INDEX IF NOT EXISTS assistant_task_steps_pending ON assistant_task_steps(pending_action)",
         ):
             self.store._run(statement)
+
+    def _recover_interrupted(self) -> None:
+        """После рестарта не повторять действия молча.
+
+        Очередь подтверждений живёт в RAM, поэтому waiting action после нового
+        процесса уже не существует. Выполнявшийся шаг тоже нельзя считать
+        успешным: он переводится обратно в pending, а задача ставится на паузу.
+        Возобновление всегда явное.
+        """
+        rows = self.store._rows(
+            "SELECT id,status FROM assistant_tasks WHERE status IN ('running','waiting')")
+        for row in rows:
+            task_id = int(row["id"])
+            steps = self._rows(task_id)
+            interrupted = next(
+                (step for step in steps if step["status"] in ("running", "waiting")), None)
+            if interrupted is not None:
+                self._set_step(
+                    task_id, int(interrupted["seq"]), status="pending",
+                    pending_action="", result={})
+                current = int(interrupted["seq"])
+            else:
+                current = int(self.get(task_id).get("current_step") or 0)
+            self._set_task(
+                task_id, status="paused", current_step=current,
+                error="Выполнение прервано перезапуском NOZZA. Проверьте текущий шаг и продолжите вручную.")
+
+    def on_action_expired(self, action_id: str) -> dict[str, Any] | None:
+        """Истёкшее подтверждение не оставляет задачу в вечном waiting."""
+        rows = self.store._rows(
+            "SELECT task_id,seq FROM assistant_task_steps WHERE pending_action=? LIMIT 1",
+            (str(action_id),))
+        if not rows:
+            return None
+        task_id, seq = int(rows[0]["task_id"]), int(rows[0]["seq"])
+        self._set_step(task_id, seq, status="pending", pending_action="", result={})
+        self._set_task(
+            task_id, status="paused", current_step=seq,
+            error="Подтверждение шага истекло. Продолжите задачу, когда будете готовы.")
+        return self.get(task_id)
 
     def validate_steps(self, raw: Any) -> tuple[list[dict[str, Any]], str]:
         if not isinstance(raw, list) or not raw:
@@ -146,8 +187,9 @@ class TaskEngine:
         task = self.get(task_id)
         if task is None:
             return {"ok": False, "reason": "Задача не найдена"}
-        if task["status"] in TERMINAL:
-            return {"ok": False, "reason": f"Задача уже {task['status']}", "task": task}
+        if task["status"] not in RUNNABLE:
+            return {"ok": False, "reason": f"Задачу в статусе {task['status']} нельзя запустить",
+                    "task": task}
         with self._lock:
             if int(task_id) in self._running:
                 return {"ok": True, "started": False, "reason": "Задача уже выполняется", "task": task}
@@ -160,6 +202,12 @@ class TaskEngine:
         return {"ok": True, "started": True, "task": self.get(task_id)}
 
     def run_sync(self, task_id: int) -> dict[str, Any]:
+        task = self.get(task_id)
+        if task is None:
+            return {"ok": False, "reason": "Задача не найдена"}
+        if task["status"] not in RUNNABLE:
+            return {"ok": False, "reason": f"Задачу в статусе {task['status']} нельзя запустить",
+                    "task": task}
         with self._lock:
             if int(task_id) in self._running:
                 return {"ok": False, "reason": "Задача уже выполняется"}
