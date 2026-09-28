@@ -1,4 +1,4 @@
-"""Full Control Center NOZZA: разговор, дела, память, обучение и настройки."""
+"""Full Control Center Люмы: разговор, дела, память, обучение и настройки."""
 from __future__ import annotations
 
 import json
@@ -64,7 +64,7 @@ class ChatPage(QWidget):
         layout.addWidget(self.feed, 1)
         row = QHBoxLayout()
         self.input = QLineEdit()
-        self.input.setPlaceholderText("Спроси NOZZA или скажи, что сделать…")
+        self.input.setPlaceholderText("Спроси Люму или скажи, что сделать…")
         self.input.returnPressed.connect(self._submit)
         row.addWidget(self.input, 1)
         send = QPushButton("Отправить")
@@ -83,7 +83,7 @@ class ChatPage(QWidget):
         chunks = []
         for turn in turns:
             role = str(turn.get("role") or "")
-            who = "Вы" if role == "user" else "NOZZA"
+            who = "Вы" if role == "user" else "Люма"
             text = str(turn.get("text") or "")
             chunks.append(f"<p><b>{who}</b><br>{text}</p>")
         self.feed.setHtml("".join(chunks))
