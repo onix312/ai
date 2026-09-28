@@ -305,6 +305,23 @@ class _TaskSink:
         }}
 
 
+class _PlannerSink:
+    def __init__(self):
+        self.goals = []
+
+    def preview(self, goal):
+        self.goals.append(goal)
+        return {"ok": True, "plan": {
+            "id": "plan-1",
+            "title": "Рабочее место",
+            "summary": "Открыть нужные программы",
+            "steps": [
+                {"seq": 0, "skill": "app.open", "title": "Открыть программу",
+                 "params": {"target": "telegram"}, "risk": "soft", "confirm": False},
+            ],
+        }}
+
+
 class BrainChatTests(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
@@ -383,6 +400,17 @@ class FakePanel:
     """Панель цеха без сети: заранее заданные ответы мозга панели и сводка."""
 
     url = "http://127.0.0.1:8765"
+
+    def test_explicit_plan_request_builds_preview_only(self):
+        sink = _PlannerSink()
+        self.agent.planner = sink
+        answer = self.brain.chat("составь план как подготовить компьютер к работе")
+        self.assertEqual("plan", answer["kind"], answer)
+        self.assertEqual(["подготовить компьютер к работе"], sink.goals)
+        self.assertEqual([], self.agent.calls, "preview не должен выполнять skills")
+        self.assertEqual("plan-1", answer["plan"]["id"])
+        self.assertIn("Запустить план", answer["reply"])
+
 
     def __init__(self, answer=None, context=None):
         self.answer = answer

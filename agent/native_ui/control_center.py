@@ -97,6 +97,8 @@ class ChatPage(QWidget):
 class TasksPage(QWidget):
     decision = Signal(str, bool)
     command = Signal(int, str)
+    plan_preview = Signal(str)
+    plan_command = Signal(str, str)
     refresh_requested = Signal()
 
     def __init__(self) -> None:
@@ -111,6 +113,19 @@ class TasksPage(QWidget):
         refresh.clicked.connect(self.refresh_requested)
         head.addWidget(refresh)
         self.layout.addLayout(head)
+        planner_row = QHBoxLayout()
+        self.goal_input = QLineEdit()
+        self.goal_input.setPlaceholderText("Цель: например, подготовь компьютер к работе")
+        planner_row.addWidget(self.goal_input, 1)
+        preview = QPushButton("Составить план")
+        preview.setObjectName("primary")
+        preview.clicked.connect(self._preview_plan)
+        planner_row.addWidget(preview)
+        self.layout.addLayout(planner_row)
+        self.planner_message = QLabel("")
+        self.planner_message.setObjectName("muted")
+        self.planner_message.setWordWrap(True)
+        self.layout.addWidget(self.planner_message)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
@@ -119,6 +134,14 @@ class TasksPage(QWidget):
         self.host.setAlignment(Qt.AlignTop)
         scroll.setWidget(self.host_widget)
         self.layout.addWidget(scroll, 1)
+
+    def _preview_plan(self) -> None:
+        goal = self.goal_input.text().strip()
+        if goal:
+            self.plan_preview.emit(goal)
+
+    def set_planner_message(self, text: str) -> None:
+        self.planner_message.setText(str(text or ""))
 
     def _clear(self) -> None:
         while self.host.count():
@@ -129,12 +152,52 @@ class TasksPage(QWidget):
 
     def set_payload(self, payload: dict[str, Any]) -> None:
         self._clear()
+        plans = list(payload.get("plans") or [])
         tasks = list(payload.get("tasks") or [])
         pending = list(payload.get("pending") or [])
         notifications = list(payload.get("notifications") or [])
-        if not tasks and not pending and not notifications:
+        if not plans and not tasks and not pending and not notifications:
             self.host.addWidget(QLabel("Ничего не ждёт."))
             return
+        for plan in plans:
+            card = QFrame()
+            card.setStyleSheet("QFrame { background:#172033; border:1px solid #3b82f6; border-radius:12px; }")
+            box = QVBoxLayout(card)
+            title = str(plan.get("title") or "План")
+            summary = str(plan.get("summary") or "")
+            box.addWidget(QLabel(f"План: {title}"))
+            if summary:
+                note = QLabel(summary)
+                note.setWordWrap(True)
+                note.setObjectName("muted")
+                box.addWidget(note)
+            for step in list(plan.get("steps") or []):
+                risk = str(step.get("risk") or "read")
+                confirm = " · подтверждение" if step.get("confirm") else ""
+                why = str(step.get("why") or "")
+                line = f"{int(step.get('seq') or 0) + 1}. {step.get('title') or step.get('skill')} · {risk}{confirm}"
+                params = dict(step.get("params") or {})
+                if params:
+                    pairs = ", ".join(f"{key}={value}" for key, value in params.items())
+                    line += f" · {pairs}"
+                if why:
+                    line += f" — {why}"
+                label = QLabel(line)
+                label.setWordWrap(True)
+                box.addWidget(label)
+            buttons = QHBoxLayout()
+            plan_id = str(plan.get("id") or "")
+            discard = QPushButton("Отменить план")
+            discard.clicked.connect(lambda _=False, i=plan_id: self.plan_command.emit(i, "discard"))
+            approve = QPushButton("Запустить план")
+            approve.setObjectName("primary")
+            approve.clicked.connect(lambda _=False, i=plan_id: self.plan_command.emit(i, "approve"))
+            buttons.addStretch(1)
+            buttons.addWidget(discard)
+            buttons.addWidget(approve)
+            box.addLayout(buttons)
+            self.host.addWidget(card)
+
         for task in tasks:
             card = QFrame()
             card.setStyleSheet("QFrame { background:#111827; border:1px solid #334155; border-radius:12px; }")
@@ -206,6 +269,8 @@ class ControlCenter(QMainWindow):
     mic_toggle = Signal()
     task_decision = Signal(str, bool)
     task_command = Signal(int, str)
+    plan_preview = Signal(str)
+    plan_command = Signal(str, str)
 
     NAV = [
         ("chat", "💬  Разговор"),
@@ -256,6 +321,8 @@ class ControlCenter(QMainWindow):
         tasks.refresh_requested.connect(lambda: self.refresh_page.emit("tasks"))
         tasks.decision.connect(self.task_decision)
         tasks.command.connect(self.task_command)
+        tasks.plan_preview.connect(self.plan_preview)
+        tasks.plan_command.connect(self.plan_command)
         self.pages["tasks"] = tasks
         self.stack.addWidget(tasks)
 
@@ -339,6 +406,11 @@ class ControlCenter(QMainWindow):
             self.footer.setText("Агент недоступен" + (f": {error}" if error else ""))
             self.settings_status.setText("Backend: недоступен" + (f" · {error}" if error else ""))
         self.mic_button.setText("🎤 Выключить wake word" if armed else "🎤 Включить wake word")
+
+    def set_planner_message(self, text: str) -> None:
+        page = self.pages.get("tasks")
+        if isinstance(page, TasksPage):
+            page.set_planner_message(text)
 
     def set_page_payload(self, key: str, payload: Any) -> None:
         page = self.pages.get(key)

@@ -40,7 +40,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
 from . import brain as brain_mod
-from . import capabilities, config, executor, pc, skills, speech, task_engine, ui, voice_runtime, window, winapi
+from . import capabilities, config, executor, pc, planner, skills, speech, task_engine, ui, voice_runtime, window, winapi
 
 # Ожидающее действие живёт недолго: неподтверждённый клик не должен висеть
 # вечно и выстрелить через час, когда человек уже ушёл.
@@ -68,6 +68,7 @@ class Agent:
         self._runner: executor.Runner | None = None
         self._brain: brain_mod.Brain | None = None
         self._tasks: task_engine.TaskEngine | None = None
+        self._planner: planner.Planner | None = None
         self._stop = threading.Event()
         # Голос: фраза после стоп-слова идёт мозгу, ответ звучит вслух.
         self.microphone.handler = self.voice_phrase
@@ -92,6 +93,13 @@ class Agent:
         if self._tasks is None:
             self._tasks = task_engine.TaskEngine(self)
         return self._tasks
+
+    @property
+    def planner(self) -> planner.Planner:
+        """Preview-only Planner: цель -> проверенный план -> Task Engine."""
+        if self._planner is None:
+            self._planner = planner.Planner(self)
+        return self._planner
 
     def chat(self, text: str, session: str = "main", mode: str = "full",
              plan: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -339,6 +347,19 @@ class Agent:
             return {"ok": True, "tasks": self.tasks.list(
                 int(body.get("limit") or 50), str(body.get("status") or ""))}
         return {"ok": False, "reason": f"Неизвестная операция задачи «{op}»"}
+
+    def plan_op(self, body: dict[str, Any]) -> dict[str, Any]:
+        op = str(body.get("op") or "list").strip().casefold()
+        if op == "preview":
+            self.runner.refresh_capabilities()
+            return self.planner.preview(str(body.get("goal") or ""))
+        if op == "approve":
+            return self.planner.approve(str(body.get("id") or ""))
+        if op == "discard":
+            return self.planner.discard(str(body.get("id") or ""))
+        if op == "list":
+            return {"ok": True, "plans": self.planner.list()}
+        return {"ok": False, "reason": f"Неизвестная операция плана «{op}»"}
 
     def skills_payload(self) -> dict[str, Any]:
         rows = self.runner.catalog()
@@ -623,6 +644,8 @@ class AgentHandler(BaseHTTPRequestHandler):
             status = str((query.get("status") or [""])[0] or "")
             limit = int((query.get("limit") or ["50"])[0] or 50)
             return self._json(200, {"ok": True, "tasks": agent.tasks.list(limit, status)})
+        if path == "/plans":
+            return self._json(200, {"ok": True, "plans": agent.planner.list()})
         if path == "/skills":
             return self._json(200, agent.skills_payload())
         if path == "/journal":
@@ -745,6 +768,8 @@ class AgentHandler(BaseHTTPRequestHandler):
             return self._json(200, agent.brain.feedback(int(body.get("turn_id") or 0), int(body.get("rating") or 0)))
         if path == "/tasks":
             return self._json(200, agent.task_op(body))
+        if path == "/plans":
+            return self._json(200, agent.plan_op(body))
         if path == "/memory":
             store = agent.runner.store
             op = str(body.get("op") or "remember")
