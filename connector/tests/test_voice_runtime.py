@@ -160,6 +160,24 @@ class VoiceRuntimeStateTests(unittest.TestCase):
         stop.assert_called_once()
         self.assertEqual("listening", self.runtime.state)
 
+    def test_stop_phrase_cancels_busy_model_turn(self):
+        calls = []
+        self.runtime._handler_busy = True
+        self.runtime.conversation_until = time.time() + 10
+        self.runtime.cancel_handler = lambda: calls.append("cancel") or True
+        with patch.object(pc, "is_speaking", return_value=False):
+            self.runtime._handle_text("стоп")
+        self.assertEqual(["cancel"], calls)
+        self.assertEqual("listening", self.runtime.state)
+
+    def test_non_stop_phrase_is_ignored_while_handler_busy(self):
+        calls = []
+        self.runtime._handler_busy = True
+        self.runtime.cancel_handler = lambda: calls.append("cancel") or True
+        with patch.object(pc, "is_speaking", return_value=False):
+            self.runtime._handle_text("открой телеграм")
+        self.assertEqual([], calls)
+
     def test_end_phrase_closes_conversation(self):
         self.runtime.conversation_until = time.time() + 10
         with patch.object(pc, "is_speaking", return_value=False):
@@ -184,8 +202,10 @@ class VoiceRuntimeStateTests(unittest.TestCase):
         self.assertEqual("нет устройства", status["last_error"])
 
     def test_stop_when_voice_disabled_does_not_arm_microphone(self):
+        self.runtime.cancel_handler = lambda: False
         with patch.object(pc, "stop_speaking", return_value=False):
             payload = self.runtime.stop_output()
+        self.assertFalse(payload["generation_cancelled"])
         self.assertFalse(payload["armed"])
         self.assertFalse(payload["enabled"])
         self.assertEqual("idle", payload["state"])
