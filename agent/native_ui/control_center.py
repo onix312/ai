@@ -208,6 +208,21 @@ class TasksPage(QWidget):
             total = int(task.get("total_steps") or 0)
             box.addWidget(QLabel(f"{title}  ·  {status}  ·  {progress}/{total}"))
             steps = list(task.get("steps") or [])
+            checks = [
+                str((step.get("verification") or {}).get("status") or "")
+                for step in steps
+                if isinstance(step.get("verification"), dict) and step.get("verification")
+            ]
+            if checks:
+                verified = sum(1 for value in checks if value == "verified")
+                assumed = sum(1 for value in checks if value == "assumed")
+                failed_checks = sum(1 for value in checks if value == "failed")
+                parts = [f"verified {verified}", f"assumed {assumed}"]
+                if failed_checks:
+                    parts.append(f"failed {failed_checks}")
+                check_label = QLabel("Проверка: " + " · ".join(parts))
+                check_label.setObjectName("muted")
+                box.addWidget(check_label)
             current_index = int(task.get("current_step") or 0)
             current = next((step for step in steps if int(step.get("seq") or 0) == current_index), None)
             if current and status not in ("done", "cancelled"):
