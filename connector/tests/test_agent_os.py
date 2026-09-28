@@ -119,6 +119,34 @@ class BindingTests(ServerTestCase):
         self.assertEqual(404, caught.exception.code)
 
 
+class PersonaApiTests(ServerTestCase):
+    def tearDown(self):
+        self.post(self.agent_port, "/persona", {"op": "reset"})
+
+    def test_persona_get_update_reject_safety_and_reset(self):
+        initial = self.get(self.agent_port, "/persona")
+        self.assertTrue(initial["ok"])
+        self.assertEqual("formal", initial["profile"]["address"])
+
+        updated = self.post(self.agent_port, "/persona", {
+            "op": "update",
+            "profile": {"address": "informal", "verbosity": "normal"},
+        })
+        self.assertTrue(updated["ok"])
+        self.assertEqual("informal", updated["profile"]["address"])
+
+        refused = self.post(self.agent_port, "/persona", {
+            "op": "update",
+            "profile": {"safety": "off"},
+        })
+        self.assertFalse(refused["ok"])
+        self.assertIn("не управляет", refused["reason"])
+
+        reset = self.post(self.agent_port, "/persona", {"op": "reset"})
+        self.assertTrue(reset["ok"])
+        self.assertEqual("formal", reset["profile"]["address"])
+
+
 class ActionConfirmationTests(ServerTestCase):
     """Действие в чужом окне: очередь, подтверждение человека, срок жизни."""
 
