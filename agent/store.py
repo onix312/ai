@@ -235,6 +235,7 @@ class Store:
             self._migrate_1817()
             self._migrate_1819()
             self._migrate_1821()
+            self._migrate_memory_v2()
 
     def _migrate_1817(self) -> None:
         """Добавить колонки, которых не было в 18.15 — без пересоздания таблиц."""
@@ -329,6 +330,51 @@ class Store:
                 "CREATE INDEX IF NOT EXISTS dialog_session ON dialog(session, id)",
             ):
                 self._conn.execute(statement)
+            self._conn.commit()
+        except sqlite3.Error:
+            pass
+
+    def _migrate_memory_v2(self) -> None:
+        """Memory 2.0: происхождение, уверенность и число подтверждений."""
+        def has_column(table: str, col: str) -> bool:
+            try:
+                rows = self._conn.execute(f"PRAGMA table_info({table})").fetchall()
+                return any(row[1] == col for row in rows)
+            except sqlite3.Error:
+                return False
+
+        def add_column(col_def: str) -> None:
+            name = col_def.split()[0]
+            if has_column("memories", name):
+                return
+            try:
+                self._conn.execute(f"ALTER TABLE memories ADD COLUMN {col_def}")
+            except sqlite3.Error:
+                pass
+
+        add_column("origin TEXT DEFAULT 'explicit'")
+        add_column("confidence REAL DEFAULT 1.0")
+        add_column("evidence_count INTEGER DEFAULT 1")
+        add_column("provenance TEXT DEFAULT ''")
+        try:
+            self._conn.execute(
+                "UPDATE memories SET origin=CASE "
+                "WHEN source='self' THEN 'inferred' "
+                "WHEN source='observed' THEN 'observed' "
+                "WHEN origin IS NULL OR origin='' THEN 'explicit' "
+                "ELSE origin END")
+            self._conn.execute(
+                "UPDATE memories SET confidence=CASE "
+                "WHEN source='self' AND (confidence IS NULL OR confidence=1.0) THEN 0.55 "
+                "WHEN source='observed' AND (confidence IS NULL OR confidence=1.0) THEN 0.80 "
+                "ELSE COALESCE(confidence,1.0) END")
+            self._conn.execute(
+                "UPDATE memories SET evidence_count=CASE "
+                "WHEN evidence_count IS NULL OR evidence_count < 1 THEN 1 "
+                "ELSE evidence_count END")
+            self._conn.execute(
+                "UPDATE memories SET provenance=source "
+                "WHERE (provenance IS NULL OR provenance='') AND source<>''")
             self._conn.commit()
         except sqlite3.Error:
             pass
@@ -1100,6 +1146,11 @@ class Store:
 # ---------------------------------------------------------------------------
 
 MEMORY_KINDS = ("fact", "preference", "profile", "person", "rule")
+MEMORY_ORIGINS = ("explicit", "observed", "inferred", "imported")
+_MEMORY_ORIGIN_PRIORITY = {"inferred": 0, "imported": 1, "observed": 2, "explicit": 3}
+_MEMORY_DEFAULT_CONFIDENCE = {
+    "explicit": 1.0, "observed": 0.8, "imported": 0.7, "inferred": 0.55,
+}
 MAX_MEMORY_CHARS = 500
 MAX_DIALOG_TURNS = 400
 _WORD_RE = re.compile(r"[0-9a-zа-яё]+", re.IGNORECASE)
