@@ -23,5 +23,11 @@ class ProviderSpec:
 class CapabilityProvider(Protocol):
     spec: ProviderSpec
 
-    def run(self, skill_name: str, params: dict[str, Any]) -> dict[str, Any]:
+    def run(self, skill_name: str, params: dict[str, Any],
+            runner: Any | None = None) -> dict[str, Any]:
+        """Execute an already validated skill.
+
+        Stateful providers receive the current Runner explicitly. Providers never
+        own policy, confirmation or raw model output.
+        """
         ...
