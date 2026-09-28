@@ -1054,6 +1054,9 @@ class Brain:
                 return self._reply(session, clean, capabilities_text(self.runner.catalog()), kind="answer",
                                    source="registry", steps=steps, started=started,
                                    suggestions=["Как там компьютер?", "Какие окна открыты?", "Громкость 30"])
+            planned = self._planner_turn(session, clean, work, steps, started)
+            if planned:
+                return planned
             memory_reply = self._memory(clean)
             if memory_reply:
                 steps.append({"kind": "memory", "title": "Память", "detail": memory_reply["op"]})
@@ -1649,6 +1652,56 @@ class Brain:
         if fired:
             parts.append(f"ждут отметки: {len(fired)}")
         return (" По личному: " + ", ".join(parts) + ".") if parts else ""
+
+    def _planner_turn(self, session: str, text: str, work: str,
+                      steps: list[dict[str, Any]], started: float) -> dict[str, Any] | None:
+        """Явное «составь план …» создаёт только preview, ничего не исполняя."""
+        match = re.match(
+            r"^(?:(?:составь|сделай|предложи)\s+(?:мне\s+)?план(?:\s+(?:как|чтобы|для))?\s*|"
+            r"спланируй\s+|разбей\s+на\s+шаги\s+)(?P<goal>.+)$",
+            normalize_phrase(work),
+            re.IGNORECASE,
+        )
+        if not match:
+            return None
+        goal = str(match.group("goal") or "").strip(" .,!?")
+        planner_obj = getattr(self.agent, "planner", None)
+        if planner_obj is None:
+            return self._reply(
+                session, text, "Планировщик пока недоступен.", kind="error",
+                source="planner", steps=steps, started=started)
+        steps.append({"kind": "plan", "title": "Planner", "detail": _short(goal, 120)})
+        try:
+            result = planner_obj.preview(goal)
+        except Exception as exc:  # noqa: BLE001
+            return self._reply(
+                session, text, f"Не получилось составить план: {exc.__class__.__name__}.",
+                kind="error", source="planner", steps=steps, started=started)
+        if result.get("needs_clarification"):
+            return self._reply(
+                session, text, str(result.get("ask") or "Нужно уточнение."),
+                kind="clarify", source="planner", steps=steps, started=started,
+                extra={"planner_goal": goal})
+        if not result.get("ok") or not isinstance(result.get("plan"), dict):
+            return self._reply(
+                session, text, str(result.get("reason") or "План не построен."),
+                kind="error", source="planner", steps=steps, started=started)
+        plan = result["plan"]
+        plan_steps = list(plan.get("steps") or [])
+        summary = str(plan.get("summary") or "").strip()
+        lines = [f"{index + 1}. {row.get('title') or row.get('skill')}"
+                 for index, row in enumerate(plan_steps[:8])]
+        reply = "План готов"
+        if summary:
+            reply += f": {summary}"
+        if lines:
+            reply += "\n" + "\n".join(lines)
+        reply += "\nЗапускать его можно только отдельной кнопкой «Запустить план» в разделе «Задачи»."
+        return self._reply(
+            session, text, reply, kind="plan", source="planner",
+            steps=steps, started=started, result={"ok": True, "plan": plan},
+            extra={"plan": plan},
+            suggestions=["Открой задачи"])
 
     # --- отмена и цепочки (18.23, И332–И336) --------------------------------
     def _cancel_turn(self, session: str, text: str, work: str,
