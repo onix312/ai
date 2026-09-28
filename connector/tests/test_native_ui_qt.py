@@ -28,6 +28,10 @@ class NativeQtSmokeTests(unittest.TestCase):
         center.update_status(True, False, True, True)
         center.set_page_payload("memory", {"memories": [{"text": "пример"}]})
         center.set_page_payload("tasks", {
+            "tasks": [{
+                "id": 4, "title": "Подготовить рабочее место", "status": "paused",
+                "progress": 1, "total_steps": 3, "error": "Ждёт продолжения",
+            }],
             "pending": [{"id": "a1", "text": "Подтвердить действие"}],
             "notifications": [],
         })
@@ -36,6 +40,9 @@ class NativeQtSmokeTests(unittest.TestCase):
         self.assertIn("готово", quick.answer.text())
         self.assertIn("агент", center.footer.text())
         self.assertIsInstance(center.pages["tasks"], TasksPage)
+        task_page = center.pages["tasks"]
+        labels = [w.text() for w in task_page.findChildren(__import__("PySide6").QtWidgets.QLabel)]
+        self.assertTrue(any("Подготовить рабочее место" in text for text in labels))
 
         center.deleteLater()
         quick.deleteLater()
