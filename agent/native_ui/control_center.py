@@ -156,7 +156,9 @@ class ControlCenter(QMainWindow):
     chat_submitted = Signal(str)
     refresh_page = Signal(str)
     clear_chat = Signal()
-    mic_toggle = Signal()\n    task_decision = Signal(str, bool)\n
+    mic_toggle = Signal()
+    task_decision = Signal(str, bool)
+
     NAV = [
         ("chat", "💬  Разговор"),
         ("today", "☀  Сегодня"),
