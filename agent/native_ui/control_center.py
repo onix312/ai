@@ -448,7 +448,7 @@ class ControlCenter(QMainWindow):
         save_persona.clicked.connect(self._emit_persona_save)
         reset_persona = QPushButton("По умолчанию")
         reset_persona.setObjectName("persona_reset")
-        reset_persona.clicked.connect(self.persona_reset)
+        reset_persona.clicked.connect(lambda: self.persona_reset.emit())
         persona_buttons.addWidget(save_persona)
         persona_buttons.addWidget(reset_persona)
         persona_buttons.addStretch(1)
