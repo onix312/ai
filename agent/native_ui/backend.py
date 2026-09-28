@@ -157,6 +157,26 @@ class BackendClient:
         q = urllib.parse.urlencode({"limit": int(limit), "state": str(state or "")})
         return self.get(f"/events?{q}")
 
+    def security(self) -> dict[str, Any]:
+        return self.get("/security")
+
+    def security_update(self, guest: bool, patterns: list[str]) -> dict[str, Any]:
+        return self.post("/security", {
+            "op": "update", "guest": bool(guest), "patterns": list(patterns),
+        })
+
+    def security_panic(self, reason: str = "native-ui") -> dict[str, Any]:
+        return self.post("/security", {"op": "panic", "reason": reason})
+
+    def security_panic_reset(self) -> dict[str, Any]:
+        return self.post("/security", {"op": "panic_reset"})
+
+    def vault_put(self, name: str, secret: str) -> dict[str, Any]:
+        return self.post("/security", {"op": "vault.put", "name": name, "secret": secret})
+
+    def vault_delete(self, name: str) -> dict[str, Any]:
+        return self.post("/security", {"op": "vault.delete", "name": name})
+
     def arm_mic(self, seconds: float = 25.0) -> dict[str, Any]:
         return self.speech_post("/mic/arm", {"seconds": float(seconds)})
 
