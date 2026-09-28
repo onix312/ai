@@ -87,7 +87,7 @@ class Agent:
         if isinstance(cache, tuple) and now - cache[0] < 30:
             return list(cache[1])
 
-        terms: list[str] = [config.WAKE_WORD, "NOZZA", "Ноза", "Нозза"]
+        terms: list[str] = [config.WAKE_WORD, config.ASSISTANT_NAME, "Luma", *config.LEGACY_WAKE_WORDS]
         for spec in pc.APPS.values():
             terms.append(str(spec.get("title") or ""))
             terms.extend(str(word) for word in (spec.get("words") or ()))
