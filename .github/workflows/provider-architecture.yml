@@ -1,0 +1,50 @@
+name: provider-architecture
+
+on:
+  pull_request:
+    paths:
+      - "agent/providers/**"
+      - "agent/executor.py"
+      - "agent/skills.py"
+      - "agent/server.py"
+      - "agent/native_ui/**"
+      - "connector/tests/test_providers.py"
+      - "connector/tests/test_native_ui.py"
+      - "connector/tests/test_native_ui_qt.py"
+      - "docs/PROVIDERS.md"
+      - ".github/workflows/provider-architecture.yml"
+  push:
+    branches:
+      - "feature/nozza-provider-architecture-v1"
+
+jobs:
+  core:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Compile providers
+        run: python -m compileall -q agent/providers agent/executor.py agent/server.py agent/native_ui
+      - name: Provider architecture contracts
+        run: >-
+          python -m unittest
+          connector.tests.test_providers
+          connector.tests.test_assistant_skills
+          connector.tests.test_browser_provider
+          connector.tests.test_native_ui
+
+  windows-ui:
+    runs-on: windows-latest
+    env:
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install PySide6
+        run: python -m pip install "PySide6>=6.7,<7"
+      - name: Provider UI smoke
+        run: python -m unittest connector.tests.test_native_ui_qt
