@@ -512,6 +512,18 @@ def understand(text: str) -> dict[str, Any] | None:
         if not reason:
             return _plan("app.open", {"target": target}, "открыть", target={"title": plan.get("title")})
 
+    # --- браузер: структурированный контекст через локальный DevTools
+    if re.search(r"(какие|покажи|список)\s+(?:у\s+меня\s+)?вкладк|что\s+открыто\s+в\s+браузере", low):
+        return _plan("browser.tabs", {"limit": 20}, "браузер: вкладки")
+    if re.search(r"(что\s+(?:написано\s+)?на\s+(?:этой\s+)?странице|прочитай\s+(?:эту\s+)?страницу|"
+                 r"опиши\s+(?:эту\s+)?страницу|что\s+на\s+сайте)", low):
+        return _plan("browser.page", {"max_chars": 20000}, "браузер: страница")
+    if re.search(r"(что\s+выделено|прочитай\s+выделенн\w*|покажи\s+выделенн\w*)", low):
+        return _plan("browser.selection", {}, "браузер: выделение")
+    match = re.match(r"^(?:найди|поищи)\s+на\s+(?:этой\s+)?странице\s+(?P<t>.+)$", low)
+    if match:
+        return _plan("browser.find", {"query": match.group("t"), "limit": 8}, "браузер: поиск")
+
     # --- экран
     if re.search(r"(сделай|сними)\s+(скрин|скриншот|снимок экрана)|^скриншот$", low):
         return _plan("screen.shot", {}, "экран: снимок")
@@ -730,6 +742,34 @@ def summarize(skill: str, result: dict[str, Any]) -> str:
         text = str(result.get("text") or "").strip()
         return (f"В окне «{result.get('title')}»: {text[:600]}" if text
                 else f"Окно «{result.get('title')}» не отдаёт текст элементов (современные программы рисуют его сами).")
+    if skill == "browser.tabs":
+        rows = result.get("tabs") or []
+        if not rows:
+            return "В локальном DevTools не видно открытых вкладок."
+        shown = "; ".join(
+            f"{'● ' if row.get('active') else ''}{str(row.get('title') or row.get('url') or '')[:80]}"
+            for row in rows[:8])
+        more = f" И ещё {len(rows) - 8}." if len(rows) > 8 else ""
+        return f"Вкладок: {len(rows)}. {shown}.{more}"
+    if skill == "browser.page":
+        title = str(result.get("title") or "страница")
+        text = str(result.get("text") or "").strip()
+        forms = len(result.get("forms") or [])
+        links = len(result.get("links") or [])
+        if not text:
+            return f"«{title}» открыта, но видимого текста почти нет. Ссылок: {links}, форм: {forms}."
+        suffix = "…" if len(text) > 900 else ""
+        return f"«{title}»\n{text[:900]}{suffix}\nСсылок: {links}, форм: {forms}."
+    if skill == "browser.find":
+        rows = result.get("matches") or []
+        if not rows:
+            return str(result.get("reason") or "На странице этого не нашёл.")
+        return "Нашёл на странице: " + " | ".join(str(row)[:260] for row in rows[:4])
+    if skill == "browser.selection":
+        selected = str(result.get("selection") or "").strip()
+        return (f"Выделено: «{selected[:1200]}{'…' if len(selected) > 1200 else ''}»"
+                if selected else "На странице ничего не выделено.")
+
     if skill == "system.health":
         return health_phrase(result)
     if skill == "system.process_list":
@@ -837,6 +877,10 @@ def suggestions_for(skill: str, result: dict[str, Any]) -> list[str]:
         return [f"Переключись на {row.split(' - ')[-1][:24]}" for row in rows[:3]]
     if skill in ("window.focus", "window.arrange"):
         return ["Сверни его", "Разверни его", "Какие окна открыты?"]
+    if skill == "browser.tabs":
+        return ["Что на этой странице?", "Прочитай выделенное"]
+    if skill == "browser.page":
+        return ["Какие вкладки открыты?", "Что выделено?"]
     if skill == "system.health":
         return ["Что грузит компьютер?", "Недавние файлы"]
     if skill == "files.quick_open" and result.get("files"):
