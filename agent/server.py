@@ -40,7 +40,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
 from . import brain as brain_mod
-from . import capabilities, config, executor, pc, skills, speech, ui, window, winapi
+from . import capabilities, config, executor, pc, skills, speech, ui, voice_runtime, window, winapi
 
 # Ожидающее действие живёт недолго: неподтверждённый клик не должен висеть
 # вечно и выстрелить через час, когда человек уже ушёл.
@@ -59,7 +59,7 @@ class Agent:
         self.state = config.State()
         self.capabilities = capabilities.detect()
         self.recognizer = speech.Recognizer()
-        self.microphone = speech.Microphone(self.recognizer)
+        self.microphone = voice_runtime.VoiceRuntime(self.recognizer)
         self._pending: dict[str, dict[str, Any]] = {}
         self._lock = threading.Lock()
         # Исполнитель навыков и своя база создаются по первому обращению: агент
@@ -222,8 +222,13 @@ class Agent:
     def health(self) -> dict[str, Any]:
         window, _reason = winapi.active_window()
         self.state.window = window
-        self.state.wake_word = bool(self.microphone.armed)
+        voice = self.microphone.status()
+        self.state.wake_word = bool(voice.get("armed"))
+        self.state.armed = bool(voice.get("armed"))
+        self.state.voice_enabled = bool(voice.get("enabled"))
+        self.state.voice_state = str(voice.get("state") or "idle")
         payload = self.state.payload(self.capabilities)
+        payload["voice"] = voice
         payload["model"] = (self.recognizer.name if self.recognizer.loaded
                             else self.capabilities.get("speech_model", ""))
         return payload
@@ -254,7 +259,18 @@ class Agent:
 
     def disarm_microphone(self) -> dict[str, Any]:
         self.microphone.disarm()
-        return {"ok": True, "armed": False, "reason": ""}
+        return {"ok": True, "armed": False, "reason": "", **self.microphone.status()}
+
+    def enable_voice(self) -> dict[str, Any]:
+        ok, reason = self.microphone.enable()
+        return {"ok": ok, "reason": reason, **self.microphone.status()}
+
+    def disable_voice(self) -> dict[str, Any]:
+        self.microphone.disable()
+        return {"ok": True, "reason": "", **self.microphone.status()}
+
+    def stop_voice_output(self) -> dict[str, Any]:
+        return self.microphone.stop_output()
 
     # --- навыки ассистента (18.14) ----------------------------------------
     def run_skill(self, name: str, params: Any = None, ask: bool = True) -> dict[str, Any]:
@@ -519,6 +535,8 @@ class AgentHandler(BaseHTTPRequestHandler):
             return self._json(500, {"ok": False, "reason": "Агент не инициализирован"})
         if path == "/health":
             return self._json(200, agent.health())
+        if self.role == "speech" and path == "/voice/status":
+            return self._json(200, {"ok": True, **agent.microphone.status()})
         if path == "/capabilities":
             caps = dict(agent.refresh_capabilities())
             # Живые связи для шапки окна: панель цеха и модель (короткие пинги).
@@ -607,6 +625,12 @@ class AgentHandler(BaseHTTPRequestHandler):
                                                               config.MIC_ARM_SECONDS)))
         if self.role == "speech" and path == "/mic/disarm":
             return self._json(200, agent.disarm_microphone())
+        if self.role == "speech" and path == "/voice/enable":
+            return self._json(200, agent.enable_voice())
+        if self.role == "speech" and path == "/voice/disable":
+            return self._json(200, agent.disable_voice())
+        if self.role == "speech" and path == "/voice/stop":
+            return self._json(200, agent.stop_voice_output())
         if self.role != "agent":
             return self._json(404, {"ok": False, "reason": f"Маршрута {path} нет"})
         body = self._read_json()
@@ -755,6 +779,14 @@ def run() -> int:
     except Exception as exc:
         print(f"  ⚠ Пульс надзора не включился: {exc}")
     threading.Thread(target=speech_server.serve_forever, daemon=True).start()
+    if config.VOICE_ALWAYS_ON:
+        voice_state = agent.enable_voice()
+        if voice_state.get("ok"):
+            print(f"  Голос:      wake word «{config.WAKE_WORD}» слушается локально")
+        else:
+            print(f"  ⚠ Voice Engine: {voice_state.get('reason') or 'не запустился'}")
+    else:
+        print("  Голос:      постоянный wake word выключен настройкой")
     # 18.22: напоминания, таймеры фокуса и привычки звонят сами.
     agent.start_scheduler()
     print(f"  Напоминания: планировщик проверяет каждые {int(SCHEDULER_SEC)} с")
@@ -764,6 +796,7 @@ def run() -> int:
         print("Останавливаю агента")
     finally:
         agent.stop_scheduler()
+        agent.microphone.shutdown()
         speech_server.shutdown()
         agent_server.shutdown()
     return 0
