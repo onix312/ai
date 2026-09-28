@@ -69,6 +69,7 @@ GUEST_PRIVATE_ROUTES = frozenset({
     "/screen",
     "/learning",
     "/notifications",
+    "/notifications/seen",
     "/chat/history",
     "/journal",
     "/events",
