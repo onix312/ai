@@ -105,7 +105,9 @@ class Agent:
     @property
     def replanner(self) -> replanner.Replanner:
         if self._replanner is None:
-            self._replanner = replanner.Replanner(self)
+            with self._lock:
+                if self._replanner is None:
+                    self._replanner = replanner.Replanner(self)
         return self._replanner
 
     def chat(self, text: str, session: str = "main", mode: str = "full",
