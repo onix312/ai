@@ -111,12 +111,17 @@ class TasksPage(QWidget):
         refresh.clicked.connect(self.refresh_requested)
         head.addWidget(refresh)
         self.layout.addLayout(head)
-        self.host = QVBoxLayout()
-        self.layout.addLayout(self.host)
-        self.layout.addStretch(1)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        self.host_widget = QWidget()
+        self.host = QVBoxLayout(self.host_widget)
+        self.host.addStretch(1)
+        scroll.setWidget(self.host_widget)
+        self.layout.addWidget(scroll, 1)
 
     def _clear(self) -> None:
-        while self.host.count():
+        while self.host.count() > 1:
             item = self.host.takeAt(0)
             widget = item.widget()
             if widget is not None:
@@ -139,6 +144,13 @@ class TasksPage(QWidget):
             progress = int(task.get("progress") or 0)
             total = int(task.get("total_steps") or 0)
             box.addWidget(QLabel(f"{title}  ·  {status}  ·  {progress}/{total}"))
+            steps = list(task.get("steps") or [])
+            current_index = int(task.get("current_step") or 0)
+            current = next((step for step in steps if int(step.get("seq") or 0) == current_index), None)
+            if current and status not in ("done", "cancelled"):
+                detail = QLabel(f"Сейчас: {current.get('skill') or 'шаг'}")
+                detail.setObjectName("muted")
+                box.addWidget(detail)
             if task.get("error"):
                 error = QLabel(str(task.get("error")))
                 error.setObjectName("muted")
