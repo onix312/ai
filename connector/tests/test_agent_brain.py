@@ -368,7 +368,8 @@ class BrainChatTests(unittest.TestCase):
         sink = _TaskSink()
         self.agent.tasks = sink
         answer = self.brain.chat("громкость 30 и переключи трек")
-        self.assertEqual("task", answer["kind"], answer)
+        if answer["kind"] != "task":
+            self.fail(repr(answer))
         self.assertEqual(1, len(sink.created))
         self.assertTrue(sink.created[0]["start"])
         self.assertEqual(
