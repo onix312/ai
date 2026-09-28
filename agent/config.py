@@ -37,6 +37,11 @@ VOICE_FOLLOWUP_SECONDS = float(os.environ.get("PRINTFLOW_VOICE_FOLLOWUP_SECONDS"
 VOICE_VAD_THRESHOLD = int(os.environ.get("PRINTFLOW_VOICE_VAD_THRESHOLD", "320") or 320)
 VOICE_SILENCE_SECONDS = float(os.environ.get("PRINTFLOW_VOICE_SILENCE_SECONDS", "0.8") or 0.8)
 VOICE_MAX_PHRASE_SECONDS = float(os.environ.get("PRINTFLOW_VOICE_MAX_PHRASE_SECONDS", "15") or 15)
+# Voice Engine 3.0: немного звука до срабатывания VAD сохраняется только в RAM,
+# чтобы первая согласная wake-word не обрезалась. Partial ASR обновляет live
+# status, но не отправляется в Brain до финализации фразы.
+VOICE_PREROLL_CHUNKS = max(0, int(os.environ.get("NOZZA_VOICE_PREROLL_CHUNKS", "3") or 3))
+VOICE_PARTIAL_MIN_CHARS = max(1, int(os.environ.get("NOZZA_VOICE_PARTIAL_MIN_CHARS", "2") or 2))
 
 # --- 18.14: личный ассистент компьютера ------------------------------------
 # Адрес рантайма модели. Тот же, что у помощника в панели (`assistant.DEFAULT_URL`):
