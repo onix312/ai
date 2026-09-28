@@ -25,7 +25,10 @@ class UiState:
         if voice_state in ("idle", "listening", "thinking", "speaking", "error"):
             self.assistant_state = voice_state
         self.pending = list(payload.get("pending") or [])
-        if self.last_error and self.connected:
+        voice_error = str(voice.get("last_error") or "")
+        if voice_state == "error" and voice_error:
+            self.last_error = voice_error
+        elif self.last_error and self.connected:
             self.last_error = ""
 
     def set_error(self, message: str) -> None:
