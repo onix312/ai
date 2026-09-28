@@ -45,11 +45,17 @@ class ProviderRegistryTests(unittest.TestCase):
             "browser_reason": "DevTools выключен",
             "windows": True,
             "windows_reason": "",
+            "panel": True,
+            "panel_reason": "",
+            "sqlite": True,
+            "sqlite_reason": "",
         })
         by_name = {row["name"]: row for row in rows}
         self.assertFalse(by_name["browser"]["available"])
         self.assertIn("DevTools", by_name["browser"]["reason"])
         self.assertTrue(by_name["desktop"]["available"])
+        self.assertTrue(by_name["printflow"]["available"])
+        self.assertTrue(by_name["personal"]["available"])
         browser_skills = {row["name"]: row for row in by_name["browser"]["skills"]}
         self.assertEqual("read", browser_skills["browser.page"]["risk"])
         self.assertFalse(browser_skills["browser.page"]["confirm"])
