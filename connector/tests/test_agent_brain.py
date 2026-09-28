@@ -359,7 +359,8 @@ class BrainChatTests(unittest.TestCase):
         self.assertEqual([], self.store.dialog("main"))
 
     def test_dangerous_skill_becomes_pending(self):
-        answer = self.brain.chat("выключи компьютер")
+        with patch.dict(self.agent.runner._caps, {"system": True}):
+            answer = self.brain.chat("выключи компьютер")
         self.assertEqual("pending", answer["kind"])
         self.assertEqual({"id": "abc", "text": answer["pending"]["text"]}, answer["pending"])
         self.assertEqual(("system.power", {"action": "shutdown"}), self.agent.calls[-1])
