@@ -55,6 +55,8 @@ class NativeApp:
         self.center.task_command.connect(self.task_command)
         self.center.plan_preview.connect(self.plan_preview)
         self.center.plan_command.connect(self.plan_command)
+        self.center.replan_command.connect(self.replan_command)
+        self.center.replan_preview.connect(self.replan_preview)
 
         self._restore_geometry()
         self._install_hotkey()
@@ -202,11 +204,13 @@ class NativeApp:
         notes = self.backend.notifications()
         tasks = self.backend.tasks(50)
         plans = self.backend.plans()
+        replans = self.backend.replans()
         return {
             "pending": pending.get("pending") or [],
             "notifications": notes.get("notifications") or [],
             "tasks": tasks.get("tasks") or [],
             "plans": plans.get("plans") or [],
+            "replans": replans.get("replans") or [],
         }
 
     def decide_task(self, action_id: str, confirmed: bool) -> None:
@@ -262,6 +266,31 @@ class NativeApp:
             lambda: self.backend.plan_op(op, plan_id),
             done,
         )
+
+    def replan_command(self, replan_id: str, op: str) -> None:
+        def done(payload: dict[str, Any]) -> None:
+            if not payload.get("ok"):
+                self.center.set_planner_message(str(payload.get("reason") or "Не удалось изменить план."))
+            elif op == "approve":
+                self.center.set_planner_message("Новый маршрут принят. Задача на паузе; продолжите её вручную.")
+            else:
+                self.center.set_planner_message("Старый маршрут сохранён.")
+            self.refresh_page("tasks")
+
+        self.run_async(lambda: self.backend.replan_op(op, replan_id), done)
+
+    def replan_preview(self, task_id: int) -> None:
+        def done(payload: dict[str, Any]) -> None:
+            if payload.get("needs_clarification"):
+                message = str(payload.get("ask") or "Требуется уточнение.")
+            elif payload.get("ok"):
+                message = "Новый маршрут готов для проверки."
+            else:
+                message = str(payload.get("reason") or "Не удалось предложить маршрут.")
+            self.center.set_planner_message(message)
+            self.refresh_page("tasks")
+
+        self.run_async(lambda: self.backend.replan_op("preview", task_id=task_id), done)
 
     # --------------------------------------------------------------- mic
     def toggle_mic(self) -> None:

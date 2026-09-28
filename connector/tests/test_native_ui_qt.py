@@ -48,6 +48,14 @@ class NativeQtSmokeTests(unittest.TestCase):
                 ],
             }],
             "pending": [{"id": "a1", "text": "Подтвердить действие"}],
+            "replans": [{
+                "id": "r1", "task_id": 4, "reason": "Проверка не прошла",
+                "summary": "Проверить состояние", "old_tail": [{
+                    "seq": 2, "skill": "window.focus", "status": "failed",
+                    "verification": {"status": "failed"}}],
+                "steps": [{"seq": 2, "skill": "system.health", "title": "Здоровье ПК",
+                           "risk": "read", "confirm": False}],
+            }],
             "notifications": [],
         })
 
@@ -61,6 +69,8 @@ class NativeQtSmokeTests(unittest.TestCase):
         self.assertTrue(any("План: Рабочее место" in text for text in labels))
         self.assertTrue(any("target=telegram" in text for text in labels))
         self.assertTrue(any("verified 1" in text and "assumed 1" in text for text in labels))
+        self.assertTrue(any("Новый маршрут" in text for text in labels))
+        self.assertTrue(any("Здоровье ПК" in text for text in labels))
 
         center.deleteLater()
         quick.deleteLater()
