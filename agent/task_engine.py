@@ -339,6 +339,12 @@ class TaskEngine:
         self._run_loop(int(task_id))
         return {"ok": True, "task": self.get(task_id)}
 
+    def _run_skill(self, name: str, params: dict[str, Any]) -> dict[str, Any]:
+        """Run one task step with autonomy context when the host supports it."""
+        if getattr(self.agent, "autonomy", None) is None:
+            return self.agent.run_skill(name, params, ask=False)
+        return self.agent.run_skill(name, params, ask=False, autonomy_mode="task")
+
     def _run_loop(self, task_id: int) -> None:
         try:
             while True:
@@ -356,9 +362,8 @@ class TaskEngine:
                     return
                 self._set_step(task_id, seq, status="running", started_at=now_iso(),
                                pending_action="", result={})
-                result = self.agent.run_skill(
-                    str(pending["skill"]), pending.get("params") or {},
-                    ask=False, autonomy_mode="task")
+                result = self._run_skill(
+                    str(pending["skill"]), pending.get("params") or {})
                 if result.get("queued") and result.get("id"):
                     action_id = str(result["id"])
                     self._set_step(task_id, seq, status="waiting", pending_action=action_id,
