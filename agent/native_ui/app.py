@@ -10,11 +10,11 @@ from PySide6.QtWidgets import QApplication, QSystemTrayIcon
 
 from .backend import BackendClient
 from .control_center import ControlCenter
-from .hotkeys import HotkeyFilter, register_default, unregister
+from .hotkeys import HotkeyFilter, QUICK_HOTKEY_ID, STOP_HOTKEY_ID, register_default, register_stop, unregister
 from .orb import VoiceOrb
 from .quick_panel import QuickPanel
 from .state import UiState
-from .tray import NozzaTray
+from .tray import LumaTray
 from .workers import Worker
 
 
@@ -24,8 +24,8 @@ class NativeApp:
     def __init__(self, qt: QApplication | None = None,
                  backend: BackendClient | None = None) -> None:
         self.qt = qt or QApplication.instance() or QApplication(sys.argv)
-        self.qt.setApplicationName("NOZZA Assistant")
-        self.qt.setOrganizationName("NOZZA")
+        self.qt.setApplicationName("Люма")
+        self.qt.setOrganizationName("Luma")
         self.qt.setQuitOnLastWindowClosed(False)
         self.backend = backend or BackendClient()
         self.state = UiState()
@@ -33,15 +33,18 @@ class NativeApp:
         self._busy_status = False
         self._busy_chat = False
         self._hotkey_filter: HotkeyFilter | None = None
+        self._stop_hotkey_filter: HotkeyFilter | None = None
         self._hotkey_registered = False
+        self._stop_hotkey_registered = False
 
         self.orb = VoiceOrb()
         self.quick = QuickPanel()
         self.center = ControlCenter()
-        self.tray = NozzaTray(
+        self.tray = LumaTray(
             self.open_quick,
             self.open_center,
             self.toggle_mic,
+            self.toggle_stop_all,
             self.restart_ui,
             self.quit,
         )
@@ -51,6 +54,7 @@ class NativeApp:
         self.center.refresh_page.connect(self.refresh_page)
         self.center.clear_chat.connect(self.clear_chat)
         self.center.mic_toggle.connect(self.toggle_mic)
+        self.center.safety_toggle.connect(self.toggle_stop_all)
         self.center.task_decision.connect(self.decide_task)
         self.center.persona_save.connect(self.save_persona)
         self.center.persona_reset.connect(self.reset_persona)
@@ -139,10 +143,12 @@ class NativeApp:
         self.tray.apply_status(
             self.state.connected, self.state.voice_enabled, self.state.model_ok,
             self.state.assistant_state, self.state.last_error,
+            self.state.safety_stopped,
         )
         self.center.update_status(
             self.state.connected, self.state.voice_enabled, self.state.model_ok,
             self.state.panel_ok, self.state.last_error,
+            self.state.safety_stopped,
         )
         if not self.state.connected:
             if self.orb.isVisible():
@@ -173,7 +179,7 @@ class NativeApp:
             reply = str(payload.get("reply") or payload.get("reason") or "Готово.")
             self.quick.set_busy(False)
             self.quick.show_answer(reply)
-            self.center.chat.append_local("NOZZA", reply)
+            self.center.chat.append_local("Люма", reply)
             pending = payload.get("pending")
             if isinstance(pending, dict) and pending.get("id"):
                 self.center.set_page_payload("tasks", {"pending": [pending]})
@@ -186,7 +192,7 @@ class NativeApp:
             self._busy_chat = False
             self.quick.set_busy(False)
             self.quick.show_answer(message)
-            self.center.chat.append_local("NOZZA", message)
+            self.center.chat.append_local("Люма", message)
             self.state.set_error(message)
             self.orb.set_state("error", 2400)
             self._render_status()
@@ -393,6 +399,26 @@ class NativeApp:
             "listening" if self.state.voice_enabled else "idle"))
         self._render_status()
 
+    def toggle_stop_all(self) -> None:
+        if self.state.safety_stopped:
+            self.run_async(self.backend.safety_resume, self._safety_result)
+        else:
+            self.run_async(self.backend.safety_stop, self._safety_result)
+
+    def stop_all(self) -> None:
+        if not self.state.safety_stopped:
+            self.run_async(self.backend.safety_stop, self._safety_result)
+
+    def _safety_result(self, payload: dict[str, Any]) -> None:
+        self.state.safety_stopped = bool(payload.get("stopped") or payload.get("latched"))
+        if self.state.safety_stopped:
+            self.state.voice_enabled = False
+            self.state.armed = False
+            self.state.assistant_state = "idle"
+            self.orb.set_state("idle", 900)
+        self._render_status()
+        self.refresh_page("tasks")
+
     # --------------------------------------------------------------- windows
     def open_quick(self) -> None:
         self.quick.show_centered()
@@ -412,11 +438,15 @@ class NativeApp:
     # --------------------------------------------------------------- hotkey
     def _install_hotkey(self) -> None:
         try:
-            self._hotkey_filter = HotkeyFilter(self.open_quick)
+            self._hotkey_filter = HotkeyFilter(self.open_quick, QUICK_HOTKEY_ID)
             self.qt.installNativeEventFilter(self._hotkey_filter)
-            self._hotkey_registered = register_default(0)
+            self._hotkey_registered = register_default(0, QUICK_HOTKEY_ID)
+            self._stop_hotkey_filter = HotkeyFilter(self.stop_all, STOP_HOTKEY_ID)
+            self.qt.installNativeEventFilter(self._stop_hotkey_filter)
+            self._stop_hotkey_registered = register_stop(0, STOP_HOTKEY_ID)
         except Exception:
             self._hotkey_registered = False
+            self._stop_hotkey_registered = False
 
     # ------------------------------------------------------------- lifecycle
     def _restore_geometry(self) -> None:
@@ -442,7 +472,9 @@ class NativeApp:
     def quit(self) -> None:
         self._save_geometry()
         if self._hotkey_registered:
-            unregister(0)
+            unregister(0, QUICK_HOTKEY_ID)
+        if self._stop_hotkey_registered:
+            unregister(0, STOP_HOTKEY_ID)
         self.tray.hide()
         self.qt.quit()
 
