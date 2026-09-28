@@ -320,3 +320,15 @@ owned skills. Control Center отображает этот каталог в Н�
 
 Следующие кандидаты миграции: Files, PrintFlow, Telegram и Personal.
 Подробно: [../docs/PROVIDERS.md](../docs/PROVIDERS.md).
+
+
+## Persona Engine 1.0
+
+Стиль общения NOZZA хранится отдельно от памяти и safety policy. В настройках
+Native UI можно выбрать обращение, подробность, уровень юмора, инициативность и
+тон отношений. Профиль хранится локально в `persona.*` preferences.
+
+Persona влияет только на форму ответа. Она не меняет skills, risk,
+confirmations, Planner/Task Engine или providers.
+
+Подробнее: [../docs/PERSONA.md](../docs/PERSONA.md).
