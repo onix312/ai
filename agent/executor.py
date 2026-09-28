@@ -452,40 +452,6 @@ class Runner:
         return {"ok": True, "steps": done, "reason": "",
                 "hint": f"Выполнено шагов: {len(done)}"}
 
-    # --- панель (И137, И1, И174) ------------------------------------------
-    def _panel_actions(self, _params: dict[str, Any]) -> dict[str, Any]:
-        return self.panel.actions()
-
-    def _panel_do(self, params: dict[str, Any]) -> dict[str, Any]:
-        action, why = self.panel.find_action(str(params.get("action") or ""))
-        if action is None:
-            return {"ok": False, "reason": why}
-        inner = params.get("params")
-        values = inner if isinstance(inner, dict) else {}
-        # Подтверждение действия панели берётся из её каталога: ассистент не
-        # решает сам, какие действия двигают деньги и печать.
-        confirmed = bool(action.get("confirm"))
-        result = self.panel.run_action(action, values, confirmed=confirmed)
-        result["title_action"] = str(action.get("title") or action.get("id") or "")
-        result["panel_confirm"] = confirmed
-        explain = " ".join(str(params.get("explain") or "").split())[:300]
-        result["target"] = explain or result["title_action"]
-        if not confirmed:
-            result["hint"] = "Действие чтения: выполнено без подтверждения"
-        elif explain and result.get("ok"):
-            result["hint"] = explain  # в журнал — что именно сделано словами панели, а не «готово»
-        return result
-
-    def _panel_ask(self, params: dict[str, Any]) -> dict[str, Any]:
-        question = str(params.get("question") or "").strip()
-        if not question:
-            return {"ok": False, "reason": "Пустой вопрос"}
-        return self.panel.ask(question)
-
-    def _day(self, kind: str, params: dict[str, Any]) -> dict[str, Any]:
-        days = int(params.get("days") or 1)
-        return self.panel.day(kind, days=max(1, min(90, days)))
-
     # --- файлы и знания (И142, И143, И144, И147, И148) --------------------
     def _folders(self, raw: Any, default: tuple[str, ...]) -> list[str]:
         if isinstance(raw, (list, tuple)):
