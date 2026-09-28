@@ -13,7 +13,7 @@ from . import skills
 from .store import now_iso
 
 TERMINAL = frozenset(("done", "cancelled"))
-RUNNABLE = frozenset(("planned", "paused", "running"))
+STARTABLE = frozenset(("planned", "paused"))
 
 
 class TaskEngine:
@@ -187,7 +187,7 @@ class TaskEngine:
         task = self.get(task_id)
         if task is None:
             return {"ok": False, "reason": "Задача не найдена"}
-        if task["status"] not in RUNNABLE:
+        if task["status"] not in STARTABLE:
             return {"ok": False, "reason": f"Задачу в статусе {task['status']} нельзя запустить",
                     "task": task}
         with self._lock:
@@ -205,7 +205,7 @@ class TaskEngine:
         task = self.get(task_id)
         if task is None:
             return {"ok": False, "reason": "Задача не найдена"}
-        if task["status"] not in RUNNABLE:
+        if task["status"] not in STARTABLE:
             return {"ok": False, "reason": f"Задачу в статусе {task['status']} нельзя запустить",
                     "task": task}
         with self._lock:
@@ -277,7 +277,7 @@ class TaskEngine:
         if result.get("ok"):
             self._set_step(task_id, seq, status="done", pending_action="",
                            finished_at=now_iso(), result=result)
-            self._set_task(task_id, status="running", current_step=seq + 1, error="")
+            self._set_task(task_id, status="paused", current_step=seq + 1, error="")
             self.start(task_id)
         else:
             reason = str(result.get("reason") or "Подтверждённый шаг не выполнен")
