@@ -62,6 +62,7 @@ class Planner:
         self.agent = agent
         self._lock = threading.RLock()
         self._drafts: dict[str, dict[str, Any]] = {}
+        self._approving: set[str] = set()
 
     def _purge(self) -> None:
         now = time.time()
@@ -175,31 +176,40 @@ class Planner:
         key = str(draft_id or "").strip()
         with self._lock:
             draft = self._drafts.get(key)
-        if not draft:
-            return {"ok": False, "reason": "План не найден или уже истёк"}
-
-        # Повторная валидация непосредственно перед созданием задачи.
-        steps = [{"skill": row["skill"], "params": dict(row.get("params") or {})}
-                 for row in draft["steps"]]
-        checked, reason = self.agent.tasks.validate_steps(steps)
-        if reason:
-            return {"ok": False, "reason": f"План больше нельзя запустить: {reason}"}
-        result = self.agent.tasks.create(
-            str(draft["title"]),
-            [{"skill": row["skill"], "params": row["params"]} for row in checked],
-            goal=str(draft["goal"]),
-            source="planner",
-            start=True,
-        )
-        if result.get("ok"):
+            if not draft:
+                return {"ok": False, "reason": "План не найден или уже истёк"}
+            if key in self._approving:
+                return {"ok": False, "reason": "Этот план уже запускается"}
+            self._approving.add(key)
+        try:
+            # Повторная валидация непосредственно перед созданием задачи.
+            steps = [{"skill": row["skill"], "params": dict(row.get("params") or {})}
+                     for row in draft["steps"]]
+            checked, reason = self.agent.tasks.validate_steps(steps)
+            if reason:
+                return {"ok": False, "reason": f"План больше нельзя запустить: {reason}"}
+            result = self.agent.tasks.create(
+                str(draft["title"]),
+                [{"skill": row["skill"], "params": row["params"]} for row in checked],
+                goal=str(draft["goal"]),
+                source="planner",
+                start=True,
+            )
+            if result.get("ok"):
+                with self._lock:
+                    self._drafts.pop(key, None)
+                return {"ok": True, "task": result.get("task"), "plan_id": key}
+            return result
+        finally:
             with self._lock:
-                self._drafts.pop(key, None)
-            return {"ok": True, "task": result.get("task"), "plan_id": key}
-        return result
+                self._approving.discard(key)
 
     def discard(self, draft_id: str) -> dict[str, Any]:
+        key = str(draft_id or "").strip()
         with self._lock:
-            existed = self._drafts.pop(str(draft_id or "").strip(), None) is not None
+            if key in self._approving:
+                return {"ok": False, "discarded": False, "reason": "План уже запускается"}
+            existed = self._drafts.pop(key, None) is not None
         return {"ok": existed, "discarded": existed,
                 "reason": "" if existed else "План не найден"}
 
