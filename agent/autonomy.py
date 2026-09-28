@@ -93,11 +93,14 @@ class AutonomyPolicy:
 
     def update(self, level: str | None = None,
                providers: Any = None) -> dict[str, Any]:
+        clean_level: str | None = None
+        clean_providers: dict[str, str] = {}
+
         if level is not None:
             value = str(level or "").strip().casefold()
             if value not in LEVELS:
                 return {"ok": False, "reason": f"Неизвестный уровень автономности «{value}»"}
-            self.store.set_preference(PREFIX + "level", value)
+            clean_level = value
 
         if providers is not None:
             if not isinstance(providers, dict):
@@ -116,10 +119,14 @@ class AutonomyPolicy:
                         "reason": f"{name} нельзя поднять выше {hard}",
                         "hard_max": hard,
                     }
-            for raw_name, raw_level in providers.items():
-                name = str(raw_name).strip().casefold()
-                value = str(raw_level).strip().casefold()
-                self.store.set_preference(PROVIDER_PREFIX + name, value)
+                clean_providers[name] = value
+
+        # Validate first, persist second: a rejected provider patch must not
+        # partially change the global autonomy level.
+        if clean_level is not None:
+            self.store.set_preference(PREFIX + "level", clean_level)
+        for name, value in clean_providers.items():
+            self.store.set_preference(PROVIDER_PREFIX + name, value)
         return self.payload()
 
     def reset(self) -> dict[str, Any]:
@@ -154,8 +161,17 @@ class AutonomyPolicy:
         from . import skills
 
         risk = skills.risk_of(skill)
-        # Observer may use read-only skills to inspect state.
-        required = "observer" if mode == "direct" and risk == "read" else MODE_LEVEL.get(mode, "assistant")
+        name = str(skill.get("name") or "")
+        # A learned/macro chain remains multi-step even when exposed as one skill.
+        if mode == "direct" and (skill.get("steps") or name == "assistant.macro_run"):
+            required = "operator"
+        else:
+            # Observer may use read-only skills to inspect state.
+            required = (
+                "observer"
+                if mode == "direct" and risk == "read"
+                else MODE_LEVEL.get(mode, "assistant")
+            )
         provider = str(skill.get("provider") or "core")
         return self.check(required, provider)
 
