@@ -28,6 +28,13 @@ class NativeQtSmokeTests(unittest.TestCase):
         center.update_status(True, False, True, True)
         center.set_page_payload("memory", {"memories": [{"text": "пример"}]})
         center.set_page_payload("tasks", {
+            "plans": [{
+                "id": "p1", "title": "Рабочее место", "summary": "Открыть нужные программы",
+                "steps": [{
+                    "seq": 0, "skill": "app.open", "title": "Открыть программу",
+                    "risk": "soft", "confirm": False, "why": "связь",
+                }],
+            }],
             "tasks": [{
                 "id": 4, "title": "Подготовить рабочее место", "status": "paused",
                 "progress": 1, "total_steps": 3, "error": "Ждёт продолжения",
@@ -43,6 +50,7 @@ class NativeQtSmokeTests(unittest.TestCase):
         task_page = center.pages["tasks"]
         labels = [w.text() for w in task_page.findChildren(QLabel)]
         self.assertTrue(any("Подготовить рабочее место" in text for text in labels))
+        self.assertTrue(any("План: Рабочее место" in text for text in labels))
 
         center.deleteLater()
         quick.deleteLater()
