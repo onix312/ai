@@ -165,6 +165,13 @@ def probe() -> tuple[bool, str]:
         return False, str(exc) + "; включите локальный Chromium DevTools endpoint"
     if not isinstance(data, dict):
         return False, "Chromium DevTools ответил неожиданным форматом"
+    ws = str(data.get("webSocketDebuggerUrl") or "")
+    if not ws:
+        return False, "На локальном адресе нет Chromium DevTools WebSocket"
+    try:
+        _loopback_url(ws, ("ws", "wss"))
+    except BrowserError as exc:
+        return False, str(exc)
     return True, ""
 
 
