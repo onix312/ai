@@ -39,6 +39,13 @@ class NativeQtSmokeTests(unittest.TestCase):
             "tasks": [{
                 "id": 4, "title": "Подготовить рабочее место", "status": "paused",
                 "progress": 1, "total_steps": 3, "error": "Ждёт продолжения",
+                "steps": [
+                    {"seq": 0, "skill": "app.open",
+                     "verification": {"status": "verified", "reason": "окно найдено"}},
+                    {"seq": 1, "skill": "system.media",
+                     "verification": {"status": "assumed", "reason": "нет независимой проверки"}},
+                    {"seq": 2, "skill": "window.focus", "verification": {}},
+                ],
             }],
             "pending": [{"id": "a1", "text": "Подтвердить действие"}],
             "notifications": [],
@@ -53,6 +60,7 @@ class NativeQtSmokeTests(unittest.TestCase):
         self.assertTrue(any("Подготовить рабочее место" in text for text in labels))
         self.assertTrue(any("План: Рабочее место" in text for text in labels))
         self.assertTrue(any("target=telegram" in text for text in labels))
+        self.assertTrue(any("verified 1" in text and "assumed 1" in text for text in labels))
 
         center.deleteLater()
         quick.deleteLater()

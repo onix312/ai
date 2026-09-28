@@ -5,6 +5,7 @@ import pathlib
 import tempfile
 import time
 import unittest
+from unittest.mock import patch
 
 from agent.store import Store
 from agent.task_engine import TaskEngine
@@ -76,6 +77,35 @@ class TaskEngineTests(unittest.TestCase):
         self.assertEqual("done", reloaded["status"])
         self.assertEqual(2, reloaded["current_step"])
 
+    def test_failed_verification_stops_before_next_step(self):
+        task_id = self._create([
+            {"skill": "app.open", "params": {"target": "telegram"}},
+            {"skill": "app.open", "params": {"target": "printflow"}},
+        ])
+        with patch("agent.task_engine.verifier.verify", return_value={
+            "status": "failed", "reason": "окно не появилось", "evidence": {},
+        }):
+            self.engine.run_sync(task_id)
+        task = self.engine.get(task_id)
+        self.assertEqual("failed", task["status"])
+        self.assertEqual(1, len(self.agent.calls), "следующий шаг не должен стартовать")
+        self.assertEqual("failed", task["steps"][0]["verification"]["status"])
+        self.assertIn("Проверка результата", task["error"])
+
+    def test_verified_evidence_is_persisted(self):
+        task_id = self._create([
+            {"skill": "app.open", "params": {"target": "telegram"}},
+        ])
+        with patch("agent.task_engine.verifier.verify", return_value={
+            "status": "verified", "reason": "окно найдено",
+            "evidence": {"active": "Telegram"},
+        }):
+            self.engine.run_sync(task_id)
+        task = self.engine.get(task_id)
+        self.assertEqual("done", task["status"])
+        self.assertEqual("verified", task["steps"][0]["verification"]["status"])
+        self.assertEqual("Telegram", task["steps"][0]["verification"]["evidence"]["active"])
+
     def test_confirmation_pauses_execution_and_resumes_after_human(self):
         task_id = self._create([
             {"skill": "clipboard.write", "params": {"text": "привет"}},
@@ -97,6 +127,30 @@ class TaskEngineTests(unittest.TestCase):
             time.sleep(0.01)
         self.assertEqual("done", task["status"])
         self.assertEqual(2, len(self.agent.calls))
+
+    def test_confirmed_step_is_verified_before_resume(self):
+        task_id = self._create([
+            {"skill": "clipboard.write", "params": {"text": "привет"}},
+            {"skill": "app.open", "params": {"target": "telegram"}},
+        ])
+        self.engine.run_sync(task_id)
+        action_id = self.engine.get(task_id)["steps"][0]["pending_action"]
+        with patch("agent.task_engine.verifier.verify", return_value={
+            "status": "verified", "reason": "буфер совпал", "evidence": {"chars": 6},
+        }):
+            self.engine.on_action_result(
+                action_id,
+                {"ok": True, "done": True, "result": {"ok": True, "text": "привет"}},
+                True,
+            )
+        deadline = time.time() + 1
+        while time.time() < deadline:
+            task = self.engine.get(task_id)
+            if task["status"] == "done":
+                break
+            time.sleep(0.01)
+        self.assertEqual("done", task["status"])
+        self.assertEqual("verified", task["steps"][0]["verification"]["status"])
 
     def test_declined_confirmation_pauses_task_without_losing_step(self):
         task_id = self._create([

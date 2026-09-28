@@ -271,3 +271,16 @@ risk/confirmation политика остаётся прежней.
 API: `GET /plans`, `POST /plans`.
 
 Подробно: [../docs/PLANNER.md](../docs/PLANNER.md).
+
+
+### Verification Engine 1.0
+
+Task Engine после успешного действия пытается независимо прочитать состояние.
+Шаг получает один из статусов `verified / assumed / failed`. Явное
+несоответствие останавливает задачу до следующего шага; отсутствие verifier
+честно остаётся `assumed`.
+
+Сейчас независимо проверяются громкость, активное окно после `window.focus`
+и clipboard после `clipboard.write`.
+
+Подробно: [../docs/VERIFICATION.md](../docs/VERIFICATION.md).

@@ -9,7 +9,7 @@ import json
 import threading
 from typing import Any
 
-from . import skills
+from . import skills, verifier
 from .store import now_iso
 
 TERMINAL = frozenset(("done", "cancelled"))
@@ -160,6 +160,10 @@ class TaskEngine:
                 row["result"] = json.loads(row.pop("result_json") or "{}")
             except (ValueError, TypeError):
                 row["result"] = {}
+            row["verification"] = (
+                dict(row["result"].get("_verification") or {})
+                if isinstance(row["result"], dict) else {}
+            )
         return rows
 
     def get(self, task_id: int) -> dict[str, Any] | None:
@@ -247,6 +251,14 @@ class TaskEngine:
                                    result=result)
                     self._set_task(task_id, status="failed", current_step=seq, error=reason)
                     return
+                result, check = self._verify_result(
+                    str(pending["skill"]), pending.get("params") or {}, result)
+                if check.get("status") == "failed":
+                    reason = "Проверка результата: " + str(check.get("reason") or "состояние не совпало")
+                    self._set_step(task_id, seq, status="failed", finished_at=now_iso(),
+                                   result=result)
+                    self._set_task(task_id, status="failed", current_step=seq, error=reason)
+                    return
                 self._set_step(task_id, seq, status="done", finished_at=now_iso(), result=result)
                 latest = self.get(task_id)
                 if latest is None:
@@ -275,8 +287,30 @@ class TaskEngine:
                            error="Шаг отменён человеком")
             return self.get(task_id)
         if result.get("ok"):
+            task = self.get(task_id)
+            step = next(
+                (row for row in (task or {}).get("steps", []) if int(row.get("seq") or 0) == seq),
+                None,
+            )
+            if step is None:
+                self._set_task(task_id, status="failed", current_step=seq,
+                               error="Шаг подтверждения не найден для проверки")
+                return self.get(task_id)
+            actual = result.get("result") if isinstance(result.get("result"), dict) else result
+            checked_result, check = self._verify_result(
+                str(step.get("skill") or ""), step.get("params") or {}, actual)
+            stored = dict(result)
+            stored["_verification"] = check
+            if isinstance(result.get("result"), dict):
+                stored["result"] = checked_result
+            if check.get("status") == "failed":
+                reason = "Проверка результата: " + str(check.get("reason") or "состояние не совпало")
+                self._set_step(task_id, seq, status="failed", pending_action="",
+                               finished_at=now_iso(), result=stored)
+                self._set_task(task_id, status="failed", current_step=seq, error=reason)
+                return self.get(task_id)
             self._set_step(task_id, seq, status="done", pending_action="",
-                           finished_at=now_iso(), result=result)
+                           finished_at=now_iso(), result=stored)
             self._set_task(task_id, status="paused", current_step=seq + 1, error="")
             self.start(task_id)
         else:
@@ -285,6 +319,14 @@ class TaskEngine:
                            finished_at=now_iso(), result=result)
             self._set_task(task_id, status="failed", current_step=seq, error=reason)
         return self.get(task_id)
+
+    @staticmethod
+    def _verify_result(skill_name: str, params: dict[str, Any],
+                       result: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+        check = verifier.verify(skill_name, params, result)
+        stored = dict(result)
+        stored["_verification"] = check
+        return stored, check
 
     def pause(self, task_id: int) -> dict[str, Any]:
         task = self.get(task_id)

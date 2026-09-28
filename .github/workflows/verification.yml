@@ -1,0 +1,45 @@
+name: verification
+
+on:
+  pull_request:
+    paths:
+      - "agent/verifier.py"
+      - "agent/task_engine.py"
+      - "agent/native_ui/**"
+      - "connector/tests/test_verifier.py"
+      - "connector/tests/test_task_engine.py"
+      - "connector/tests/test_native_ui_qt.py"
+      - ".github/workflows/verification.yml"
+  push:
+    branches:
+      - "feature/nozza-verification-v1"
+
+jobs:
+  core:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Compile verification layer
+        run: python -m compileall -q agent/verifier.py agent/task_engine.py agent/native_ui
+      - name: Verification tests
+        run: >-
+          python -m unittest
+          connector.tests.test_verifier
+          connector.tests.test_task_engine
+
+  windows-ui:
+    runs-on: windows-latest
+    env:
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install PySide6
+        run: python -m pip install "PySide6>=6.7,<7"
+      - name: Verification UI smoke
+        run: python -m unittest connector.tests.test_native_ui_qt
