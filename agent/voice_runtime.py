@@ -364,13 +364,22 @@ class VoiceRuntime:
             return
         from . import pc
 
-        # Пока NOZZA говорит, собственный голос не считается новой командой.
-        # Слушается только явный barge-in.
+        # Во время собственного TTS принимаем stop и явное обращение к Люме,
+        # но отбрасываем фразу, если она похожа на недавно произнесённый TTS.
         if during_output or pc.is_speaking():
             if is_stop_phrase(clean):
                 pc.stop_speaking()
                 self.conversation_until = time.time() + config.VOICE_FOLLOWUP_SECONDS
                 self.state = "listening"
+                return
+            if speech.is_wake_phrase(clean) and not pc.recent_tts_echo(clean):
+                pc.stop_speaking()
+                self.conversation_until = time.time() + config.VOICE_FOLLOWUP_SECONDS
+                phrase = speech.phrase_after_wake_word(clean)
+                if phrase:
+                    self._dispatch(phrase)
+                else:
+                    self.state = "listening"
             return
 
         if self._handler_busy:

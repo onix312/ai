@@ -1,5 +1,13 @@
 # NOZZA — handoff и roadmap после Verification Engine 1.0
 
+> **Актуализация 29.09.2026, Voice 3 Phase 5:** Phase 4 уже в `main`.
+> Новое имя помощника — **Люма**, primary wake-word — `люма`.
+> Старые `ноза/нозза/nozza/noza` временно сохранены как legacy wake aliases.
+> Phase 5 добавляет wake-word barge-in во время TTS и text-level echo rejection,
+> чтобы Люма не реагировала на собственный голос. Следом: acoustic echo
+> suppression → optional HQ local TTS → Native UI 2.0.
+
+
 > **Актуализация 29.09.2026, Voice 3 Phase 4:** Phase 3 уже в `main`.
 > Текущая ветка добавляет Dynamic Vocabulary: локальные имена приложений,
 > проектов, принтеров, клиентов, целей и выученных команд мягко корректируют
