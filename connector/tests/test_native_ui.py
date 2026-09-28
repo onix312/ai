@@ -146,6 +146,28 @@ class BackendClientTests(unittest.TestCase):
             ("POST", "http://127.0.0.1:8799/persona", {"op": "reset"}),
         ], calls)
 
+    def test_autonomy_api_uses_agent_port(self):
+        client = BackendClient()
+        calls = []
+
+        def fake(req, timeout=0):
+            body = json.loads(req.data.decode("utf-8")) if req.data else None
+            calls.append((req.get_method(), req.full_url, body))
+            return _Response({"ok": True, "level": "agent", "providers": {}})
+
+        with mock.patch("urllib.request.urlopen", fake):
+            client.autonomy()
+            client.autonomy_update("operator", {"printflow": "assistant"})
+            client.autonomy_reset()
+        self.assertEqual([
+            ("GET", "http://127.0.0.1:8799/autonomy", None),
+            ("POST", "http://127.0.0.1:8799/autonomy", {
+                "op": "update", "level": "operator",
+                "providers": {"printflow": "assistant"},
+            }),
+            ("POST", "http://127.0.0.1:8799/autonomy", {"op": "reset"}),
+        ], calls)
+
     def test_network_failure_is_friendly(self):
         client = BackendClient()
         with mock.patch("urllib.request.urlopen", side_effect=OSError("down")):

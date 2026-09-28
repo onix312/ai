@@ -11,7 +11,7 @@ import time
 import uuid
 from typing import Any
 
-from . import config, model, skills
+from . import autonomy, config, model, skills
 
 MAX_GOAL = 1200
 MAX_STEPS = 8
@@ -172,6 +172,10 @@ class Planner:
         return {"ok": True, "plan": self._public(draft)}
 
     def approve(self, draft_id: str) -> dict[str, Any]:
+        allowed, why, policy = autonomy.check_agent(self.agent, "agent", "core")
+        if not allowed:
+            return {"ok": False, "reason": why, "autonomy_blocked": True,
+                    "autonomy": policy}
         self._purge()
         key = str(draft_id or "").strip()
         with self._lock:
@@ -188,6 +192,17 @@ class Planner:
             checked, reason = self.agent.tasks.validate_steps(steps)
             if reason:
                 return {"ok": False, "reason": f"План больше нельзя запустить: {reason}"}
+            policy = getattr(self.agent, "autonomy", None)
+            if policy is not None:
+                learned = self.agent.runner.learned()
+                for row in checked:
+                    skill = skills.get(str(row.get("skill") or ""), learned)
+                    if skill is None:
+                        continue
+                    allowed_step, why_step = policy.check_skill(skill, "plan")
+                    if not allowed_step:
+                        return {"ok": False, "reason": why_step, "autonomy_blocked": True,
+                                "autonomy": policy.payload()}
             result = self.agent.tasks.create(
                 str(draft["title"]),
                 [{"skill": row["skill"], "params": row["params"]} for row in checked],

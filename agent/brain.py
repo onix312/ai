@@ -1592,6 +1592,15 @@ class Brain:
                 )
             except Exception as exc:  # noqa: BLE001
                 created = {"ok": False, "reason": f"Task Engine: {exc.__class__.__name__}"}
+            if created.get("autonomy_blocked"):
+                reason = str(created.get("reason") or "Текущий уровень автономности не разрешает задачу.")
+                return self._reply(
+                    session, text, reason, kind="error", source=origin,
+                    steps=steps, started=started,
+                    result={"ok": False, "autonomy_blocked": True},
+                    extra={**(extra or {}), "autonomy": created.get("autonomy")},
+                    suggestions=["Открой настройки автономности"],
+                )
             if created.get("ok") and isinstance(created.get("task"), dict):
                 task = created["task"]
                 task_id = int(task.get("id") or 0)

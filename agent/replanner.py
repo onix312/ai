@@ -7,7 +7,7 @@ import time
 import uuid
 from typing import Any
 
-from . import config, model, planner, skills
+from . import autonomy, config, model, planner, skills
 
 _RULES = """Ты перепланировщик NOZZA. Верни только JSON с полями summary, ask, steps.
 steps — массив объектов {skill, params, why}. Предложи максимум 8 шагов из каталога.
@@ -142,6 +142,10 @@ class Replanner:
         return {"ok": True, "replan": self._public(draft)}
 
     def approve(self, draft_id: str) -> dict[str, Any]:
+        allowed, why, policy = autonomy.check_agent(self.agent, "agent", "core")
+        if not allowed:
+            return {"ok": False, "reason": why, "autonomy_blocked": True,
+                    "autonomy": policy}
         self._purge()
         key = str(draft_id or "").strip()
         with self._lock:
@@ -156,6 +160,17 @@ class Replanner:
             checked, reason = self._validate(draft["steps"], int(draft["replace_from"]))
             if reason:
                 return {"ok": False, "reason": reason}
+            policy = getattr(self.agent, "autonomy", None)
+            if policy is not None:
+                learned = self.agent.runner.learned()
+                for row in checked:
+                    skill = skills.get(str(row.get("skill") or ""), learned)
+                    if skill is None:
+                        continue
+                    allowed_step, why_step = policy.check_skill(skill, "plan")
+                    if not allowed_step:
+                        return {"ok": False, "reason": why_step, "autonomy_blocked": True,
+                                "autonomy": policy.payload()}
             result = self.agent.tasks.replace_remaining(
                 int(draft["task_id"]), int(draft["replace_from"]), checked,
                 str(draft["reason"]), expected_tail=str(draft["_tail"]))

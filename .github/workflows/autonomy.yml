@@ -1,0 +1,56 @@
+name: autonomy
+
+on:
+  pull_request:
+    paths:
+      - "agent/autonomy.py"
+      - "agent/server.py"
+      - "agent/task_engine.py"
+      - "agent/planner.py"
+      - "agent/replanner.py"
+      - "agent/brain.py"
+      - "agent/native_ui/**"
+      - "connector/tests/test_autonomy.py"
+      - "connector/tests/test_native_ui.py"
+      - "connector/tests/test_native_ui_qt.py"
+      - "docs/AUTONOMY.md"
+      - ".github/workflows/autonomy.yml"
+  push:
+    branches:
+      - "feature/nozza-autonomy-levels-v1"
+
+jobs:
+  core:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Compile autonomy layer
+        run: >-
+          python -m compileall -q
+          agent/autonomy.py agent/server.py agent/task_engine.py
+          agent/planner.py agent/replanner.py agent/brain.py agent/native_ui
+      - name: Autonomy contracts
+        run: >-
+          python -m unittest
+          connector.tests.test_autonomy
+          connector.tests.test_task_engine
+          connector.tests.test_planner
+          connector.tests.test_replanner
+          connector.tests.test_native_ui
+
+  windows-ui:
+    runs-on: windows-latest
+    env:
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install PySide6
+        run: python -m pip install "PySide6>=6.7,<7"
+      - name: Autonomy UI smoke
+        run: python -m unittest connector.tests.test_native_ui_qt

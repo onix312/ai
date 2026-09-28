@@ -10,7 +10,7 @@ import hashlib
 import threading
 from typing import Any
 
-from . import planner, skills, verifier
+from . import autonomy, planner, skills, verifier
 from .store import now_iso
 
 TERMINAL = frozenset(("done", "cancelled"))
@@ -153,8 +153,12 @@ class TaskEngine:
             )
         task = self.get(task_id)
         if start:
-            self.start(task_id)
+            started = self.start(task_id)
             task = self.get(task_id)
+            if not started.get("ok"):
+                return {"ok": False, "reason": str(started.get("reason") or "Задача не запущена"),
+                        "task": task, "autonomy_blocked": bool(started.get("autonomy_blocked")),
+                        "autonomy": started.get("autonomy")}
         return {"ok": True, "task": task}
 
     def _rows(self, task_id: int) -> list[dict[str, Any]]:
@@ -264,7 +268,33 @@ class TaskEngine:
                 "SELECT id FROM assistant_tasks ORDER BY id DESC LIMIT ?", (limit,))
         return [task for row in rows if (task := self.get(int(row["id"]))) is not None]
 
+    def _autonomy_preflight(self, task: dict[str, Any], mode: str = "task") -> tuple[bool, str, dict[str, Any] | None]:
+        policy = getattr(self.agent, "autonomy", None)
+        if policy is None:
+            return True, "", None
+        learned = {}
+        runner = getattr(self.agent, "runner", None)
+        if runner is not None and callable(getattr(runner, "learned", None)):
+            try:
+                learned = runner.learned()
+            except Exception:
+                learned = {}
+        for step in task.get("steps") or []:
+            if step.get("status") == "done":
+                continue
+            skill = skills.get(str(step.get("skill") or ""), learned)
+            if skill is None:
+                continue
+            ok, reason = policy.check_skill(skill, mode)
+            if not ok:
+                return False, reason, policy.payload()
+        return True, "", policy.payload()
+
     def start(self, task_id: int) -> dict[str, Any]:
+        allowed, why, policy = autonomy.check_agent(self.agent, "operator", "core")
+        if not allowed:
+            return {"ok": False, "reason": why, "autonomy_blocked": True,
+                    "autonomy": policy}
         with self._lock:
             task = self.get(task_id)
             if task is None:
@@ -272,6 +302,10 @@ class TaskEngine:
             if task["status"] not in STARTABLE:
                 return {"ok": False, "reason": f"Задачу в статусе {task['status']} нельзя запустить",
                         "task": task}
+            allowed_steps, why_steps, policy_steps = self._autonomy_preflight(task, "task")
+            if not allowed_steps:
+                return {"ok": False, "reason": why_steps, "task": task,
+                        "autonomy_blocked": True, "autonomy": policy_steps}
             if int(task_id) in self._running:
                 return {"ok": True, "started": False, "reason": "Задача уже выполняется", "task": task}
             self._running.add(int(task_id))
@@ -283,6 +317,10 @@ class TaskEngine:
         return {"ok": True, "started": True, "task": self.get(task_id)}
 
     def run_sync(self, task_id: int) -> dict[str, Any]:
+        allowed, why, policy = autonomy.check_agent(self.agent, "operator", "core")
+        if not allowed:
+            return {"ok": False, "reason": why, "autonomy_blocked": True,
+                    "autonomy": policy}
         with self._lock:
             task = self.get(task_id)
             if task is None:
@@ -290,12 +328,22 @@ class TaskEngine:
             if task["status"] not in STARTABLE:
                 return {"ok": False, "reason": f"Задачу в статусе {task['status']} нельзя запустить",
                         "task": task}
+            allowed_steps, why_steps, policy_steps = self._autonomy_preflight(task, "task")
+            if not allowed_steps:
+                return {"ok": False, "reason": why_steps, "task": task,
+                        "autonomy_blocked": True, "autonomy": policy_steps}
             if int(task_id) in self._running:
                 return {"ok": False, "reason": "Задача уже выполняется"}
             self._running.add(int(task_id))
             self._set_task(task_id, status="running", error="")
         self._run_loop(int(task_id))
         return {"ok": True, "task": self.get(task_id)}
+
+    def _run_skill(self, name: str, params: dict[str, Any]) -> dict[str, Any]:
+        """Run one task step with autonomy context when the host supports it."""
+        if getattr(self.agent, "autonomy", None) is None:
+            return self.agent.run_skill(name, params, ask=False)
+        return self.agent.run_skill(name, params, ask=False, autonomy_mode="task")
 
     def _run_loop(self, task_id: int) -> None:
         try:
@@ -314,8 +362,8 @@ class TaskEngine:
                     return
                 self._set_step(task_id, seq, status="running", started_at=now_iso(),
                                pending_action="", result={})
-                result = self.agent.run_skill(
-                    str(pending["skill"]), pending.get("params") or {}, ask=False)
+                result = self._run_skill(
+                    str(pending["skill"]), pending.get("params") or {})
                 if result.get("queued") and result.get("id"):
                     action_id = str(result["id"])
                     self._set_step(task_id, seq, status="waiting", pending_action=action_id,
@@ -324,6 +372,12 @@ class TaskEngine:
                     return
                 if not result.get("ok"):
                     reason = str(result.get("reason") or "Шаг не выполнен")
+                    if result.get("autonomy_blocked"):
+                        self._set_step(task_id, seq, status="pending",
+                                       pending_action="", result=result)
+                        self._set_task(task_id, status="paused", current_step=seq,
+                                       error=reason)
+                        return
                     self._set_step(task_id, seq, status="failed", finished_at=now_iso(),
                                    result=result)
                     self._set_task(task_id, status="failed", current_step=seq, error=reason)
@@ -363,6 +417,11 @@ class TaskEngine:
             self._set_step(task_id, seq, status="pending", pending_action="", result={})
             self._set_task(task_id, status="paused", current_step=seq,
                            error="Шаг отменён человеком")
+            return self.get(task_id)
+        if result.get("autonomy_blocked"):
+            reason = str(result.get("reason") or "Уровень автономности изменён")
+            self._set_step(task_id, seq, status="pending", pending_action="", result=result)
+            self._set_task(task_id, status="paused", current_step=seq, error=reason)
             return self.get(task_id)
         if result.get("ok"):
             task = self.get(task_id)

@@ -54,6 +54,8 @@ class NativeApp:
         self.center.task_decision.connect(self.decide_task)
         self.center.persona_save.connect(self.save_persona)
         self.center.persona_reset.connect(self.reset_persona)
+        self.center.autonomy_save.connect(self.save_autonomy)
+        self.center.autonomy_reset.connect(self.reset_autonomy)
         self.center.task_command.connect(self.task_command)
         self.center.plan_preview.connect(self.plan_preview)
         self.center.plan_command.connect(self.plan_command)
@@ -118,6 +120,11 @@ class NativeApp:
         self.run_async(
             self.backend.persona,
             self.center.set_persona_payload,
+            lambda _message: None,
+        )
+        self.run_async(
+            self.backend.autonomy,
+            self.center.set_autonomy_payload,
             lambda _message: None,
         )
 
@@ -314,6 +321,24 @@ class NativeApp:
                 self.center.set_persona_message(str(payload.get("reason") or "Профиль не сохранён."))
 
         self.run_async(lambda: self.backend.persona_update(dict(profile or {})), done)
+
+    def save_autonomy(self, level: str, providers: dict[str, str]) -> None:
+        def done(payload: dict[str, Any]) -> None:
+            if payload.get("ok"):
+                self.center.set_autonomy_payload(payload)
+                self.center.set_autonomy_message("✓ Policy автономности сохранена.")
+            else:
+                self.center.set_autonomy_message(str(payload.get("reason") or "Policy не сохранена."))
+        self.run_async(lambda: self.backend.autonomy_update(level, providers), done)
+
+    def reset_autonomy(self) -> None:
+        def done(payload: dict[str, Any]) -> None:
+            if payload.get("ok"):
+                self.center.set_autonomy_payload(payload)
+                self.center.set_autonomy_message("Автономность возвращена к безопасным значениям по умолчанию.")
+            else:
+                self.center.set_autonomy_message(str(payload.get("reason") or "Не удалось сбросить policy."))
+        self.run_async(self.backend.autonomy_reset, done)
 
     def reset_persona(self) -> None:
         def done(payload: dict[str, Any]) -> None:

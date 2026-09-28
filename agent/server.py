@@ -40,7 +40,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
 from . import brain as brain_mod
-from . import capabilities, config, executor, pc, persona as persona_mod, planner, replanner, skills, speech, task_engine, ui, voice_runtime, window, winapi
+from . import autonomy as autonomy_mod, capabilities, config, executor, pc, persona as persona_mod, planner, replanner, skills, speech, task_engine, ui, voice_runtime, window, winapi
 from .providers import registry as provider_registry
 
 # Ожидающее действие живёт недолго: неподтверждённый клик не должен висеть
@@ -72,6 +72,7 @@ class Agent:
         self._planner: planner.Planner | None = None
         self._replanner: replanner.Replanner | None = None
         self._persona: persona_mod.Persona | None = None
+        self._autonomy: autonomy_mod.AutonomyPolicy | None = None
         self._stop = threading.Event()
         # Голос: фраза после стоп-слова идёт мозгу, ответ звучит вслух.
         self.microphone.handler = self.voice_phrase
@@ -118,6 +119,13 @@ class Agent:
         if self._persona is None:
             self._persona = persona_mod.Persona(self.runner.store)
         return self._persona
+
+    @property
+    def autonomy(self) -> autonomy_mod.AutonomyPolicy:
+        """Policy-уровень над skills. Confirmations остаются canonical."""
+        if self._autonomy is None:
+            self._autonomy = autonomy_mod.AutonomyPolicy(self.runner.store)
+        return self._autonomy
 
     def chat(self, text: str, session: str = "main", mode: str = "full",
              plan: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -307,7 +315,8 @@ class Agent:
         return self.microphone.stop_output()
 
     # --- навыки ассистента (18.14) ----------------------------------------
-    def run_skill(self, name: str, params: Any = None, ask: bool = True) -> dict[str, Any]:
+    def run_skill(self, name: str, params: Any = None, ask: bool = True,
+                  autonomy_mode: str = "direct") -> dict[str, Any]:
         """Выполнить навык. Риск «write» и выше — через подтверждение человека.
 
         Порядок тот же, что для клика в чужом окне: навык с подтверждением не
@@ -320,13 +329,20 @@ class Agent:
         skill = skills.get(key, runner.learned())
         if skill is None:
             return runner.run(key, params)
+        allowed, why = self.autonomy.check_skill(skill, autonomy_mode)
+        if not allowed:
+            return {"ok": False, "skill": key, "title": str(skill.get("title") or key),
+                    "reason": why, "autonomy_blocked": True,
+                    "autonomy": self.autonomy.payload()}
         clean, errors = skills.check_params(skill, params)
         if errors:
             # Путь отказа один: тот же `runner.run` запишет причину в журнал,
             # и её потом покажет навык `agent.why`.
             return runner.run(key, params)
         if skills.confirm_required(skill):
-            return self.queue_action("skill", {"name": key, "params": clean}, ask=ask)
+            return self.queue_action(
+                "skill", {"name": key, "params": clean}, ask=ask,
+                autonomy_mode=autonomy_mode)
         return runner.run(key, clean)
 
     def discard_action(self, action_id: str) -> bool:
@@ -417,7 +433,8 @@ class Agent:
                 "stats": self.runner.store.stats()}
 
     # --- действия в чужих окнах -------------------------------------------
-    def queue_action(self, kind: str, params: dict[str, Any], ask: bool = True) -> dict[str, Any]:
+    def queue_action(self, kind: str, params: dict[str, Any], ask: bool = True,
+                     autonomy_mode: str = "direct") -> dict[str, Any]:
         """Действие становится ожидающим: без человека оно не выполняется.
 
         `ask=False` — просьба пришла из окна агента: там же карточка
@@ -425,6 +442,13 @@ class Agent:
         (служба, контейнер) всплывающее окно не открывается и отклоняет
         действие сразу — поэтому для окна агента его не зовём вовсе.
         """
+        # Raw UI actions are still actions: Observer must not bypass policy
+        # through the legacy /click /type /key /activate endpoints.
+        if kind != "skill":
+            allowed, why = self.autonomy.check("assistant", "core")
+            if not allowed:
+                return {"ok": False, "queued": False, "reason": why,
+                        "autonomy_blocked": True, "autonomy": self.autonomy.payload()}
         # Навык подтверждается так же, как клик, но управление окнами ему не
         # нужно: файлы и панель существуют и не в Windows.
         if kind != "skill" and not self.capabilities.get("windows"):
@@ -438,7 +462,7 @@ class Agent:
             self._purge()
             self._pending[action_id] = {
                 "id": action_id, "kind": kind, "params": params, "window": window,
-                "created_at": time.time(),
+                "created_at": time.time(), "autonomy_mode": str(autonomy_mode or "direct"),
                 "text": _describe(kind, params, window),
             }
         self.state.last_action = f"ждёт подтверждения: {kind}"
@@ -457,6 +481,11 @@ class Agent:
         if not action:
             return {"ok": False, "done": False,
                     "reason": "Действие не найдено или истекло — запросите заново"}
+        if confirmed and action["kind"] != "skill":
+            allowed, why = self.autonomy.check("assistant", "core")
+            if not allowed:
+                return {"ok": False, "done": False, "reason": why,
+                        "autonomy_blocked": True}
         if not confirmed:
             self.state.last_action = "отменено человеком"
             result = {"ok": True, "done": False, "reason": "Отменено человеком"}
@@ -465,8 +494,19 @@ class Agent:
             return result
         if action["kind"] == "skill":
             params = action["params"] if isinstance(action["params"], dict) else {}
-            result = self.runner.run(str(params.get("name") or ""),
-                                     params.get("params") or {}, confirmed=True)
+            key = str(params.get("name") or "").strip().casefold()
+            skill = skills.get(key, self.runner.learned())
+            if skill is not None:
+                allowed, why = self.autonomy.check_skill(
+                    skill, str(action.get("autonomy_mode") or "direct"))
+                if not allowed:
+                    result = {"ok": False, "skill": key, "reason": why,
+                              "autonomy_blocked": True, "autonomy": self.autonomy.payload()}
+                    if self._tasks is not None:
+                        self.tasks.on_action_result(str(action_id), result, True)
+                    return {"ok": False, "done": False, "reason": why, "result": result,
+                            "autonomy_blocked": True}
+            result = self.runner.run(key, params.get("params") or {}, confirmed=True)
             ok = bool(result.get("ok"))
             reason = str(result.get("reason") or "")
             self.state.last_action = (f"навык {params.get('name')}: "
@@ -697,6 +737,8 @@ class AgentHandler(BaseHTTPRequestHandler):
             return self._json(200, agent.providers_payload())
         if path == "/persona":
             return self._json(200, agent.persona.payload())
+        if path == "/autonomy":
+            return self._json(200, agent.autonomy.payload())
         if path == "/journal":
             query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
             limit = int((query.get("limit") or ["30"])[0] or 30)
@@ -830,6 +872,16 @@ class AgentHandler(BaseHTTPRequestHandler):
             if op == "update":
                 return self._json(200, agent.persona.update(body.get("profile") or {}))
             return self._json(200, {"ok": False, "reason": f"Неизвестная persona-операция «{op}»"})
+        if path == "/autonomy":
+            op = str(body.get("op") or "update").strip().casefold()
+            if op == "reset":
+                return self._json(200, agent.autonomy.reset())
+            if op == "update":
+                return self._json(200, agent.autonomy.update(
+                    body.get("level") if "level" in body else None,
+                    body.get("providers") if "providers" in body else None,
+                ))
+            return self._json(200, {"ok": False, "reason": f"Неизвестная autonomy-операция «{op}»"})
         if path == "/memory":
             store = agent.runner.store
             op = str(body.get("op") or "remember")
