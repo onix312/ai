@@ -32,6 +32,7 @@ class NativeQtSmokeTests(unittest.TestCase):
                 "id": "p1", "title": "Рабочее место", "summary": "Открыть нужные программы",
                 "steps": [{
                     "seq": 0, "skill": "app.open", "title": "Открыть программу",
+                    "params": {"target": "telegram"},
                     "risk": "soft", "confirm": False, "why": "связь",
                 }],
             }],
