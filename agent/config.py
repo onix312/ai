@@ -27,6 +27,16 @@ LANGUAGE = os.environ.get("PRINTFLOW_SPEECH_LANG", "ru")
 # нажал горячую клавишу или кнопку агента. Постоянно открытый микрофон исключён
 # решением владельца (вопрос 6 допроса).
 MIC_ARM_SECONDS = float(os.environ.get("PRINTFLOW_MIC_ARM_SECONDS", "25") or 25)
+SPEECH_MODEL_PATH = os.environ.get("PRINTFLOW_SPEECH_MODEL_PATH", "").strip()
+
+# Voice Engine 2.0: постоянный локальный wake word. Аудио не сохраняется и
+# в Brain попадает только после wake word или внутри короткой разговорной сессии.
+VOICE_ALWAYS_ON = os.environ.get("PRINTFLOW_VOICE_ALWAYS_ON", "1").strip().lower() not in (
+    "0", "false", "нет", "no", "off")
+VOICE_FOLLOWUP_SECONDS = float(os.environ.get("PRINTFLOW_VOICE_FOLLOWUP_SECONDS", "8") or 8)
+VOICE_VAD_THRESHOLD = int(os.environ.get("PRINTFLOW_VOICE_VAD_THRESHOLD", "320") or 320)
+VOICE_SILENCE_SECONDS = float(os.environ.get("PRINTFLOW_VOICE_SILENCE_SECONDS", "0.8") or 0.8)
+VOICE_MAX_PHRASE_SECONDS = float(os.environ.get("PRINTFLOW_VOICE_MAX_PHRASE_SECONDS", "15") or 15)
 
 # --- 18.14: личный ассистент компьютера ------------------------------------
 # Адрес рантайма модели. Тот же, что у помощника в панели (`assistant.DEFAULT_URL`):
@@ -88,6 +98,8 @@ class State:
 
     armed: bool = False
     wake_word: bool = False
+    voice_enabled: bool = False
+    voice_state: str = "idle"
     window: str = ""
     last_phrase: str = ""
     last_action: str = ""
@@ -98,6 +110,8 @@ class State:
             "ok": True,
             "armed": self.armed,
             "wake_word": self.wake_word,
+            "voice_enabled": self.voice_enabled,
+            "voice_state": self.voice_state,
             "window": self.window,
             "last_phrase": self.last_phrase,
             "last_action": self.last_action,
