@@ -158,3 +158,12 @@ class AutonomyPolicy:
         required = "observer" if mode == "direct" and risk == "read" else MODE_LEVEL.get(mode, "assistant")
         provider = str(skill.get("provider") or "core")
         return self.check(required, provider)
+
+
+def check_agent(agent: Any, required: str, provider: str = "core") -> tuple[bool, str, dict[str, Any] | None]:
+    """Compatibility helper for tests/embedders that do not expose autonomy yet."""
+    policy = getattr(agent, "autonomy", None)
+    if policy is None:
+        return True, "", None
+    ok, reason = policy.check(required, provider)
+    return ok, reason, policy.payload()
