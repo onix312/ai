@@ -21,6 +21,7 @@ on:
       - "docs/VOICE-ENGINE-3-PHASE3.md"
       - "docs/VOICE-ENGINE-3-PHASE4.md"
       - "docs/VOICE-ENGINE-3-PHASE5.md"
+      - "docs/VOICE-ENGINE-3-PHASE6.md"
       - "docs/NOZZA-NEXT-HANDOFF.md"
       - ".github/workflows/voice-engine-3.yml"
   push:
