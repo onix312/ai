@@ -101,5 +101,24 @@ class BrainPersonaPromptTests(unittest.TestCase):
         self.assertIn("кратко", text)
 
 
+    def test_informal_address_applies_to_rule_based_smalltalk(self):
+        class Runner:
+            def __init__(self, store):
+                self.store = store
+
+        with tempfile.TemporaryDirectory() as tmp:
+            store = Store(pathlib.Path(tmp) / "talk.sqlite3")
+            try:
+                persona = Persona(store)
+                persona.update({"address": "informal"})
+                agent = type("Agent", (), {"runner": Runner(store), "persona": persona})()
+                b = brain.Brain(agent)
+                answer = b._small_talk("main", "спасибо", "thanks", [], 0.0)
+                self.assertIn("Обращайся", answer["reply"])
+                self.assertNotIn("Обращайтесь", answer["reply"])
+            finally:
+                store.close()
+
+
 if __name__ == "__main__":
     unittest.main()
