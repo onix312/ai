@@ -93,6 +93,29 @@ class VoiceStreamingTests(unittest.TestCase):
         self.assertEqual("vosk", status["asr_engine"])
 
 
+class DynamicVocabularyTests(unittest.TestCase):
+    def test_conservative_correction_prefers_known_name(self):
+        self.assertEqual(
+            "открой Orca",
+            speech.apply_dynamic_vocabulary("открой Orka", ["Orca"]),
+        )
+        self.assertEqual(
+            "проверь Альфа",
+            speech.apply_dynamic_vocabulary("проверь Алфа", ["Альфа"]),
+        )
+
+    def test_unknown_words_are_not_forced_into_vocabulary(self):
+        text = "расскажи про квантовую механику"
+        self.assertEqual(text, speech.apply_dynamic_vocabulary(text, ["Orca", "Альфа", "P1S"]))
+
+    def test_vocabulary_is_deduplicated_and_bounded(self):
+        terms = ["Orca", "orca", "  Альфа  "] + [f"Проект {i}" for i in range(200)]
+        vocab = speech.normalize_vocabulary(terms, limit=10)
+        self.assertEqual("Orca", vocab[0])
+        self.assertEqual("Альфа", vocab[1])
+        self.assertEqual(10, len(vocab))
+
+
 class VoiceRuntimeStateTests(unittest.TestCase):
     def setUp(self):
         self.runtime = voice_runtime.VoiceRuntime(_Recognizer())
