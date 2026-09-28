@@ -1210,6 +1210,9 @@ class Brain:
                     started: float) -> dict[str, Any]:
         """Привет / как дела / кто ты — по-человечески и с живой сводкой цеха, без модели."""
         name = self._owner_name()
+        persona = getattr(self.agent, "persona", None)
+        profile = persona.profile() if persona is not None else {"address": "formal"}
+        informal = profile.get("address") == "informal"
         farm, panel_note = "", ""
         if talk in ("greet", "how"):
             client = getattr(self.runner, "panel", None)
@@ -1230,11 +1233,14 @@ class Brain:
             "greet": (f"{hello} {farm}{mine}" if farm else
                       f"{hello} Я на связи: компьютер, окна, звук, файлы, память и личные дела.{mine}{panel_note}"),
             "how": "Я на связи." + (f" {farm}" if farm else panel_note),
-            "who": ("Я NOZZA — помощник цеха на этом компьютере. Сам управляю окнами, звуком, программами и файлами, "
-                    "помню ваши просьбы, а про станки, заказы и деньги спрашиваю панель цеха. Всё, что меняет "
-                    "систему или цех, — только после вашего «Подтвердить»."),
-            "thanks": f"Пожалуйста{', ' + name if name else ''}! Обращайтесь.",
-            "bye": "До связи! Если что — позовите.",
+            "who": (
+                "Я NOZZA — помощник на этом компьютере. Управляю окнами, звуком, программами и файлами, "
+                + ("помню твои просьбы" if informal else "помню ваши просьбы")
+                + ", а про станки, заказы и деньги спрашиваю PrintFlow. Всё, что требует подтверждения, "
+                  "по-прежнему выполняю только после кнопки «Подтвердить»."
+            ),
+            "thanks": f"Пожалуйста{', ' + name if name else ''}! " + ("Обращайся." if informal else "Обращайтесь."),
+            "bye": "До связи! Если что — " + ("позови." if informal else "позовите."),
             "ok": "Хорошо. Если что — я рядом.",
         }
         steps.append({"kind": "rule", "title": "Разговор", "detail": {"greet": "приветствие", "how": "как дела",
