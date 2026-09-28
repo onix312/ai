@@ -1,5 +1,13 @@
 # NOZZA — handoff и roadmap после Verification Engine 1.0
 
+> **Актуализация 29.09.2026, Voice 3 Phase 3:** Phase 2 уже в `main`.
+> Текущая ветка добавляет sentence-level streaming TTS для свободных voice
+> ответов. Ранний TTS разрешён только при пустом `skill`, поэтому NOZZA не
+> произносит «готово» до фактического executor result. Stop token по-прежнему
+> закрывает модель, текущий TTS и очередь следующих предложений.
+> Следом: dynamic vocabulary → wake-word/echo suppression → optional HQ local TTS.
+
+
 > **Актуализация 29.09.2026, Voice 3 Phase 2:** Phase 1 уже в `main`.
 > Текущая ветка добавляет barge-in до уровня модели: stop во время thinking
 > отменяет только активный voice generation, не сохраняет оборванный ответ в
