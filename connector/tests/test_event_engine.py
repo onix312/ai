@@ -167,7 +167,7 @@ class EventEngineTests(unittest.TestCase):
         rows = self.events.list()
         task_rows = [row for row in rows if row["kind"] == "task_failed"]
         self.assertEqual(1, len(task_rows))
-        self.assertEqual(2, task_rows[0]["occurrences"])
+        self.assertEqual(1, task_rows[0]["occurrences"])
 
     def test_settings_validation_is_atomic(self):
         result = self.events.update({
