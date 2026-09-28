@@ -68,7 +68,7 @@ class ProviderDispatchTests(unittest.TestCase):
                     result = runner.run("desktop.observe", {"limit": 12, "ocr": False})
                 self.assertTrue(result["ok"])
                 run.assert_called_once_with(
-                    "desktop.observe", {"title": "", "limit": 12, "screenshot": False, "ocr": False})
+                    "desktop.observe", {"limit": 12, "ocr": False})
             finally:
                 store.close()
 
