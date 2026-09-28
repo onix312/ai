@@ -90,6 +90,27 @@ class BackendClientTests(unittest.TestCase):
             ("POST", "http://127.0.0.1:8799/tasks", {"op": "pause", "id": 7}),
         ], calls)
 
+    def test_planner_api_uses_agent_port(self):
+        client = BackendClient()
+        calls = []
+
+        def fake(req, timeout=0):
+            body = json.loads(req.data.decode("utf-8")) if req.data else None
+            calls.append((req.get_method(), req.full_url, body))
+            return _Response({"ok": True, "plans": []})
+
+        with mock.patch("urllib.request.urlopen", fake):
+            client.plans()
+            client.plan_op("preview", goal="подготовить компьютер")
+            client.plan_op("approve", "abc")
+        self.assertEqual([
+            ("GET", "http://127.0.0.1:8799/plans", None),
+            ("POST", "http://127.0.0.1:8799/plans",
+             {"op": "preview", "id": "", "goal": "подготовить компьютер"}),
+            ("POST", "http://127.0.0.1:8799/plans",
+             {"op": "approve", "id": "abc"}),
+        ], calls)
+
     def test_network_failure_is_friendly(self):
         client = BackendClient()
         with mock.patch("urllib.request.urlopen", side_effect=OSError("down")):
