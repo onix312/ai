@@ -61,6 +61,9 @@ Persona не может менять:
 ## Brain
 
 Hardcoded стиль вынесен из `_PLANNER_RULES` в динамический persona fragment.
+Безопасный smalltalk (приветствие, благодарность, прощание, «кто ты») также
+учитывает formal/informal. Тексты ошибок, safety и подтверждений намеренно не
+перефразируются Persona Engine.
 
 Порядок prompt:
 
