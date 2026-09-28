@@ -609,6 +609,7 @@ SKILLS: dict[str, dict[str, Any]] = {
     },
     "desktop.observe": {
         "title": "Восприятие рабочего стола",
+        "provider": "desktop",
         "description": "Активное окно, элементы и фокус с указанием источников данных.",
         "host": "agent", "risk": "read",
         "params": {"title": "text", "limit": "int", "screenshot": "bool", "ocr": "bool"},
@@ -641,6 +642,7 @@ SKILLS: dict[str, dict[str, Any]] = {
     },
     # --- браузер: структурированный read-only контекст --------------------
     "browser.tabs": {
+        "provider": "browser",
         "title": "Вкладки браузера",
         "description": "Список вкладок Chromium через локальный DevTools: заголовок и адрес.",
         "host": "agent", "risk": "read", "params": {"limit": "int"},
@@ -648,6 +650,7 @@ SKILLS: dict[str, dict[str, Any]] = {
         "doc": "Только loopback CDP. Ничего не кликает и не меняет на странице.",
     },
     "browser.page": {
+        "provider": "browser",
         "title": "Прочитать текущую страницу",
         "description": "Заголовок, URL, видимый текст, ссылки, кнопки и структура форм без значений полей.",
         "host": "agent", "risk": "read",
@@ -656,6 +659,7 @@ SKILLS: dict[str, dict[str, Any]] = {
         "doc": "Фиксированный read-only DOM script; password и значения форм не возвращаются.",
     },
     "browser.find": {
+        "provider": "browser",
         "title": "Найти на странице",
         "description": "Найти фразу в видимом тексте текущей вкладки и вернуть контекст.",
         "host": "agent", "risk": "read",
@@ -664,6 +668,7 @@ SKILLS: dict[str, dict[str, Any]] = {
         "doc": "Поиск идёт по уже прочитанному видимому тексту, без кликов и ввода.",
     },
     "browser.selection": {
+        "provider": "browser",
         "title": "Выделенный текст страницы",
         "description": "Прочитать выделенный фрагмент текущей вкладки вместе с заголовком и URL.",
         "host": "agent", "risk": "read", "params": {"target_id": "text"},
