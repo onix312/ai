@@ -174,3 +174,12 @@ class BackendClient:
 
     def stop_voice(self) -> dict[str, Any]:
         return self.speech_post("/voice/stop", {})
+
+    def safety_stop(self) -> dict[str, Any]:
+        return self.post("/safety/stop", {})
+
+    def safety_resume(self) -> dict[str, Any]:
+        return self.post("/safety/resume", {})
+
+    def safety_status(self) -> dict[str, Any]:
+        return self.get("/safety/status")
