@@ -40,7 +40,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
 from . import brain as brain_mod
-from . import autonomy as autonomy_mod, capabilities, config, event_engine as event_mod, executor, pc, persona as persona_mod, planner, replanner, skills, speech, task_engine, ui, voice_runtime, window, winapi
+from . import autonomy as autonomy_mod, capabilities, config, event_engine as event_mod, executor, pc, persona as persona_mod, planner, replanner, security as security_mod, skills, speech, task_engine, ui, voice_runtime, window, winapi
 from .providers import registry as provider_registry
 
 # Ожидающее действие живёт недолго: неподтверждённый клик не должен висеть
@@ -74,6 +74,7 @@ class Agent:
         self._persona: persona_mod.Persona | None = None
         self._autonomy: autonomy_mod.AutonomyPolicy | None = None
         self._events: event_mod.EventEngine | None = None
+        self._security: security_mod.SecurityPolicy | None = None
         self._stop = threading.Event()
         # Голос: фраза после стоп-слова идёт мозгу, ответ звучит вслух.
         self.microphone.handler = self.voice_phrase
@@ -135,12 +136,20 @@ class Agent:
             self._events = event_mod.EventEngine(self)
         return self._events
 
+    @property
+    def security(self) -> security_mod.SecurityPolicy:
+        """Privacy, sensitive-window, vault and panic policy."""
+        if self._security is None:
+            self._security = security_mod.SecurityPolicy(self.runner.store)
+        return self._security
+
     def chat(self, text: str, session: str = "main", mode: str = "full",
              plan: dict[str, Any] | None = None) -> dict[str, Any]:
         """Фраза человека → ответ мозга. Способности обновляются перед разговором."""
         if mode != "pc" or plan:
             self.runner.refresh_capabilities()
-        return self.brain.chat(text, session=session, mode=mode, plan=plan)
+        use_session = f"guest-{session}" if self.security.guest() else session
+        return self.brain.chat(text, session=use_session, mode=mode, plan=plan)
 
     # --- планировщик личного (18.22) ---------------------------------------
     def tick(self, now: Any = None) -> list[dict[str, Any]]:
@@ -181,6 +190,8 @@ class Agent:
         return delivered
 
     def _voice_notify(self) -> bool:
+        if self.security.guest() or self.security.panic_latched():
+            return False
         if not self.capabilities.get("speech_out"):
             return False
         try:
@@ -363,6 +374,11 @@ class Agent:
             # Путь отказа один: тот же `runner.run` запишет причину в журнал,
             # и её потом покажет навык `agent.why`.
             return runner.run(key, params)
+        secure, security_reason = self.security.guard_skill(key, clean, skill)
+        if not secure:
+            return {"ok": False, "skill": key, "title": str(skill.get("title") or key),
+                    "reason": security_reason, "security_blocked": True,
+                    "security": self.security.payload()}
         if skills.confirm_required(skill):
             return self.queue_action(
                 "skill", {"name": key, "params": clean}, ask=ask,
@@ -469,6 +485,11 @@ class Agent:
         # Raw UI actions are still actions: Observer must not bypass policy
         # through the legacy /click /type /key /activate endpoints.
         if kind != "skill":
+            window, _reason = winapi.active_window()
+            secure, security_reason = self.security.guard_raw(kind, window)
+            if not secure:
+                return {"ok": False, "queued": False, "reason": security_reason,
+                        "security_blocked": True, "security": self.security.payload()}
             allowed, why = self.autonomy.check("assistant", "core")
             if not allowed:
                 return {"ok": False, "queued": False, "reason": why,
@@ -506,6 +527,11 @@ class Agent:
             return {"ok": False, "done": False,
                     "reason": "Действие не найдено или истекло — запросите заново"}
         if confirmed and action["kind"] != "skill":
+            secure, security_reason = self.security.guard_raw(
+                str(action["kind"]), str(action.get("window") or ""))
+            if not secure:
+                return {"ok": False, "done": False, "reason": security_reason,
+                        "security_blocked": True}
             allowed, why = self.autonomy.check("assistant", "core")
             if not allowed:
                 return {"ok": False, "done": False, "reason": why,
@@ -521,6 +547,15 @@ class Agent:
             key = str(params.get("name") or "").strip().casefold()
             skill = skills.get(key, self.runner.learned())
             if skill is not None:
+                secure, security_reason = self.security.guard_skill(
+                    key, params.get("params") or {}, skill)
+                if not secure:
+                    result = {"ok": False, "skill": key, "reason": security_reason,
+                              "security_blocked": True, "security": self.security.payload()}
+                    if self._tasks is not None:
+                        self.tasks.on_action_result(str(action_id), result, True)
+                    return {"ok": False, "done": False, "reason": security_reason,
+                            "result": result, "security_blocked": True}
                 allowed, why = self.autonomy.check_skill(
                     skill, str(action.get("autonomy_mode") or "direct"))
                 if not allowed:
