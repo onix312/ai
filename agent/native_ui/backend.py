@@ -80,6 +80,12 @@ class BackendClient:
     def pending(self) -> dict[str, Any]:
         return self.get("/pending")
 
+    def tasks(self, limit: int = 50) -> dict[str, Any]:
+        return self.get(f"/tasks?limit={int(limit)}")
+
+    def task_op(self, op: str, task_id: int = 0, **payload: Any) -> dict[str, Any]:
+        return self.post("/tasks", {"op": op, "id": int(task_id), **payload})
+
     def decide(self, action_id: str, confirmed: bool) -> dict[str, Any]:
         return self.post("/action/confirm", {"id": action_id, "confirmed": bool(confirmed)})
 

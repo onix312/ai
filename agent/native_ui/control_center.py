@@ -96,6 +96,7 @@ class ChatPage(QWidget):
 
 class TasksPage(QWidget):
     decision = Signal(str, bool)
+    command = Signal(int, str)
     refresh_requested = Signal()
 
     def __init__(self) -> None:
@@ -110,9 +111,14 @@ class TasksPage(QWidget):
         refresh.clicked.connect(self.refresh_requested)
         head.addWidget(refresh)
         self.layout.addLayout(head)
-        self.host = QVBoxLayout()
-        self.layout.addLayout(self.host)
-        self.layout.addStretch(1)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        self.host_widget = QWidget()
+        self.host = QVBoxLayout(self.host_widget)
+        self.host.setAlignment(Qt.AlignTop)
+        scroll.setWidget(self.host_widget)
+        self.layout.addWidget(scroll, 1)
 
     def _clear(self) -> None:
         while self.host.count():
@@ -123,11 +129,52 @@ class TasksPage(QWidget):
 
     def set_payload(self, payload: dict[str, Any]) -> None:
         self._clear()
+        tasks = list(payload.get("tasks") or [])
         pending = list(payload.get("pending") or [])
         notifications = list(payload.get("notifications") or [])
-        if not pending and not notifications:
+        if not tasks and not pending and not notifications:
             self.host.addWidget(QLabel("Ничего не ждёт."))
             return
+        for task in tasks:
+            card = QFrame()
+            card.setStyleSheet("QFrame { background:#111827; border:1px solid #334155; border-radius:12px; }")
+            box = QVBoxLayout(card)
+            title = str(task.get("title") or f"Задача {task.get('id')}")
+            status = str(task.get("status") or "planned")
+            progress = int(task.get("progress") or 0)
+            total = int(task.get("total_steps") or 0)
+            box.addWidget(QLabel(f"{title}  ·  {status}  ·  {progress}/{total}"))
+            steps = list(task.get("steps") or [])
+            current_index = int(task.get("current_step") or 0)
+            current = next((step for step in steps if int(step.get("seq") or 0) == current_index), None)
+            if current and status not in ("done", "cancelled"):
+                detail = QLabel(f"Сейчас: {current.get('skill') or 'шаг'}")
+                detail.setObjectName("muted")
+                box.addWidget(detail)
+            if task.get("error"):
+                error = QLabel(str(task.get("error")))
+                error.setObjectName("muted")
+                error.setWordWrap(True)
+                box.addWidget(error)
+            buttons = QHBoxLayout()
+            task_id = int(task.get("id") or 0)
+            if status in ("planned", "paused"):
+                op = "resume" if status == "paused" else "run"
+                run = QPushButton("Продолжить" if status == "paused" else "Запустить")
+                run.clicked.connect(lambda _=False, i=task_id, action=op: self.command.emit(i, action))
+                buttons.addWidget(run)
+            if status in ("running", "waiting"):
+                pause = QPushButton("Пауза")
+                pause.clicked.connect(lambda _=False, i=task_id: self.command.emit(i, "pause"))
+                buttons.addWidget(pause)
+            if status not in ("done", "cancelled"):
+                cancel = QPushButton("Отменить задачу")
+                cancel.clicked.connect(lambda _=False, i=task_id: self.command.emit(i, "cancel"))
+                buttons.addWidget(cancel)
+            buttons.addStretch(1)
+            box.addLayout(buttons)
+            self.host.addWidget(card)
+
         for row in pending:
             card = QFrame()
             card.setStyleSheet("QFrame { background:#111827; border:1px solid #334155; border-radius:12px; }")
@@ -158,6 +205,7 @@ class ControlCenter(QMainWindow):
     clear_chat = Signal()
     mic_toggle = Signal()
     task_decision = Signal(str, bool)
+    task_command = Signal(int, str)
 
     NAV = [
         ("chat", "💬  Разговор"),
@@ -207,6 +255,7 @@ class ControlCenter(QMainWindow):
         tasks = TasksPage()
         tasks.refresh_requested.connect(lambda: self.refresh_page.emit("tasks"))
         tasks.decision.connect(self.task_decision)
+        tasks.command.connect(self.task_command)
         self.pages["tasks"] = tasks
         self.stack.addWidget(tasks)
 

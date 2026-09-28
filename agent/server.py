@@ -40,7 +40,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
 from . import brain as brain_mod
-from . import capabilities, config, executor, pc, skills, speech, ui, voice_runtime, window, winapi
+from . import capabilities, config, executor, pc, skills, speech, task_engine, ui, voice_runtime, window, winapi
 
 # Ожидающее действие живёт недолго: неподтверждённый клик не должен висеть
 # вечно и выстрелить через час, когда человек уже ушёл.
@@ -67,6 +67,7 @@ class Agent:
         # ещё не создана, а навыки никто не звал.
         self._runner: executor.Runner | None = None
         self._brain: brain_mod.Brain | None = None
+        self._tasks: task_engine.TaskEngine | None = None
         self._stop = threading.Event()
         # Голос: фраза после стоп-слова идёт мозгу, ответ звучит вслух.
         self.microphone.handler = self.voice_phrase
@@ -84,6 +85,13 @@ class Agent:
         if self._brain is None:
             self._brain = brain_mod.Brain(self)
         return self._brain
+
+    @property
+    def tasks(self) -> task_engine.TaskEngine:
+        """Долгоживущие многошаговые задачи поверх того же реестра навыков."""
+        if self._tasks is None:
+            self._tasks = task_engine.TaskEngine(self)
+        return self._tasks
 
     def chat(self, text: str, session: str = "main", mode: str = "full",
              plan: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -295,6 +303,43 @@ class Agent:
             return self.queue_action("skill", {"name": key, "params": clean}, ask=ask)
         return runner.run(key, clean)
 
+    def discard_action(self, action_id: str) -> bool:
+        """Тихо убрать pending action при отмене целой Task Engine задачи."""
+        with self._lock:
+            self._purge()
+            return self._pending.pop(str(action_id or ""), None) is not None
+
+    def task_op(self, body: dict[str, Any]) -> dict[str, Any]:
+        op = str(body.get("op") or "list").strip().casefold()
+        if op == "create":
+            return self.tasks.create(
+                str(body.get("title") or ""),
+                body.get("steps"),
+                goal=str(body.get("goal") or ""),
+                source=str(body.get("source") or "api"),
+                start=bool(body.get("start")),
+            )
+        try:
+            task_id = int(body.get("id") or 0)
+        except (TypeError, ValueError):
+            return {"ok": False, "reason": "Некорректный номер задачи"}
+        if op == "run":
+            return self.tasks.start(task_id)
+        if op == "pause":
+            return self.tasks.pause(task_id)
+        if op == "resume":
+            return self.tasks.resume(task_id)
+        if op == "cancel":
+            return self.tasks.cancel(task_id)
+        if op == "get":
+            task = self.tasks.get(task_id)
+            return {"ok": bool(task), "task": task,
+                    "reason": "" if task else "Задача не найдена"}
+        if op == "list":
+            return {"ok": True, "tasks": self.tasks.list(
+                int(body.get("limit") or 50), str(body.get("status") or ""))}
+        return {"ok": False, "reason": f"Неизвестная операция задачи «{op}»"}
+
     def skills_payload(self) -> dict[str, Any]:
         rows = self.runner.catalog()
         return {"ok": True, "skills": rows, "count": len(rows),
@@ -352,7 +397,10 @@ class Agent:
                     "reason": "Действие не найдено или истекло — запросите заново"}
         if not confirmed:
             self.state.last_action = "отменено человеком"
-            return {"ok": True, "done": False, "reason": "Отменено человеком"}
+            result = {"ok": True, "done": False, "reason": "Отменено человеком"}
+            if self._tasks is not None:
+                self.tasks.on_action_result(str(action_id), result, False)
+            return result
         if action["kind"] == "skill":
             params = action["params"] if isinstance(action["params"], dict) else {}
             result = self.runner.run(str(params.get("name") or ""),
@@ -362,8 +410,14 @@ class Agent:
             self.state.last_action = (f"навык {params.get('name')}: "
                                       + ("выполнен" if ok else reason))
             if not ok:
-                return {"ok": False, "done": False, "reason": reason, "result": result}
-            return {"ok": True, "done": True, "reason": "", "result": result}
+                answer = {"ok": False, "done": False, "reason": reason, "result": result}
+                if self._tasks is not None:
+                    self.tasks.on_action_result(str(action_id), answer, True)
+                return answer
+            answer = {"ok": True, "done": True, "reason": "", "result": result}
+            if self._tasks is not None:
+                self.tasks.on_action_result(str(action_id), answer, True)
+            return answer
         ok, reason = _execute(action["kind"], action["params"])
         self.state.last_action = f"{action['kind']}: {'выполнено' if ok else reason}"
         if not ok:
@@ -378,9 +432,12 @@ class Agent:
 
     def _purge(self) -> None:
         deadline = time.time() - PENDING_TTL_SEC
-        for action_id in [key for key, value in self._pending.items()
-                          if value["created_at"] < deadline]:
+        expired = [key for key, value in self._pending.items()
+                   if value["created_at"] < deadline]
+        for action_id in expired:
             self._pending.pop(action_id, None)
+            if self._tasks is not None:
+                self.tasks.on_action_expired(action_id)
 
     def _ask(self, action_id: str) -> None:
         """Окно подтверждения на этом компьютере.
@@ -561,6 +618,11 @@ class AgentHandler(BaseHTTPRequestHandler):
             return self._bytes(200, image, "image/png")
         if path == "/pending":
             return self._json(200, {"ok": True, "pending": agent.pending()})
+        if path == "/tasks":
+            query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+            status = str((query.get("status") or [""])[0] or "")
+            limit = int((query.get("limit") or ["50"])[0] or 50)
+            return self._json(200, {"ok": True, "tasks": agent.tasks.list(limit, status)})
         if path == "/skills":
             return self._json(200, agent.skills_payload())
         if path == "/journal":
@@ -681,6 +743,8 @@ class AgentHandler(BaseHTTPRequestHandler):
             return self._json(200, agent.learning_op(body))
         if path == "/feedback":
             return self._json(200, agent.brain.feedback(int(body.get("turn_id") or 0), int(body.get("rating") or 0)))
+        if path == "/tasks":
+            return self._json(200, agent.task_op(body))
         if path == "/memory":
             store = agent.runner.store
             op = str(body.get("op") or "remember")

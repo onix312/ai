@@ -290,6 +290,21 @@ class FakeAgent:
         return self.runner.run(name, params)
 
 
+class _TaskSink:
+    def __init__(self):
+        self.created = []
+
+    def create(self, title, steps, goal="", source="manual", start=False):
+        self.created.append({
+            "title": title, "steps": steps, "goal": goal,
+            "source": source, "start": start,
+        })
+        return {"ok": True, "task": {
+            "id": 7, "title": title, "status": "running",
+            "total_steps": len(steps), "progress": 0, "steps": steps,
+        }}
+
+
 class BrainChatTests(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
@@ -347,6 +362,21 @@ class BrainChatTests(unittest.TestCase):
         self.assertEqual(("system.volume", {"level": 30}), (result["plan"]["skill"], result["plan"]["params"]))
         self.assertEqual("voice.command", result["skill"])
         self.assertEqual([], self.agent.calls, "разбор команды ничего не исполняет")
+
+
+    def test_understood_multi_step_command_becomes_persistent_task(self):
+        sink = _TaskSink()
+        self.agent.tasks = sink
+        answer = self.brain.chat("громкость 30 и переключи трек")
+        self.assertEqual("task", answer["kind"], answer)
+        self.assertEqual(1, len(sink.created))
+        self.assertTrue(sink.created[0]["start"])
+        self.assertEqual(
+            ["system.volume", "system.media"],
+            [step["skill"] for step in sink.created[0]["steps"]],
+        )
+        self.assertEqual([], self.agent.calls, "шаги исполняет Task Engine, а не Brain напрямую")
+        self.assertEqual(7, answer["task"]["id"])
 
 
 class FakePanel:

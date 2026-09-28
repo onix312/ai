@@ -1494,6 +1494,47 @@ class Brain:
         if len(plan_steps) == 1 and not head:
             return self._one_step(session, text, plan_steps[0], history, steps, started, extra=extra, save=True,
                                   origin=origin)
+
+        # Уже однозначно разобранные многошаговые команды исполняются через
+        # persistent Task Engine. Он не планирует за Brain, а лишь надёжно
+        # исполняет готовые зарегистрированные skills по одному, с паузой на
+        # существующих safety-подтверждениях.
+        direct_steps = [
+            {"skill": str(step.get("skill") or ""), "params": dict(step.get("params") or {})}
+            for step in plan_steps
+            if isinstance(step, dict) and step.get("skill")
+        ]
+        tasks_engine = getattr(self.agent, "tasks", None)
+        if len(direct_steps) == len(plan_steps) and len(direct_steps) > 1 and tasks_engine is not None:
+            try:
+                created = tasks_engine.create(
+                    _short(text, 120) or "Многошаговая задача",
+                    direct_steps,
+                    goal=text,
+                    source=origin,
+                    start=True,
+                )
+            except Exception as exc:  # noqa: BLE001
+                created = {"ok": False, "reason": f"Task Engine: {exc.__class__.__name__}"}
+            if created.get("ok") and isinstance(created.get("task"), dict):
+                task = created["task"]
+                task_id = int(task.get("id") or 0)
+                count = int(task.get("total_steps") or len(direct_steps))
+                status = str(task.get("status") or "running")
+                steps.append({"kind": "task", "title": "Task Engine",
+                              "detail": f"задача {task_id}: {count} шагов · {status}"})
+                title = _short(str(task.get("title") or text), 80)
+                reply = (head + "\n" if head else "") + (
+                    f"Запустил задачу «{title}»: {count} шагов. "
+                    "Прогресс и подтверждения видны в разделе «Задачи».")
+                return self._reply(
+                    session, text, reply.strip(), kind="task", source=origin,
+                    steps=steps, started=started,
+                    result={"ok": True, "task": task},
+                    extra={**(extra or {}), "task": task},
+                    suggestions=["Открой задачи"],
+                )
+
         results = [self._one_step(session, text, step, history, steps, started, save=False, origin=origin)
                    for step in plan_steps]
         lines = [str(result.get("reply") or "") for result in results if result.get("reply")]
