@@ -32,6 +32,7 @@ jobs:
           connector.tests.test_persona
           connector.tests.test_native_ui
           connector.tests.test_agent_brain.BrainChatTests
+          connector.tests.test_agent_os.PersonaApiTests
 
   windows-ui:
     runs-on: windows-latest
