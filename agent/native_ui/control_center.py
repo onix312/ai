@@ -341,6 +341,8 @@ class ControlCenter(QMainWindow):
     persona_reset = Signal()
     autonomy_save = Signal(str, object)
     autonomy_reset = Signal()
+    proactivity_save = Signal(object)
+    proactivity_reset = Signal()
 
     NAV = [
         ("chat", "💬  Разговор"),
@@ -505,6 +507,81 @@ class ControlCenter(QMainWindow):
         self.autonomy_status.setObjectName("muted")
         self.autonomy_status.setWordWrap(True)
         sl.addWidget(self.autonomy_status)
+
+        proactivity_title = QLabel("Proactivity")
+        proactivity_title.setStyleSheet("font-size:16px; font-weight:700; margin-top:12px;")
+        sl.addWidget(proactivity_title)
+
+        pro_mode_row = QHBoxLayout()
+        pro_mode_label = QLabel("Режим")
+        pro_mode_label.setMinimumWidth(130)
+        self.proactivity_mode = QComboBox()
+        self.proactivity_mode.setObjectName("proactivity_mode")
+        pro_mode_row.addWidget(pro_mode_label)
+        pro_mode_row.addWidget(self.proactivity_mode, 1)
+        sl.addLayout(pro_mode_row)
+
+        pro_budget_row = QHBoxLayout()
+        pro_budget_label = QLabel("Несрочных / час")
+        pro_budget_label.setMinimumWidth(130)
+        self.proactivity_budget = QComboBox()
+        self.proactivity_budget.setObjectName("proactivity_budget")
+        for value in (0, 1, 2, 3, 5, 10):
+            self.proactivity_budget.addItem(str(value), value)
+        pro_budget_row.addWidget(pro_budget_label)
+        pro_budget_row.addWidget(self.proactivity_budget, 1)
+        sl.addLayout(pro_budget_row)
+
+        pro_cooldown_row = QHBoxLayout()
+        pro_cooldown_label = QLabel("Cooldown")
+        pro_cooldown_label.setMinimumWidth(130)
+        self.proactivity_cooldown = QComboBox()
+        self.proactivity_cooldown.setObjectName("proactivity_cooldown")
+        for value in (5, 10, 15, 30, 60, 120):
+            self.proactivity_cooldown.addItem(f"{value} мин", value)
+        pro_cooldown_row.addWidget(pro_cooldown_label)
+        pro_cooldown_row.addWidget(self.proactivity_cooldown, 1)
+        sl.addLayout(pro_cooldown_row)
+
+        quiet_row = QHBoxLayout()
+        quiet_label = QLabel("Тихие часы")
+        quiet_label.setMinimumWidth(130)
+        self.proactivity_quiet_start = QLineEdit()
+        self.proactivity_quiet_start.setObjectName("proactivity_quiet_start")
+        self.proactivity_quiet_start.setPlaceholderText("22:00")
+        self.proactivity_quiet_start.setMaximumWidth(90)
+        self.proactivity_quiet_end = QLineEdit()
+        self.proactivity_quiet_end.setObjectName("proactivity_quiet_end")
+        self.proactivity_quiet_end.setPlaceholderText("08:00")
+        self.proactivity_quiet_end.setMaximumWidth(90)
+        quiet_row.addWidget(quiet_label)
+        quiet_row.addWidget(self.proactivity_quiet_start)
+        quiet_row.addWidget(QLabel("→"))
+        quiet_row.addWidget(self.proactivity_quiet_end)
+        quiet_row.addStretch(1)
+        sl.addLayout(quiet_row)
+
+        pro_buttons = QHBoxLayout()
+        save_proactivity = QPushButton("Сохранить инициативность")
+        save_proactivity.setObjectName("proactivity_save")
+        save_proactivity.clicked.connect(self._emit_proactivity_save)
+        reset_proactivity = QPushButton("По умолчанию")
+        reset_proactivity.setObjectName("proactivity_reset")
+        reset_proactivity.clicked.connect(lambda: self.proactivity_reset.emit())
+        pro_buttons.addWidget(save_proactivity)
+        pro_buttons.addWidget(reset_proactivity)
+        pro_buttons.addStretch(1)
+        sl.addLayout(pro_buttons)
+
+        self.proactivity_status = QLabel("Загрузка Event Engine…")
+        self.proactivity_status.setObjectName("muted")
+        self.proactivity_status.setWordWrap(True)
+        sl.addWidget(self.proactivity_status)
+
+        self.events_view = QTextBrowser()
+        self.events_view.setMaximumHeight(150)
+        self.events_view.setPlainText("Событий пока нет.")
+        sl.addWidget(self.events_view)
         providers_title = QLabel("Providers")
         providers_title.setStyleSheet("font-size:16px; font-weight:700; margin-top:12px;")
         sl.addWidget(providers_title)
@@ -612,6 +689,60 @@ class ControlCenter(QMainWindow):
 
     def set_autonomy_message(self, text: str) -> None:
         self.autonomy_status.setText(str(text or ""))
+
+    def _emit_proactivity_save(self) -> None:
+        self.proactivity_save.emit({
+            "mode": str(self.proactivity_mode.currentData() or self.proactivity_mode.currentText()),
+            "max_nonurgent_per_hour": int(self.proactivity_budget.currentData() or 0),
+            "cooldown_minutes": int(self.proactivity_cooldown.currentData() or 30),
+            "quiet_start": self.proactivity_quiet_start.text().strip(),
+            "quiet_end": self.proactivity_quiet_end.text().strip(),
+        })
+
+    def set_proactivity_payload(self, payload: dict[str, Any]) -> None:
+        settings = dict(payload.get("settings") or {})
+        modes = [str(value) for value in (payload.get("modes") or [])]
+        labels = {
+            "silent": "Silent · только явные напоминания",
+            "important": "Important only",
+            "balanced": "Balanced",
+            "active": "Active",
+        }
+        self.proactivity_mode.clear()
+        for value in modes:
+            self.proactivity_mode.addItem(labels.get(value, value), value)
+        idx = self.proactivity_mode.findData(str(settings.get("mode") or "balanced"))
+        if idx >= 0:
+            self.proactivity_mode.setCurrentIndex(idx)
+
+        for combo, key, default in (
+            (self.proactivity_budget, "max_nonurgent_per_hour", 2),
+            (self.proactivity_cooldown, "cooldown_minutes", 30),
+        ):
+            idx = combo.findData(int(settings.get(key) or default))
+            if idx >= 0:
+                combo.setCurrentIndex(idx)
+        self.proactivity_quiet_start.setText(str(settings.get("quiet_start") or "22:00"))
+        self.proactivity_quiet_end.setText(str(settings.get("quiet_end") or "08:00"))
+
+        autopilot = bool(payload.get("autopilot"))
+        prefix = "Autopilot включён." if autopilot else "Autopilot выключен: инициативные события журналируются, но не прерывают пользователя."
+        self.proactivity_status.setText(prefix + " " + str(payload.get("invariant") or ""))
+
+        rows = list(payload.get("recent") or [])
+        lines = []
+        for row in rows[:12]:
+            state = str(row.get("state") or "new")
+            title = str(row.get("title") or row.get("kind") or "event")
+            reason = str(row.get("reason") or "")
+            line = f"[{state}] {title}"
+            if reason:
+                line += f"\n  {reason}"
+            lines.append(line)
+        self.events_view.setPlainText("\n\n".join(lines) if lines else "Событий пока нет.")
+
+    def set_proactivity_message(self, text: str) -> None:
+        self.proactivity_status.setText(str(text or ""))
 
     def set_persona_payload(self, payload: dict[str, Any]) -> None:
         profile = dict(payload.get("profile") or {})
