@@ -32,6 +32,27 @@ class NativeQtSmokeTests(unittest.TestCase):
             {"name": "desktop", "title": "Рабочий стол", "available": False,
              "reason": "нужен Windows", "skills": [{"name": "desktop.observe"}]},
         ]})
+        center.set_persona_payload({
+            "ok": True,
+            "profile": {
+                "address": "informal", "verbosity": "normal", "humor": "off",
+                "initiative": "balanced", "relationship": "friendly",
+            },
+            "options": {
+                "address": ["formal", "informal"],
+                "verbosity": ["brief", "normal", "detailed"],
+                "humor": ["off", "light", "playful"],
+                "initiative": ["quiet", "balanced", "active"],
+                "relationship": ["professional", "friendly", "warm"],
+            },
+            "labels": {
+                "address": {"formal": "на «вы»", "informal": "на «ты»"},
+                "verbosity": {"brief": "кратко", "normal": "обычно", "detailed": "подробно"},
+                "humor": {"off": "без юмора", "light": "лёгкий юмор", "playful": "игриво"},
+                "initiative": {"quiet": "тихо", "balanced": "умеренно", "active": "активно"},
+                "relationship": {"professional": "профессионально", "friendly": "дружелюбно", "warm": "тепло"},
+            },
+        })
         center.set_page_payload("memory", {"memories": [{"text": "пример"}]})
         center.set_page_payload("tasks", {
             "plans": [{
@@ -71,6 +92,10 @@ class NativeQtSmokeTests(unittest.TestCase):
         self.assertIn("Браузер", center.providers_view.toPlainText())
         self.assertIn("browser.page", center.providers_view.toPlainText())
         self.assertIn("нужен Windows", center.providers_view.toPlainText())
+        self.assertEqual("informal", center.persona_boxes["address"].currentData())
+        self.assertEqual("normal", center.persona_boxes["verbosity"].currentData())
+        self.assertEqual("off", center.persona_boxes["humor"].currentData())
+        self.assertIn("не на права", center.persona_status.text())
         self.assertIsInstance(center.pages["tasks"], TasksPage)
         task_page = center.pages["tasks"]
         labels = [w.text() for w in task_page.findChildren(QLabel)]
