@@ -21,7 +21,8 @@ class BrowserProvider:
         ),
     )
 
-    def run(self, skill_name: str, params: dict[str, Any]) -> dict[str, Any]:
+    def run(self, skill_name: str, params: dict[str, Any],
+            runner: Any | None = None) -> dict[str, Any]:
         if skill_name == "browser.tabs":
             return browser.tabs(int(params.get("limit") or 30))
         if skill_name == "browser.page":
