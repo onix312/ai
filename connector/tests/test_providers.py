@@ -56,6 +56,43 @@ class ProviderRegistryTests(unittest.TestCase):
         self.assertTrue(browser_skills["browser.page"]["reversible"])
 
 
+class ProviderImplementationTests(unittest.TestCase):
+    def test_printflow_provider_preserves_panel_action_confirmation_metadata(self):
+        provider = registry.for_skill("panel.do")
+
+        class Panel:
+            def find_action(self, name):
+                self.name = name
+                return {"id": "queue.pause", "title": "Пауза очереди", "confirm": True}, ""
+
+            def run_action(self, action, values, confirmed=False):
+                return {"ok": True, "values": values, "confirmed": confirmed}
+
+        runner = type("RunnerStub", (), {"panel": Panel()})()
+        result = provider.run("panel.do", {
+            "action": "queue.pause",
+            "params": {"printer": "P1S"},
+            "explain": "поставить очередь на паузу",
+        }, runner)
+        self.assertTrue(result["ok"])
+        self.assertTrue(result["panel_confirm"])
+        self.assertTrue(result["confirmed"])
+        self.assertEqual("Пауза очереди", result["title_action"])
+        self.assertEqual("поставить очередь на паузу", result["target"])
+
+    def test_personal_provider_delegates_only_to_personal_handlers(self):
+        provider = registry.for_skill("reminder.list")
+        runner = object()
+        handler = __import__('unittest.mock').mock.Mock(return_value={
+            "ok": True, "reminders": [], "say": "Напоминаний нет.",
+        })
+        with patch("agent.providers.personal.personal_skills.handlers",
+                   return_value={"reminder.list": handler}):
+            result = provider.run("reminder.list", {"limit": 5}, runner)
+        self.assertTrue(result["ok"])
+        handler.assert_called_once_with({"limit": 5})
+
+
 class ProviderDispatchTests(unittest.TestCase):
     def test_executor_routes_browser_skill_through_provider(self):
         with tempfile.TemporaryDirectory() as tmp:
