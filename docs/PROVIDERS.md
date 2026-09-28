@@ -27,7 +27,9 @@ skills validation + confirmation
  Provider Registry
     ├─ Browser Provider
     ├─ Desktop Provider
-    └─ далее Files / PrintFlow / Telegram
+    ├─ PrintFlow Provider
+    ├─ Personal Provider
+    └─ далее Files / Telegram / Windows
 ```
 
 Provider не обходит safety. Он получает только params, которые уже прошли
@@ -42,7 +44,11 @@ Provider не обходит safety. Он получает только params, 
 - required capabilities;
 - owned skills;
 - reversible flag для каждого перенесённого skill;
-- run(skill_name, params).
+- run(skill_name, params, runner).
+
+Stateful provider получает `Runner` только после skill validation и
+confirmation. Это позволяет использовать локальные store/panel зависимости, не
+перенося policy внутрь provider.
 
 Risk и confirmation остаются в canonical `agent/skills.py`. Provider Registry
 показывает их рядом со своими skills, но не имеет права понижать риск.
@@ -60,7 +66,32 @@ Risk и confirmation остаются в canonical `agent/skills.py`. Provider R
 
 - desktop.observe
 
-Эти реализации больше не находятся в handler-map и методах `executor.py`.
+### PrintFlow Provider
+
+- panel.actions
+- panel.do
+- panel.ask
+- day.briefing
+- day.summary
+
+PrintFlow остаётся отдельным локальным сервисом. Provider получает текущий
+`Runner.panel`, но не принимает решений о risk/confirmation самостоятельно.
+
+### Personal Provider
+
+- reminders
+- lists
+- goals
+- habits
+- expenses
+- diary
+- me.today
+- learning skills
+
+Personal Provider использует локальную SQLite ассистента через существующие
+`personal_skills` handlers.
+
+Эти skills больше не выбираются центральным handler-map `executor.py`.
 
 ## API
 
@@ -87,9 +118,12 @@ Control Center → Настройки показывает зарегистри�
 Следующие кандидаты:
 
 1. Files Provider;
-2. PrintFlow Provider;
-3. Telegram Provider;
-4. Personal Provider.
+2. Telegram Provider;
+3. Windows Provider.
+
+Миграция остаётся пошаговой: Provider Architecture 1.0 даёт единый контракт,
+ownership и status API, а перенос тяжёлых интеграций делается отдельными
+безопасными срезами.
 
 Каждый перенос должен:
 
