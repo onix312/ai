@@ -104,5 +104,51 @@ class VoiceRuntimeStateTests(unittest.TestCase):
         self.assertEqual("idle", self.runtime.state)
 
 
+class _FakeStdin:
+    def close(self):
+        pass
+
+
+class _FakeProcess:
+    def __init__(self):
+        self.pid = 123
+        self.stdin = _FakeStdin()
+        self.alive = True
+        self.terminated = False
+        self.killed = False
+
+    def poll(self):
+        return None if self.alive else 0
+
+    def terminate(self):
+        self.terminated = True
+        self.alive = False
+
+    def wait(self, timeout=None):
+        self.alive = False
+        return 0
+
+    def kill(self):
+        self.killed = True
+        self.alive = False
+
+
+class TtsInterruptionTests(unittest.TestCase):
+    def tearDown(self):
+        pc.stop_speaking()
+
+    def test_speak_tracks_process_and_stop_terminates_it(self):
+        process = _FakeProcess()
+        with patch.object(pc, "speech_engine", return_value="sapi"), \
+             patch.object(pc.subprocess, "Popen", return_value=process):
+            result, reason = pc.speak("привет")
+        self.assertEqual("", reason)
+        self.assertEqual(123, result["pid"])
+        self.assertTrue(pc.is_speaking())
+        self.assertTrue(pc.stop_speaking())
+        self.assertTrue(process.terminated)
+        self.assertFalse(pc.is_speaking())
+
+
 if __name__ == "__main__":
     unittest.main()
