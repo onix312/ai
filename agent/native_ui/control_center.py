@@ -116,12 +116,12 @@ class TasksPage(QWidget):
         scroll.setFrameShape(QFrame.NoFrame)
         self.host_widget = QWidget()
         self.host = QVBoxLayout(self.host_widget)
-        self.host.addStretch(1)
+        self.host.setAlignment(Qt.AlignTop)
         scroll.setWidget(self.host_widget)
         self.layout.addWidget(scroll, 1)
 
     def _clear(self) -> None:
-        while self.host.count() > 1:
+        while self.host.count():
             item = self.host.takeAt(0)
             widget = item.widget()
             if widget is not None:
