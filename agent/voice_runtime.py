@@ -16,7 +16,7 @@ from . import config, speech
 
 
 STOP_WORDS = frozenset(("стоп", "хватит", "тихо", "замолчи", "остановись"))
-END_WORDS = frozenset(("всё", "все", "спасибо", "отбой"))
+END_WORDS = frozenset(("всё", "все", "отбой"))
 
 
 def normalized_words(text: str) -> tuple[str, ...]:
@@ -214,8 +214,24 @@ class VoiceRuntime:
             self.state = "error"
         finally:
             self.listening = False
-            if not self.persistent_enabled:
+            self._thread = None
+            if self.persistent_enabled and self.state == "error":
+                self._schedule_retry()
+            elif not self.persistent_enabled:
                 self.state = "idle"
+
+    def _schedule_retry(self) -> None:
+        """Переподключить микрофон после временного отказа устройства."""
+        def retry() -> None:
+            if not self.persistent_enabled:
+                return
+            self._shutdown.clear()
+            self.state = "idle"
+            self._ensure_thread()
+
+        timer = threading.Timer(2.0, retry)
+        timer.daemon = True
+        timer.start()
 
     def _next_phrase(self, frames: "queue.Queue[bytes]") -> tuple[list[bytes], bool]:
         """Простой VAD; помечает звук, начавшийся во время TTS, против эха."""
