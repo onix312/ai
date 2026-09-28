@@ -124,6 +124,16 @@ class PcHelpersTests(unittest.TestCase):
 
 
 class ModelClientTests(unittest.TestCase):
+    def test_cancellation_token_closes_live_request_once(self):
+        token = model.CancellationToken()
+        calls = []
+        token.add_closer(lambda: calls.append("closed"))
+        self.assertTrue(token.cancel())
+        self.assertEqual(["closed"], calls)
+        self.assertFalse(token.cancel())
+        token.add_closer(lambda: calls.append("late"))
+        self.assertEqual(["closed", "late"], calls)
+
     def test_parse_json_takes_first_balanced_object(self):
         text = 'Вот план: ```json\n{"skill": "system.volume", "params": {"level": 30}, "reply": "Ставлю {30}"}\n``` Надеюсь, помог!'
         self.assertEqual({"skill": "system.volume", "params": {"level": 30}, "reply": "Ставлю {30}"}, model.parse_json(text))
@@ -381,6 +391,38 @@ class BrainChatTests(unittest.TestCase):
         answer = self.brain.chat("", plan={"skill": "delete.everything", "params": {}})
         self.assertEqual("error", answer["kind"])
         self.assertIn("нет в реестре", answer["reply"])
+
+    def test_cancelled_model_turn_is_not_saved_to_history(self):
+        started = threading.Event()
+        finished = threading.Event()
+
+        def fake_chat(*_args, cancel=None, **_kwargs):
+            started.set()
+            self.assertIsNotNone(cancel)
+            deadline = time.time() + 2
+            while not cancel.cancelled and time.time() < deadline:
+                time.sleep(0.01)
+            finished.set()
+            return {"ok": False, "text": "", "reason": "Отменено",
+                    "model": "qwen", "cancelled": True}
+
+        result = {}
+
+        def run():
+            with patch.object(model, "status", return_value={"ok": True, "model": "qwen", "reason": "", "url": "http://127.0.0.1:11434"}), \
+                 patch.object(model, "chat", side_effect=fake_chat):
+                result.update(self.brain.chat("расскажи что-нибудь сложное", session="voice"))
+
+        thread = threading.Thread(target=run)
+        thread.start()
+        self.assertTrue(started.wait(1))
+        self.assertTrue(self.brain.cancel_session("voice"))
+        thread.join(2)
+        self.assertTrue(finished.is_set())
+        self.assertEqual("cancelled", result.get("kind"))
+        self.assertEqual("cancelled", result.get("status"))
+        self.assertEqual("", result.get("reply"))
+        self.assertEqual([], self.store.dialog("voice"))
 
     def test_model_plan_is_checked_by_registry(self):
         with patch.object(model, "status", return_value={"ok": True, "model": "qwen2.5:3b", "reason": ""}), \
