@@ -51,6 +51,7 @@ class NativeQtSmokeTests(unittest.TestCase):
         labels = [w.text() for w in task_page.findChildren(QLabel)]
         self.assertTrue(any("Подготовить рабочее место" in text for text in labels))
         self.assertTrue(any("План: Рабочее место" in text for text in labels))
+        self.assertTrue(any("target=telegram" in text for text in labels))
 
         center.deleteLater()
         quick.deleteLater()
