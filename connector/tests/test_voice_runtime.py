@@ -104,6 +104,21 @@ class VoiceRuntimeStateTests(unittest.TestCase):
         self.assertEqual("idle", self.runtime.state)
 
 
+    def test_error_state_is_not_erased_by_status(self):
+        self.runtime.state = "error"
+        self.runtime.last_error = "нет устройства"
+        status = self.runtime.status()
+        self.assertEqual("error", status["state"])
+        self.assertEqual("нет устройства", status["last_error"])
+
+    def test_stop_when_voice_disabled_does_not_arm_microphone(self):
+        with patch.object(pc, "stop_speaking", return_value=False):
+            payload = self.runtime.stop_output()
+        self.assertFalse(payload["armed"])
+        self.assertFalse(payload["enabled"])
+        self.assertEqual("idle", payload["state"])
+
+
 class _FakeStdin:
     def close(self):
         pass
