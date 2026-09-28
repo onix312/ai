@@ -367,7 +367,7 @@ class BrainChatTests(unittest.TestCase):
     def test_understood_multi_step_command_becomes_persistent_task(self):
         sink = _TaskSink()
         self.agent.tasks = sink
-        answer = self.brain.chat("громкость 30 и следующий трек")
+        answer = self.brain.chat("громкость 30 и переключи трек")
         self.assertEqual("task", answer["kind"])
         self.assertEqual(1, len(sink.created))
         self.assertTrue(sink.created[0]["start"])
