@@ -1421,7 +1421,9 @@ _OPTIONAL = ("folders", "folder", "limit", "days", "save", "execute", "params", 
              # 18.22: личные навыки и обучение — недостающее объясняет обработчик
              # («Когда напомнить?», «К какой цели?»), а не общий отказ реестра.
              "id", "list", "items", "item", "unit", "deadline", "goal", "amount", "absolute", "remind_at",
-             "habit", "period", "mood", "day", "phrase", "meaning", "when", "repeat")
+             "habit", "period", "mood", "day", "phrase", "meaning", "when", "repeat",
+             # Provider handlers define safe defaults for observation selectors.
+             "screenshot", "ocr", "target_id", "max_chars")
 
 
 # ---------------------------------------------------------------------------
