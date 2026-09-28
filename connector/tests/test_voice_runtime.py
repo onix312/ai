@@ -127,6 +127,42 @@ class VoiceRuntimeStateTests(unittest.TestCase):
             return {"reply": "ok"}
         return handle
 
+    def test_luma_is_primary_wake_word(self):
+        self.assertTrue(speech.is_wake_phrase("Люма, открой телеграм"))
+        self.assertEqual("открой телеграм", speech.phrase_after_wake_word("Люма, открой телеграм"))
+        self.assertTrue(speech.is_wake_phrase("Ноза, открой телеграм"), "legacy wake alias")
+
+    def test_recent_tts_echo_rejects_own_phrase(self):
+        with pc._TTS_LOCK:
+            pc._LAST_TTS_TEXT = "Люма сейчас расскажет про печать"
+            pc._LAST_TTS_AT = time.time()
+        self.assertTrue(pc.recent_tts_echo("люма сейчас расскажет про печать"))
+        self.assertFalse(pc.recent_tts_echo("люма открой телеграм"))
+
+    def test_wake_barge_in_interrupts_tts_if_not_echo(self):
+        calls = []
+        event = threading.Event()
+        self.runtime.handler = self._handler(calls, event)
+        with patch.object(pc, "is_speaking", return_value=True), \
+             patch.object(pc, "recent_tts_echo", return_value=False), \
+             patch.object(pc, "stop_speaking", return_value=True) as stop:
+            self.runtime._handle_text("Люма, открой телеграм", during_output=True)
+        self.assertTrue(event.wait(1))
+        self.assertEqual(["открой телеграм"], calls)
+        stop.assert_called_once()
+
+    def test_tts_echo_with_wake_word_is_not_dispatched(self):
+        calls = []
+        event = threading.Event()
+        self.runtime.handler = self._handler(calls, event)
+        with patch.object(pc, "is_speaking", return_value=True), \
+             patch.object(pc, "recent_tts_echo", return_value=True), \
+             patch.object(pc, "stop_speaking", return_value=True) as stop:
+            self.runtime._handle_text("Люма рассказывает дальше", during_output=True)
+        self.assertFalse(event.wait(0.1))
+        self.assertEqual([], calls)
+        stop.assert_not_called()
+
     def test_idle_ignores_phrase_without_wake_word(self):
         calls = []
         event = threading.Event()
