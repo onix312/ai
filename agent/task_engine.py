@@ -153,8 +153,12 @@ class TaskEngine:
             )
         task = self.get(task_id)
         if start:
-            self.start(task_id)
+            started = self.start(task_id)
             task = self.get(task_id)
+            if not started.get("ok"):
+                return {"ok": False, "reason": str(started.get("reason") or "Задача не запущена"),
+                        "task": task, "autonomy_blocked": bool(started.get("autonomy_blocked")),
+                        "autonomy": started.get("autonomy")}
         return {"ok": True, "task": task}
 
     def _rows(self, task_id: int) -> list[dict[str, Any]]:
@@ -265,6 +269,10 @@ class TaskEngine:
         return [task for row in rows if (task := self.get(int(row["id"]))) is not None]
 
     def start(self, task_id: int) -> dict[str, Any]:
+        allowed, why = self.agent.autonomy.check("operator", "core")
+        if not allowed:
+            return {"ok": False, "reason": why, "autonomy_blocked": True,
+                    "autonomy": self.agent.autonomy.payload()}
         with self._lock:
             task = self.get(task_id)
             if task is None:
@@ -283,6 +291,10 @@ class TaskEngine:
         return {"ok": True, "started": True, "task": self.get(task_id)}
 
     def run_sync(self, task_id: int) -> dict[str, Any]:
+        allowed, why = self.agent.autonomy.check("operator", "core")
+        if not allowed:
+            return {"ok": False, "reason": why, "autonomy_blocked": True,
+                    "autonomy": self.agent.autonomy.payload()}
         with self._lock:
             task = self.get(task_id)
             if task is None:
@@ -315,7 +327,8 @@ class TaskEngine:
                 self._set_step(task_id, seq, status="running", started_at=now_iso(),
                                pending_action="", result={})
                 result = self.agent.run_skill(
-                    str(pending["skill"]), pending.get("params") or {}, ask=False)
+                    str(pending["skill"]), pending.get("params") or {},
+                    ask=False, autonomy_mode="task")
                 if result.get("queued") and result.get("id"):
                     action_id = str(result["id"])
                     self._set_step(task_id, seq, status="waiting", pending_action=action_id,
