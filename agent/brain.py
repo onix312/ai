@@ -1004,11 +1004,36 @@ class Brain:
         # Вложенный разговор (шаг выученной команды) не пишет реплики и не ищет
         # выученное повторно — так урок не может вызвать сам себя.
         self._local = threading.local()
+        self._cancel_lock = threading.Lock()
+        self._cancels: dict[str, model.CancellationToken] = {}
         if clock is not None:
             try:
                 agent.runner.clock = clock  # навыки считают «сейчас» по тем же часам, что и мозг
             except Exception:  # noqa: BLE001
                 pass
+
+    def cancel_session(self, session: str) -> bool:
+        """Cancel current model generation for one conversation session."""
+        key = session_key(session)
+        with self._cancel_lock:
+            token = self._cancels.get(key)
+        return bool(token and token.cancel())
+
+    def _begin_model_turn(self, session: str) -> model.CancellationToken:
+        key = session_key(session)
+        token = model.CancellationToken()
+        with self._cancel_lock:
+            previous = self._cancels.get(key)
+            self._cancels[key] = token
+        if previous is not None:
+            previous.cancel()
+        return token
+
+    def _end_model_turn(self, session: str, token: model.CancellationToken) -> None:
+        key = session_key(session)
+        with self._cancel_lock:
+            if self._cancels.get(key) is token:
+                self._cancels.pop(key, None)
 
     # --- доступ к агенту ------------------------------------------------
     @property
@@ -2030,8 +2055,21 @@ class Brain:
         messages = [{"role": turn["role"], "content": turn["text"][:500]} for turn in history[-8:]]
         messages.append({"role": "user", "content": text})
         steps.append({"kind": "model", "title": "Думаю моделью", "detail": state.get("model") or ""})
-        reply = model.chat(messages, system=system, fmt="json", temperature=0.1,
-                           timeout=min(PLAN_TIMEOUT_SEC, config.MODEL_TIMEOUT_SEC), state=state)
+        token = self._begin_model_turn(session)
+        try:
+            reply = model.chat(
+                messages, system=system, fmt="json", temperature=0.1,
+                timeout=min(PLAN_TIMEOUT_SEC, config.MODEL_TIMEOUT_SEC), state=state,
+                cancel=token,
+            )
+        finally:
+            self._end_model_turn(session, token)
+        if reply.get("cancelled"):
+            steps.append({"kind": "model", "title": "Модель", "detail": "генерация остановлена человеком"})
+            return self._reply(
+                session, text, "", kind="cancelled", source="model", steps=steps,
+                started=started, save=False,
+            )
         if not reply["ok"]:
             steps.append({"kind": "model", "title": "Модель", "detail": str(reply.get("reason") or "не ответила")[:200]})
             return self._reply(session, text,
@@ -2106,6 +2144,7 @@ class Brain:
                 meta["awaiting"] = extra["awaiting"]  # «Когда напомнить?» — ответ поймётся следующей репликой
             turn_id = int(self.store.add_turn(session, "assistant", reply, meta).get("id") or 0)
         status = ("unhandled" if not handled and kind != "error" else "failed" if kind == "error"
+                  else "cancelled" if kind == "cancelled"
                   else "needs_clarification" if kind == "clarify" else "needs_confirmation" if pending or kind == "pending"
                   else "completed")
         payload = {"ok": kind != "error", "handled": handled, "session": session, "reply": reply,
