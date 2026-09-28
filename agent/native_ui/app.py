@@ -58,8 +58,12 @@ class NativeApp:
 
         self.poll = QTimer()
         self.poll.timeout.connect(self.refresh_status)
-        self.poll.start(4000)
+        self.poll.start(900)
+        self.caps_poll = QTimer()
+        self.caps_poll.timeout.connect(self.refresh_capabilities)
+        self.caps_poll.start(15000)
         self.refresh_status()
+        self.refresh_capabilities()
         self.refresh_history()
         self.tray.show()
 
@@ -77,26 +81,11 @@ class NativeApp:
             return
         self._busy_status = True
 
-        def load() -> dict[str, Any]:
-            status = self.backend.status()
-            try:
-                caps = self.backend.capabilities()
-            except Exception:
-                caps = {}
-            return {"status": status, "caps": caps}
-
-        def done(payload: dict[str, Any]) -> None:
+        def done(status: dict[str, Any]) -> None:
             self._busy_status = False
-            status = payload.get("status") or {}
-            cap_payload = payload.get("caps") or {}
-            caps = cap_payload.get("capabilities") or status.get("capabilities") or {}
             self.state.apply_status(status)
-            self.state.model_ok = bool(caps.get("model"))
-            self.state.panel_ok = bool(caps.get("panel"))
-            if self.state.armed:
-                self.state.assistant_state = "listening"
-            elif self.state.assistant_state not in ("thinking", "speaking"):
-                self.state.assistant_state = "idle"
+            if self._busy_chat:
+                self.state.assistant_state = "thinking"
             self._render_status()
 
         def failed(message: str) -> None:
@@ -104,19 +93,35 @@ class NativeApp:
             self.state.set_error(message)
             self._render_status()
 
-        self.run_async(load, done, failed)
+        self.run_async(self.backend.status, done, failed)
+
+    def refresh_capabilities(self) -> None:
+        def done(payload: dict[str, Any]) -> None:
+            caps = payload.get("capabilities") or {}
+            self.state.model_ok = bool(caps.get("model"))
+            self.state.panel_ok = bool(caps.get("panel"))
+            self._render_status()
+
+        self.run_async(self.backend.capabilities, done, lambda _message: None)
 
     def _render_status(self) -> None:
         self.tray.apply_status(
-            self.state.connected, self.state.armed, self.state.model_ok,
+            self.state.connected, self.state.voice_enabled, self.state.model_ok,
             self.state.assistant_state, self.state.last_error,
         )
         self.center.update_status(
-            self.state.connected, self.state.armed, self.state.model_ok,
+            self.state.connected, self.state.voice_enabled, self.state.model_ok,
             self.state.panel_ok, self.state.last_error,
         )
-        if self.state.armed and self.state.connected and not self.orb.isVisible():
-            self.orb.set_state("listening", 1800)
+        if not self.state.connected:
+            if self.orb.isVisible():
+                self.orb.set_state("error", 1800)
+            return
+        voice_state = self.state.assistant_state
+        if voice_state in ("listening", "thinking", "speaking", "error"):
+            self.orb.set_state(voice_state, 1800 if voice_state == "error" else 0)
+        elif self.orb.isVisible() and not self._busy_chat:
+            self.orb.hide()
 
     # ----------------------------------------------------------------- chat
     def send_chat(self, text: str) -> None:
@@ -211,18 +216,19 @@ class NativeApp:
 
     # --------------------------------------------------------------- mic
     def toggle_mic(self) -> None:
-        if self.state.armed:
-            self.run_async(self.backend.disarm_mic, self._mic_result)
+        if self.state.voice_enabled:
+            self.run_async(self.backend.disable_voice, self._mic_result)
         else:
             self.orb.set_state("listening")
-            self.run_async(lambda: self.backend.arm_mic(25), self._mic_result)
+            self.run_async(self.backend.enable_voice, self._mic_result)
 
     def _mic_result(self, payload: dict[str, Any]) -> None:
+        self.state.voice_enabled = bool(payload.get("enabled"))
         self.state.armed = bool(payload.get("armed"))
         self.state.connected = bool(payload.get("ok", True))
-        self.state.assistant_state = "listening" if self.state.armed else "idle"
+        self.state.assistant_state = str(payload.get("state") or (
+            "listening" if self.state.voice_enabled else "idle"))
         self._render_status()
-        self.orb.set_state(self.state.assistant_state, 1700 if not self.state.armed else 0)
 
     # --------------------------------------------------------------- windows
     def open_quick(self) -> None:
