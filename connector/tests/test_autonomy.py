@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import pathlib
 import tempfile
+import time
 import unittest
 
 from agent import autonomy, executor
@@ -81,7 +82,7 @@ class AgentAutonomyIntegrationTests(unittest.TestCase):
     def test_observer_blocks_write_skill_before_confirmation_queue(self):
         self.agent.autonomy.update("observer")
         result = self.agent.run_skill(
-            "clipboard.write", {"text": "не писать"}, ask=False)
+            "list.clear", {"list": "покупки"}, ask=False)
         self.assertFalse(result["ok"])
         self.assertTrue(result["autonomy_blocked"])
         self.assertEqual([], self.agent.pending())
@@ -89,7 +90,7 @@ class AgentAutonomyIntegrationTests(unittest.TestCase):
     def test_assistant_allows_write_to_reach_normal_confirmation(self):
         self.agent.autonomy.update("assistant")
         result = self.agent.run_skill(
-            "clipboard.write", {"text": "черновик"}, ask=False)
+            "list.clear", {"list": "покупки"}, ask=False)
         self.assertTrue(result["ok"])
         self.assertTrue(result["queued"])
         self.assertTrue(result["requires_confirmation"])
@@ -97,7 +98,7 @@ class AgentAutonomyIntegrationTests(unittest.TestCase):
     def test_pending_action_is_rechecked_after_level_is_lowered(self):
         self.agent.autonomy.update("assistant")
         queued = self.agent.run_skill(
-            "clipboard.write", {"text": "не выполнять"}, ask=False)
+            "list.clear", {"list": "покупки"}, ask=False)
         self.agent.autonomy.update("observer")
         result = self.agent.confirm_action(queued["id"], True)
         self.assertFalse(result["ok"])
@@ -107,11 +108,17 @@ class AgentAutonomyIntegrationTests(unittest.TestCase):
         self.agent.autonomy.update("operator")
         created = self.agent.tasks.create(
             "Записать в буфер",
-            [{"skill": "clipboard.write", "params": {"text": "черновик"}}],
+            [{"skill": "list.clear", "params": {"list": "покупки"}}],
             start=True,
         )
         self.assertTrue(created["ok"], created)
-        task = self.agent.tasks.get(int(created["task"]["id"]))
+        task_id = int(created["task"]["id"])
+        deadline = time.time() + 1.0
+        task = self.agent.tasks.get(task_id)
+        while task and task["status"] == "running" and time.time() < deadline:
+            time.sleep(0.01)
+            task = self.agent.tasks.get(task_id)
+        self.assertIsNotNone(task)
         self.assertEqual("waiting", task["status"])
         action_id = task["steps"][0]["pending_action"]
         self.assertTrue(action_id)
@@ -121,7 +128,7 @@ class AgentAutonomyIntegrationTests(unittest.TestCase):
         self.assertFalse(result["ok"])
         self.assertTrue(result["autonomy_blocked"])
 
-        task = self.agent.tasks.get(int(created["task"]["id"]))
+        task = self.agent.tasks.get(task_id)
         self.assertEqual("paused", task["status"])
         self.assertEqual("pending", task["steps"][0]["status"])
         self.assertIn("operator", task["error"])
