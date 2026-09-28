@@ -146,8 +146,8 @@ class FlyerContentTests(unittest.TestCase):
 
     def test_page_uses_shared_engine_and_local_qr(self):
         """Общая панель и QR без интернета — как у остальных генераторов."""
-        self.assertIn('<script src="nz.js"></script>', self.text)
-        self.assertIn('<script src="../assets/qr.js"></script>', self.text)
+        self.assertRegex(self.text, r'<script src="nz\.js(?:\?v=[^"]+)?"></script>')
+        self.assertRegex(self.text, r'<script src="\.\./assets/qr\.js(?:\?v=[^"]+)?"></script>')
         self.assertIn("NZ.mount(draw)", self.text)
 
 
