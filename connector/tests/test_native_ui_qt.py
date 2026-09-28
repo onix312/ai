@@ -32,6 +32,23 @@ class NativeQtSmokeTests(unittest.TestCase):
             {"name": "desktop", "title": "Рабочий стол", "available": False,
              "reason": "нужен Windows", "skills": [{"name": "desktop.observe"}]},
         ]})
+        center.set_autonomy_payload({
+            "ok": True,
+            "level": "operator",
+            "levels": ["observer", "assistant", "operator", "agent", "autopilot"],
+            "labels": {
+                "observer": "Observer", "assistant": "Assistant",
+                "operator": "Operator", "agent": "Agent", "autopilot": "Autopilot",
+            },
+            "providers": {
+                "browser": {"level": "autopilot", "hard_max": "autopilot"},
+                "desktop": {"level": "agent", "hard_max": "agent"},
+                "printflow": {"level": "assistant", "hard_max": "agent"},
+                "personal": {"level": "autopilot", "hard_max": "autopilot"},
+                "core": {"level": "agent", "hard_max": "agent"},
+            },
+            "invariant": "confirmations остаются обязательными",
+        })
         center.set_persona_payload({
             "ok": True,
             "profile": {
@@ -96,6 +113,10 @@ class NativeQtSmokeTests(unittest.TestCase):
         self.assertEqual("normal", center.persona_boxes["verbosity"].currentData())
         self.assertEqual("off", center.persona_boxes["humor"].currentData())
         self.assertIn("не на права", center.persona_status.text())
+        self.assertEqual("operator", center.autonomy_level.currentData())
+        self.assertEqual("assistant", center.autonomy_provider_boxes["printflow"].currentData())
+        self.assertEqual(4, center.autonomy_provider_boxes["desktop"].count())
+        self.assertIn("обязательными", center.autonomy_status.text())
         self.assertIsInstance(center.pages["tasks"], TasksPage)
         task_page = center.pages["tasks"]
         labels = [w.text() for w in task_page.findChildren(QLabel)]
