@@ -19,6 +19,10 @@ class ProviderRegistryTests(unittest.TestCase):
     def test_migrated_skills_have_exact_owner(self):
         self.assertEqual("browser", registry.for_skill("browser.page").spec.name)
         self.assertEqual("desktop", registry.for_skill("desktop.observe").spec.name)
+        self.assertEqual("printflow", registry.for_skill("panel.ask").spec.name)
+        self.assertEqual("printflow", registry.for_skill("day.summary").spec.name)
+        self.assertEqual("personal", registry.for_skill("reminder.list").spec.name)
+        self.assertEqual("personal", registry.for_skill("habit.add").spec.name)
         self.assertIsNone(registry.for_skill("system.volume"))
 
     def test_catalog_reports_capability_reasons_and_contracts(self):
@@ -51,7 +55,41 @@ class ProviderDispatchTests(unittest.TestCase):
                 }) as run:
                     result = runner.run("browser.tabs", {"limit": 7})
                 self.assertTrue(result["ok"])
-                run.assert_called_once_with("browser.tabs", {"limit": 7})
+                run.assert_called_once_with("browser.tabs", {"limit": 7}, runner)
+            finally:
+                store.close()
+
+    def test_executor_routes_printflow_skill_through_provider(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = Store(pathlib.Path(tmp) / "assistant.sqlite3")
+            runner = executor.Runner(store=store, panel=Client("http://127.0.0.1:1"))
+            runner._caps = {"panel": True, "panel_reason": ""}
+            provider = registry.for_skill("panel.ask")
+            try:
+                with patch.object(provider, "run", return_value={
+                    "ok": True, "reply": "PrintFlow отвечает", "reason": "",
+                }) as run:
+                    result = runner.run("panel.ask", {"question": "что печатается"})
+                self.assertTrue(result["ok"])
+                run.assert_called_once_with(
+                    "panel.ask", {"question": "что печатается"}, runner)
+            finally:
+                store.close()
+
+    def test_executor_routes_personal_skill_through_provider(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = Store(pathlib.Path(tmp) / "assistant.sqlite3")
+            runner = executor.Runner(store=store, panel=Client("http://127.0.0.1:1"))
+            runner._caps = {"sqlite": True, "sqlite_reason": ""}
+            provider = registry.for_skill("reminder.list")
+            try:
+                with patch.object(provider, "run", return_value={
+                    "ok": True, "reminders": [], "say": "Напоминаний нет.",
+                }) as run:
+                    result = runner.run("reminder.list", {"limit": 10})
+                self.assertTrue(result["ok"])
+                run.assert_called_once_with(
+                    "reminder.list", {"limit": 10}, runner)
             finally:
                 store.close()
 
@@ -68,7 +106,7 @@ class ProviderDispatchTests(unittest.TestCase):
                     result = runner.run("desktop.observe", {"limit": 12, "ocr": False})
                 self.assertTrue(result["ok"])
                 run.assert_called_once_with(
-                    "desktop.observe", {"limit": 12, "ocr": False})
+                    "desktop.observe", {"limit": 12, "ocr": False}, runner)
             finally:
                 store.close()
 
