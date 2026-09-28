@@ -101,10 +101,6 @@ class TasksPage(QWidget):
     plan_command = Signal(str, str)
     replan_preview = Signal(int)
     replan_command = Signal(str, str)
-    persona_save = Signal(object)
-    persona_reset = Signal()
-    autonomy_save = Signal(str, object)
-    autonomy_reset = Signal()
     refresh_requested = Signal()
 
     def __init__(self) -> None:
@@ -343,6 +339,8 @@ class ControlCenter(QMainWindow):
     replan_command = Signal(str, str)
     persona_save = Signal(object)
     persona_reset = Signal()
+    autonomy_save = Signal(str, object)
+    autonomy_reset = Signal()
 
     NAV = [
         ("chat", "💬  Разговор"),
