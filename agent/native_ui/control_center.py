@@ -176,6 +176,10 @@ class TasksPage(QWidget):
                 confirm = " · подтверждение" if step.get("confirm") else ""
                 why = str(step.get("why") or "")
                 line = f"{int(step.get('seq') or 0) + 1}. {step.get('title') or step.get('skill')} · {risk}{confirm}"
+                params = dict(step.get("params") or {})
+                if params:
+                    pairs = ", ".join(f"{key}={value}" for key, value in params.items())
+                    line += f" · {pairs}"
                 if why:
                     line += f" — {why}"
                 label = QLabel(line)
