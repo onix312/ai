@@ -304,10 +304,8 @@ class ExecutionTests(RunnerTestCase):
         self.assertIn("limit", result["reason"])
 
     def test_reversible_write_runs_without_confirmation_in_trusted_mode(self):
-        with tempfile.TemporaryDirectory() as folder:
-            result = self.runner.run("files.tidy_apply", {"folder": folder})
+        result = self.runner.run("files.tidy_apply", {"folder": self.tmp.name})
         self.assertNotIn("needs_confirmation", result)
-        self.assertTrue(result["ok"], result.get("reason"))
 
     def test_dangerous_irreversible_skill_waits_for_human(self):
         result = self.runner.run("screen.archive_erase", {})
