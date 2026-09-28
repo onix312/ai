@@ -52,6 +52,8 @@ class NativeApp:
         self.center.clear_chat.connect(self.clear_chat)
         self.center.mic_toggle.connect(self.toggle_mic)
         self.center.task_decision.connect(self.decide_task)
+        self.center.persona_save.connect(self.save_persona)
+        self.center.persona_reset.connect(self.reset_persona)
         self.center.task_command.connect(self.task_command)
         self.center.plan_preview.connect(self.plan_preview)
         self.center.plan_command.connect(self.plan_command)
@@ -111,6 +113,11 @@ class NativeApp:
         self.run_async(
             self.backend.providers,
             self.center.set_providers_payload,
+            lambda _message: None,
+        )
+        self.run_async(
+            self.backend.persona,
+            self.center.set_persona_payload,
             lambda _message: None,
         )
 
@@ -296,6 +303,38 @@ class NativeApp:
             self.refresh_page("tasks")
 
         self.run_async(lambda: self.backend.replan_op("preview", task_id=task_id), done)
+
+    def save_persona(self, profile: dict[str, Any]) -> None:
+        def done(payload: dict[str, Any]) -> None:
+            if payload.get("ok"):
+                self.center.set_persona_message("✓ Стиль NOZZA сохранён.")
+                self.run_async(self.backend.persona, self.center.set_persona_payload,
+                               lambda _message: None)
+            else:
+                self.center.set_persona_message(str(payload.get("reason") or "Профиль не сохранён."))
+
+        self.run_async(lambda: self.backend.persona_update(dict(profile or {})), done)
+
+    def reset_persona(self) -> None:
+        def done(payload: dict[str, Any]) -> None:
+            if payload.get("ok"):
+                self.center.set_persona_payload({
+                    **payload,
+                    "options": {
+                        "address": ["formal", "informal"],
+                        "verbosity": ["brief", "normal", "detailed"],
+                        "humor": ["off", "light", "playful"],
+                        "initiative": ["quiet", "balanced", "active"],
+                        "relationship": ["professional", "friendly", "warm"],
+                    },
+                })
+                self.run_async(self.backend.persona, self.center.set_persona_payload,
+                               lambda _message: None)
+                self.center.set_persona_message("Профиль возвращён к значениям по умолчанию.")
+            else:
+                self.center.set_persona_message(str(payload.get("reason") or "Не удалось сбросить профиль."))
+
+        self.run_async(self.backend.persona_reset, done)
 
     # --------------------------------------------------------------- mic
     def toggle_mic(self) -> None:
