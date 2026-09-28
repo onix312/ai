@@ -234,9 +234,13 @@ class NativeApp:
 
         def done(payload: dict[str, Any]) -> None:
             if payload.get("needs_clarification"):
-                self.quick.show_answer(str(payload.get("ask") or "Нужно уточнение."))
+                message = str(payload.get("ask") or "Нужно уточнение.")
+                self.center.set_planner_message(message)
             elif not payload.get("ok"):
-                self.quick.show_answer(str(payload.get("reason") or "План не построен."))
+                message = str(payload.get("reason") or "План не построен.")
+                self.center.set_planner_message(message)
+            else:
+                self.center.set_planner_message("План готов. Проверьте шаги и нажмите «Запустить план».")
             self.refresh_page("tasks")
 
         self.run_async(
@@ -247,7 +251,11 @@ class NativeApp:
     def plan_command(self, plan_id: str, op: str) -> None:
         def done(payload: dict[str, Any]) -> None:
             if not payload.get("ok") and payload.get("reason"):
-                self.quick.show_answer(str(payload.get("reason")))
+                self.center.set_planner_message(str(payload.get("reason")))
+            elif op == "approve":
+                self.center.set_planner_message("План передан в Task Engine.")
+            else:
+                self.center.set_planner_message("")
             self.refresh_page("tasks")
 
         self.run_async(
