@@ -334,6 +334,26 @@ class _PlannerSink:
         }}
 
 
+class VoiceReplyStreamingTests(unittest.TestCase):
+    def test_free_answer_streams_complete_sentences_only(self):
+        spoken = []
+        stream = brain._VoiceReplyStream(lambda text: spoken.append(text) or True)
+        stream.feed('{"skill":"","params":{},"reply":"Первая фраза.')
+        self.assertEqual([], spoken)
+        stream.feed('{"skill":"","params":{},"reply":"Первая фраза. Вторая')
+        self.assertEqual(["Первая фраза."], spoken)
+        stream.feed('{"skill":"","params":{},"reply":"Первая фраза. Вторая без точки","ask":""}')
+        self.assertEqual(["Первая фраза.", "Вторая без точки"], spoken)
+        self.assertGreater(stream.count, 0)
+
+    def test_action_reply_is_never_streamed_before_execution(self):
+        spoken = []
+        stream = brain._VoiceReplyStream(lambda text: spoken.append(text) or True)
+        stream.feed('{"skill":"app.open","params":{"app":"telegram"},"reply":"Открываю Telegram."')
+        stream.feed('{"skill":"app.open","params":{"app":"telegram"},"reply":"Открываю Telegram.","ask":""}')
+        self.assertEqual([], spoken)
+
+
 class BrainChatTests(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
