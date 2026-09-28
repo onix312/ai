@@ -103,6 +103,14 @@ class VoiceRuntimeStateTests(unittest.TestCase):
         self.assertFalse(self.runtime.conversation_active)
         self.assertEqual("idle", self.runtime.state)
 
+    def test_followup_window_restarts_after_tts_finishes(self):
+        self.runtime.conversation_until = time.time() - 1
+        with patch.object(pc, "is_speaking", side_effect=[True, False]), \
+             patch.object(voice_runtime.time, "sleep", return_value=None):
+            self.runtime._watch_output()
+        self.assertTrue(self.runtime.conversation_active)
+        self.assertEqual("listening", self.runtime.state)
+
 
     def test_error_state_is_not_erased_by_status(self):
         self.runtime.state = "error"
