@@ -65,6 +65,8 @@ GUEST_PRIVATE_SKILLS = frozenset({
 GUEST_PRIVATE_ROUTES = frozenset({
     "/memory",
     "/personal",
+    "/windows",
+    "/screen",
     "/learning",
     "/notifications",
     "/chat/history",
@@ -73,6 +75,7 @@ GUEST_PRIVATE_ROUTES = frozenset({
     "/tasks",
     "/plans",
     "/replans",
+    "/feedback",
 })
 
 
