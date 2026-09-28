@@ -1211,31 +1211,83 @@ def _memory_methods() -> None:
     """Методы памяти подключаются к `Store` отдельным блоком: таблицы свои, правила свои."""
 
     def remember(self: Store, text: str, kind: str = "fact", subject: str = "",
-                 source: str = "chat", pinned: bool = False) -> dict[str, Any]:
+                 source: str = "chat", pinned: bool = False, origin: str = "",
+                 confidence: float | None = None, evidence_count: int = 1,
+                 provenance: str = "") -> dict[str, Any]:
         clean = " ".join(str(text or "").split())[:MAX_MEMORY_CHARS]
         if not clean:
             return {"ok": False, "reason": "Пустая запись памяти"}
         kind = kind if kind in MEMORY_KINDS else "fact"
         subject = " ".join(str(subject or "").split())[:80]
+        source = str(source or "chat")[:40]
+        inferred_origin = (
+            "inferred" if source == "self" else
+            "observed" if source == "observed" else
+            "explicit" if source in ("chat", "skill", "taught", "correction") else
+            "imported"
+        )
+        origin = str(origin or inferred_origin).strip().casefold()
+        origin = origin if origin in MEMORY_ORIGINS else inferred_origin
+        if confidence is None:
+            confidence = _MEMORY_DEFAULT_CONFIDENCE[origin]
+        try:
+            confidence = max(0.0, min(1.0, float(confidence)))
+        except (TypeError, ValueError):
+            confidence = _MEMORY_DEFAULT_CONFIDENCE[origin]
+        try:
+            evidence_count = max(1, min(1_000_000, int(evidence_count or 1)))
+        except (TypeError, ValueError):
+            evidence_count = 1
+        provenance = " ".join(str(provenance or source).split())[:500]
         norm = normalize(clean)
         at = now_iso()
+
         same = self._rows("SELECT * FROM memories WHERE norm=? LIMIT 1", (norm,))
         if same:
-            self._run("UPDATE memories SET updated_at=? WHERE id=?", (at, same[0]["id"]))
-            return {"ok": True, "memory": {**same[0], "updated_at": at}, "duplicate": True, "reason": ""}
+            previous = same[0]
+            old_origin = str(previous.get("origin") or "explicit")
+            old_confidence = float(previous.get("confidence") or 0.0)
+            old_evidence = max(1, int(previous.get("evidence_count") or 1))
+            stronger = (
+                _MEMORY_ORIGIN_PRIORITY.get(origin, 0)
+                >= _MEMORY_ORIGIN_PRIORITY.get(old_origin, 0)
+            )
+            final_origin = origin if stronger else old_origin
+            final_source = source if stronger else str(previous.get("source") or source)
+            final_provenance = (
+                provenance if stronger else str(previous.get("provenance") or provenance)
+            )
+            self._run(
+                "UPDATE memories SET updated_at=?, origin=?, confidence=?, evidence_count=?, "
+                "source=?, provenance=? WHERE id=?",
+                (at, final_origin, max(old_confidence, float(confidence)),
+                 old_evidence + evidence_count, final_source, final_provenance,
+                 previous["id"]))
+            row = self._rows("SELECT * FROM memories WHERE id=?", (previous["id"],))[0]
+            return {"ok": True, "memory": row, "duplicate": True, "reason": ""}
+
         if subject and kind in ("profile", "preference"):
-            # «Меня зовут Олег» после «меня зовут Саша» — это исправление, а не второй факт.
-            old = self._rows("SELECT * FROM memories WHERE kind=? AND subject=? LIMIT 1", (kind, subject))
+            old = self._rows(
+                "SELECT * FROM memories WHERE kind=? AND subject=? LIMIT 1",
+                (kind, subject))
             if old:
-                self._run("UPDATE memories SET text=?, norm=?, updated_at=?, source=? WHERE id=?",
-                          (clean, norm, at, str(source)[:40], old[0]["id"]))
+                self._run(
+                    "UPDATE memories SET text=?, norm=?, updated_at=?, source=?, origin=?, "
+                    "confidence=?, evidence_count=?, provenance=? WHERE id=?",
+                    (clean, norm, at, source, origin, float(confidence),
+                     evidence_count, provenance, old[0]["id"]))
                 row = self._rows("SELECT * FROM memories WHERE id=?", (old[0]["id"],))[0]
-                return {"ok": True, "memory": row, "replaced": old[0]["text"], "reason": ""}
+                return {
+                    "ok": True, "memory": row, "replaced": old[0]["text"], "reason": ""
+                }
+
         cursor = self._run(
-            "INSERT INTO memories(at, updated_at, kind, subject, text, norm, source, pinned) "
-            "VALUES(?,?,?,?,?,?,?,?)",
-            (at, at, kind, subject, clean, norm, str(source)[:40], 1 if pinned else 0))
-        row = self._rows("SELECT * FROM memories WHERE id=?", (int(cursor.lastrowid or 0),))
+            "INSERT INTO memories(at, updated_at, kind, subject, text, norm, source, pinned, "
+            "origin, confidence, evidence_count, provenance) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+            (at, at, kind, subject, clean, norm, source, 1 if pinned else 0,
+             origin, float(confidence), evidence_count, provenance))
+        row = self._rows(
+            "SELECT * FROM memories WHERE id=?", (int(cursor.lastrowid or 0),))
         return {"ok": True, "memory": row[0] if row else {}, "reason": ""}
 
     def memories(self: Store, limit: int = 50, kind: str = "") -> list[dict[str, Any]]:
@@ -1253,7 +1305,9 @@ def _memory_methods() -> None:
             score = memory_score(wanted, row)
             if score > 0:
                 scored.append({**row, "score": score})
-        scored.sort(key=lambda row: (-row["score"], -int(row["id"])))
+        scored.sort(key=lambda row: (
+            -row["score"], -float(row.get("confidence") or 0.0), -int(row["id"])
+        ))
         top = scored[:max(1, min(50, int(limit or 5)))]
         if touch and top:
             at = now_iso()
