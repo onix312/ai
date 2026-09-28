@@ -62,6 +62,9 @@ class VoiceRuntime:
         self.last_phrase = ""
         self.partial_phrase = ""
         self.audio_level = 0
+        self.echo_floor = 0.0
+        self.echo_threshold = int(config.VOICE_VAD_THRESHOLD)
+        self.echo_suppressed = 0
         self.streaming_asr = False
         self.last_error = ""
         self.state = "idle"
@@ -99,6 +102,9 @@ class VoiceRuntime:
             "last_phrase": self.last_phrase,
             "partial_phrase": self.partial_phrase,
             "audio_level": int(self.audio_level),
+            "echo_floor": int(self.echo_floor),
+            "echo_threshold": int(self.echo_threshold),
+            "echo_suppressed": int(self.echo_suppressed),
             "streaming_asr": bool(self.streaming_asr),
             "asr_engine": str(getattr(self.recognizer, "name", "") or ""),
             "vocabulary_count": len(self.vocabulary_terms),
@@ -300,7 +306,28 @@ class VoiceRuntime:
 
             level = peak_level(data)
             self.audio_level = level
-            loud = level >= config.VOICE_VAD_THRESHOLD
+            try:
+                speaking_now = pc.is_speaking()
+            except Exception:
+                speaking_now = False
+            threshold = int(config.VOICE_VAD_THRESHOLD)
+            if speaking_now and not started:
+                alpha = float(config.VOICE_ECHO_FLOOR_ALPHA)
+                if self.echo_floor <= 0:
+                    self.echo_floor = float(level)
+                else:
+                    self.echo_floor = (1.0 - alpha) * self.echo_floor + alpha * float(level)
+                threshold = max(
+                    threshold,
+                    int(self.echo_floor * float(config.VOICE_ECHO_GATE_MULTIPLIER)),
+                    int(self.echo_floor + int(config.VOICE_ECHO_GATE_MARGIN)),
+                )
+            elif not speaking_now and not started:
+                self.echo_floor *= 0.92
+            self.echo_threshold = threshold
+            loud = level >= threshold
+            if speaking_now and not started and not loud and level >= config.VOICE_VAD_THRESHOLD:
+                self.echo_suppressed += 1
 
             if not started and not loud:
                 pre_roll.append(data)
@@ -349,6 +376,7 @@ class VoiceRuntime:
                 break
 
         self.audio_level = 0
+        self.echo_threshold = int(config.VOICE_VAD_THRESHOLD)
         final = ""
         if stream is not None:
             try:
