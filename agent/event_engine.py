@@ -299,6 +299,13 @@ class EventEngine:
 
     def _attention_allows(self, event: dict[str, Any], now: dt.datetime,
                           settings: dict[str, Any]) -> tuple[bool, str]:
+        security = getattr(self.agent, "security", None)
+        if security is not None:
+            if security.panic_latched():
+                return False, "PANIC is latched"
+            if security.guest():
+                return False, "Guest Mode suppresses proactive owner notifications"
+
         policy = getattr(self.agent, "autonomy", None)
         if policy is None or policy.level() != "autopilot":
             return False, "proactive delivery requires Autopilot"
