@@ -40,6 +40,24 @@ class BrowserGuardTests(unittest.TestCase):
         self.assertIn("websocket-client", reason)
 
 
+    def test_probe_rejects_unrelated_json_service(self):
+        with patch.object(browser, "_websocket_available", return_value=True), \
+             patch.object(browser, "_http_json", return_value={"ok": True}):
+            ok, reason = browser.probe()
+        self.assertFalse(ok)
+        self.assertIn("DevTools WebSocket", reason)
+
+    def test_probe_accepts_loopback_devtools_version(self):
+        with patch.object(browser, "_websocket_available", return_value=True), \
+             patch.object(browser, "_http_json", return_value={
+                 "Browser": "Chrome/Test",
+                 "webSocketDebuggerUrl": "ws://127.0.0.1:9222/devtools/browser/abc",
+             }):
+            ok, reason = browser.probe()
+        self.assertTrue(ok)
+        self.assertEqual("", reason)
+
+
 class BrowserReadTests(unittest.TestCase):
     def setUp(self):
         self.target = {
