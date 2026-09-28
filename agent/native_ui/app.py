@@ -53,6 +53,8 @@ class NativeApp:
         self.center.mic_toggle.connect(self.toggle_mic)
         self.center.task_decision.connect(self.decide_task)
         self.center.task_command.connect(self.task_command)
+        self.center.plan_preview.connect(self.plan_preview)
+        self.center.plan_command.connect(self.plan_command)
 
         self._restore_geometry()
         self._install_hotkey()
@@ -199,10 +201,12 @@ class NativeApp:
         pending = self.backend.pending()
         notes = self.backend.notifications()
         tasks = self.backend.tasks(50)
+        plans = self.backend.plans()
         return {
             "pending": pending.get("pending") or [],
             "notifications": notes.get("notifications") or [],
             "tasks": tasks.get("tasks") or [],
+            "plans": plans.get("plans") or [],
         }
 
     def decide_task(self, action_id: str, confirmed: bool) -> None:
@@ -221,6 +225,34 @@ class NativeApp:
         self.run_async(
             lambda: self.backend.task_op(op, task_id),
             lambda _payload: self.refresh_page("tasks"),
+        )
+
+    def plan_preview(self, goal: str) -> None:
+        clean = str(goal or "").strip()
+        if not clean:
+            return
+
+        def done(payload: dict[str, Any]) -> None:
+            if payload.get("needs_clarification"):
+                self.quick.show_answer(str(payload.get("ask") or "Нужно уточнение."))
+            elif not payload.get("ok"):
+                self.quick.show_answer(str(payload.get("reason") or "План не построен."))
+            self.refresh_page("tasks")
+
+        self.run_async(
+            lambda: self.backend.plan_op("preview", goal=clean),
+            done,
+        )
+
+    def plan_command(self, plan_id: str, op: str) -> None:
+        def done(payload: dict[str, Any]) -> None:
+            if not payload.get("ok") and payload.get("reason"):
+                self.quick.show_answer(str(payload.get("reason")))
+            self.refresh_page("tasks")
+
+        self.run_async(
+            lambda: self.backend.plan_op(op, plan_id),
+            done,
         )
 
     # --------------------------------------------------------------- mic
