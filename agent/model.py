@@ -32,7 +32,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
-from typing import Any
+from typing import Any, Callable
 
 from . import config
 from .panel_client import loopback_ok
@@ -83,6 +83,95 @@ def _get(url: str, timeout: float) -> tuple[bool, Any, str]:
 
 def _post(url: str, payload: dict[str, Any], timeout: float) -> tuple[bool, Any, str]:
     return _request(url, timeout, payload)
+
+
+class CancellationToken:
+    """Thread-safe cancellation for a live local model request."""
+
+    def __init__(self) -> None:
+        self._event = threading.Event()
+        self._lock = threading.Lock()
+        self._closers: list[Callable[[], None]] = []
+
+    @property
+    def cancelled(self) -> bool:
+        return self._event.is_set()
+
+    def add_closer(self, closer: Callable[[], None]) -> None:
+        with self._lock:
+            if self._event.is_set():
+                try:
+                    closer()
+                except Exception:
+                    pass
+                return
+            self._closers.append(closer)
+
+    def cancel(self) -> bool:
+        if self._event.is_set():
+            return False
+        self._event.set()
+        with self._lock:
+            closers = list(self._closers)
+            self._closers.clear()
+        for closer in closers:
+            try:
+                closer()
+            except Exception:
+                pass
+        return True
+
+
+def _post_stream(url: str, payload: dict[str, Any], timeout: float,
+                 cancel: CancellationToken | None = None) -> tuple[bool, dict[str, Any], str]:
+    """Read Ollama NDJSON stream and allow another thread to close it immediately."""
+    local, why = loopback_ok(url)
+    if not local:
+        return False, {}, why
+    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    request = urllib.request.Request(
+        url, data=body, method="POST",
+        headers={"Accept": "application/x-ndjson", "Content-Type": "application/json; charset=utf-8"})
+    response = None
+    try:
+        response = _LOCAL_OPENER.open(request, timeout=timeout)  # noqa: S310 — loopback only
+        if cancel is not None:
+            cancel.add_closer(response.close)
+            if cancel.cancelled:
+                return False, {"cancelled": True}, "Отменено"
+        parts: list[str] = []
+        last: dict[str, Any] = {}
+        for raw in response:
+            if cancel is not None and cancel.cancelled:
+                return False, {"cancelled": True}, "Отменено"
+            try:
+                item = json.loads(raw.decode("utf-8", "replace") or "{}")
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(item, dict):
+                continue
+            last = item
+            message = item.get("message") or {}
+            chunk = str(message.get("content") or item.get("response") or "")
+            if chunk:
+                parts.append(chunk)
+            if item.get("done"):
+                break
+        if cancel is not None and cancel.cancelled:
+            return False, {"cancelled": True}, "Отменено"
+        return True, {"message": {"content": "".join(parts)}, **last}, ""
+    except urllib.error.HTTPError as exc:
+        return False, {}, f"рантайм ответил {exc.code}"
+    except (urllib.error.URLError, OSError, ValueError) as exc:
+        if cancel is not None and cancel.cancelled:
+            return False, {"cancelled": True}, "Отменено"
+        return False, {}, f"рантайм недоступен ({exc.__class__.__name__})"
+    finally:
+        if response is not None:
+            try:
+                response.close()
+            except Exception:
+                pass
 
 
 # Имя модели, найденное без переменной окружения, живёт минуту: панель могла
@@ -241,7 +330,8 @@ def chat(messages: list[dict[str, Any]], *, system: str = "", fmt: str | dict | 
          url: str = "", name: str = "", timeout: float | None = None,
          temperature: float = 0.2, images: list[bytes] | None = None,
          max_chars: int = MAX_REPLY_CHARS,
-         state: dict[str, Any] | None = None) -> dict[str, Any]:
+         state: dict[str, Any] | None = None,
+         cancel: CancellationToken | None = None) -> dict[str, Any]:
     """Диалог с моделью: системная роль, история, JSON-режим, картинки.
 
     `messages` — список `{role, content}` (роли user/assistant); `system`
@@ -271,16 +361,21 @@ def chat(messages: list[dict[str, Any]], *, system: str = "", fmt: str | dict | 
                 turn["images"] = [base64.b64encode(bytes(image)).decode("ascii")
                                   for image in images[:2] if image]
                 break
-    body: dict[str, Any] = {"model": state["model"], "stream": False, "messages": clean,
+    body: dict[str, Any] = {"model": state["model"], "stream": bool(cancel), "messages": clean,
                             "options": {"temperature": float(temperature)}}
     if fmt:
         body["format"] = fmt
-    ok, payload, reason = _post(
-        f"{state['url']}/api/chat", body,
-        float(timeout if timeout is not None else config.MODEL_TIMEOUT_SEC))
+    request_timeout = float(timeout if timeout is not None else config.MODEL_TIMEOUT_SEC)
+    if cancel is not None:
+        ok, payload, reason = _post_stream(f"{state['url']}/api/chat", body, request_timeout, cancel)
+    else:
+        ok, payload, reason = _post(f"{state['url']}/api/chat", body, request_timeout)
+    if cancel is not None and cancel.cancelled:
+        return {"ok": False, "text": "", "reason": "Отменено", "model": state["model"],
+                "cancelled": True}
     if not ok or not isinstance(payload, dict):
         return {"ok": False, "text": "", "reason": reason or "Рантайм не ответил",
-                "model": state["model"]}
+                "model": state["model"], "cancelled": bool((payload or {}).get("cancelled")) if isinstance(payload, dict) else False}
     message = payload.get("message") or {}
     answer = visible_text(str(message.get("content") or payload.get("response") or ""))
     if not answer:
