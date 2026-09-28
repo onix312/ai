@@ -597,8 +597,12 @@ class ControlCenter(QMainWindow):
         note.setObjectName("muted")
         sl.addWidget(note)
         sl.addStretch(1)
-        self.pages["settings"] = settings
-        self.stack.addWidget(settings)
+        settings_scroll = QScrollArea()
+        settings_scroll.setWidgetResizable(True)
+        settings_scroll.setFrameShape(QFrame.NoFrame)
+        settings_scroll.setWidget(settings)
+        self.pages["settings"] = settings_scroll
+        self.stack.addWidget(settings_scroll)
 
         body.addWidget(self.stack, 1)
         outer.addLayout(body, 1)
