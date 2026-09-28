@@ -8,7 +8,7 @@ import time
 import unittest
 from unittest.mock import patch
 
-from agent import pc, voice_runtime
+from agent import pc, speech, voice_runtime
 
 
 class _Recognizer:
