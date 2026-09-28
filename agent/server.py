@@ -71,6 +71,7 @@ class Agent:
         self._tasks: task_engine.TaskEngine | None = None
         self._planner: planner.Planner | None = None
         self._replanner: replanner.Replanner | None = None
+        self._persona: persona_mod.Persona | None = None
         self._stop = threading.Event()
         # Голос: фраза после стоп-слова идёт мозгу, ответ звучит вслух.
         self.microphone.handler = self.voice_phrase
@@ -110,6 +111,13 @@ class Agent:
                 if self._replanner is None:
                     self._replanner = replanner.Replanner(self)
         return self._replanner
+
+    @property
+    def persona(self) -> persona_mod.Persona:
+        """Устойчивая форма общения. Safety и capabilities сюда не входят."""
+        if self._persona is None:
+            self._persona = persona_mod.Persona(self.runner.store)
+        return self._persona
 
     def chat(self, text: str, session: str = "main", mode: str = "full",
              plan: dict[str, Any] | None = None) -> dict[str, Any]:
