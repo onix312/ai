@@ -111,6 +111,19 @@ class BackendClientTests(unittest.TestCase):
              {"op": "approve", "id": "abc"}),
         ], calls)
 
+    def test_provider_catalog_uses_agent_port(self):
+        client = BackendClient()
+        urls = []
+
+        def fake(req, timeout=0):
+            urls.append(req.full_url)
+            return _Response({"ok": True, "providers": []})
+
+        with mock.patch("urllib.request.urlopen", fake):
+            payload = client.providers()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(["http://127.0.0.1:8799/providers"], urls)
+
     def test_network_failure_is_friendly(self):
         client = BackendClient()
         with mock.patch("urllib.request.urlopen", side_effect=OSError("down")):
