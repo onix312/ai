@@ -5,13 +5,18 @@ on:
     paths:
       - "agent/config.py"
       - "agent/speech.py"
+      - "agent/model.py"
+      - "agent/brain.py"
+      - "agent/server.py"
       - "agent/voice_runtime.py"
       - "agent/native_ui/state.py"
       - "agent/native_ui/orb.py"
       - "agent/native_ui/app.py"
       - "connector/tests/test_voice_runtime.py"
+      - "connector/tests/test_agent_brain.py"
       - "connector/tests/test_native_ui.py"
       - "docs/VOICE-ENGINE-3.md"
+      - "docs/VOICE-ENGINE-3-PHASE2.md"
       - "docs/NOZZA-NEXT-HANDOFF.md"
       - ".github/workflows/voice-engine-3.yml"
   push:
@@ -29,7 +34,11 @@ jobs:
       - name: Compile
         run: python -m compileall -q agent connector/tests
       - name: Voice contracts
-        run: python -m unittest connector.tests.test_voice_runtime connector.tests.test_native_ui
+        run: >-
+          python -m unittest
+          connector.tests.test_voice_runtime
+          connector.tests.test_agent_brain.BrainChatTests
+          connector.tests.test_native_ui
 
   windows-ui:
     runs-on: windows-latest

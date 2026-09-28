@@ -77,6 +77,7 @@ class Agent:
         self._stop = threading.Event()
         # Голос: фраза после стоп-слова идёт мозгу, ответ звучит вслух.
         self.microphone.handler = self.voice_phrase
+        self.microphone.cancel_handler = lambda: self.brain.cancel_session("voice")
 
     @property
     def runner(self) -> executor.Runner:
@@ -336,7 +337,14 @@ class Agent:
         return {"ok": True, "reason": "", **self.microphone.status()}
 
     def stop_voice_output(self) -> dict[str, Any]:
-        return self.microphone.stop_output()
+        cancelled = False
+        try:
+            cancelled = self.brain.cancel_session("voice")
+        except Exception:
+            cancelled = False
+        payload = self.microphone.stop_output()
+        payload["generation_cancelled"] = bool(cancelled)
+        return payload
 
     # --- навыки ассистента (18.14) ----------------------------------------
     def run_skill(self, name: str, params: Any = None, ask: bool = True,

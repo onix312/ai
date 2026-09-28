@@ -1,5 +1,12 @@
 # NOZZA — handoff и roadmap после Verification Engine 1.0
 
+> **Актуализация 29.09.2026, Voice 3 Phase 2:** Phase 1 уже в `main`.
+> Текущая ветка добавляет barge-in до уровня модели: stop во время thinking
+> отменяет только активный voice generation, не сохраняет оборванный ответ в
+> историю и возвращает голосовой цикл в listening. Следом: streaming TTS,
+> dynamic vocabulary и усиление wake-word/echo suppression.
+
+
 > **Актуализация 29.09.2026, Voice 3:** Local Trusted Mode 1.0 уже в `main`.
 > Текущая ветка — **Voice Engine 3.0 Phase 1**: incremental Vosk ASR, partial
 > transcript только для UI, VAD pre-roll и live mic level в Voice Orb.
