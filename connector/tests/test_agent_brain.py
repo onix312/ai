@@ -600,7 +600,7 @@ class BrainPanelTests(unittest.TestCase):
         answer = self.brain.chat("здравствуйте")
         self.assertTrue(answer["reply"].startswith("Привет!"))
         self.assertIn("Панель цеха сейчас не отвечает", answer["reply"])
-        self.assertIn("NOZZA", self.brain.chat("кто ты?")["reply"])
+        self.assertIn("Люма", self.brain.chat("кто ты?")["reply"])
         self.assertEqual("Пожалуйста! Обращайтесь.", self.brain.chat("спасибо")["reply"])
 
     def test_workshop_question_is_answered_by_panel(self):
