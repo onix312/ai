@@ -339,6 +339,8 @@ class ControlCenter(QMainWindow):
     plan_command = Signal(str, str)
     replan_preview = Signal(int)
     replan_command = Signal(str, str)
+    persona_save = Signal(object)
+    persona_reset = Signal()
 
     NAV = [
         ("chat", "💬  Разговор"),
