@@ -1,6 +1,7 @@
 """Voice Engine 2.0: state machine without a real microphone."""
 from __future__ import annotations
 
+import queue
 import struct
 import threading
 import time
@@ -27,6 +28,69 @@ class VoiceHelpersTests(unittest.TestCase):
         self.assertFalse(voice_runtime.is_stop_phrase("останови печать"))
         self.assertTrue(voice_runtime.is_end_phrase("всё, спасибо"))
         self.assertFalse(voice_runtime.is_end_phrase("спасибо и открой телеграм"))
+
+
+class _FakeStream:
+    def __init__(self):
+        self.chunks = []
+
+    def feed(self, data):
+        self.chunks.append(bytes(data))
+        return "ноза открой" if len(self.chunks) >= 3 else "ноза"
+
+    def finish(self):
+        return "ноза открой телеграм"
+
+
+class _StreamingRecognizer(_Recognizer):
+    name = "vosk"
+
+    def __init__(self):
+        self.stream = _FakeStream()
+
+    def start_stream(self, rate=16000):
+        self.rate = rate
+        return self.stream
+
+
+class VoiceStreamingTests(unittest.TestCase):
+    def test_vad_keeps_preroll_and_finalizes_incremental_asr(self):
+        recognizer = _StreamingRecognizer()
+        runtime = voice_runtime.VoiceRuntime(recognizer)
+        frames = queue.Queue()
+        silent = struct.pack("<4h", 0, 10, -10, 0)
+        loud = struct.pack("<4h", 0, 900, -700, 0)
+        frames.put(silent)
+        frames.put(silent)
+        frames.put(loud)
+        frames.put(loud)
+        for _ in range(8):
+            frames.put(silent)
+
+        with patch.object(runtime, "_should_run", return_value=True), \
+             patch.object(pc, "is_speaking", return_value=False):
+            chunks, during_output, text = runtime._next_phrase(frames)
+
+        self.assertFalse(during_output)
+        self.assertEqual("ноза открой телеграм", text)
+        self.assertTrue(runtime.streaming_asr)
+        self.assertEqual("ноза открой телеграм", runtime.partial_phrase)
+        self.assertEqual(16000, recognizer.rate)
+        self.assertGreaterEqual(len(chunks), 4)
+        self.assertEqual(silent, chunks[0], "pre-roll должен сохранить звук до VAD")
+        self.assertEqual(silent, recognizer.stream.chunks[0])
+
+    def test_status_exposes_partial_and_engine(self):
+        recognizer = _StreamingRecognizer()
+        runtime = voice_runtime.VoiceRuntime(recognizer)
+        runtime.partial_phrase = "ноза открой"
+        runtime.audio_level = 1234
+        runtime.streaming_asr = True
+        status = runtime.status()
+        self.assertEqual("ноза открой", status["partial_phrase"])
+        self.assertEqual(1234, status["audio_level"])
+        self.assertTrue(status["streaming_asr"])
+        self.assertEqual("vosk", status["asr_engine"])
 
 
 class VoiceRuntimeStateTests(unittest.TestCase):
