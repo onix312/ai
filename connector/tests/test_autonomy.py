@@ -41,6 +41,10 @@ class AutonomyPolicyTests(unittest.TestCase):
         self.assertFalse(denied["ok"])
         self.assertEqual("agent", denied["hard_max"])
 
+        atomic = self.policy.update("observer", {"desktop": "autopilot"})
+        self.assertFalse(atomic["ok"])
+        self.assertEqual("agent", self.policy.level(), "invalid patch must not partially change level")
+
         saved = self.policy.update(providers={"browser": "assistant"})
         self.assertTrue(saved["ok"])
         self.assertEqual("assistant", saved["providers"]["browser"]["level"])
@@ -104,6 +108,52 @@ class AgentAutonomyIntegrationTests(unittest.TestCase):
         result = self.agent.queue_action("click", {"x": 1, "y": 1}, ask=False)
         self.assertFalse(result["ok"])
         self.assertTrue(result["autonomy_blocked"])
+
+
+    def test_task_engine_requires_operator(self):
+        self.agent.autonomy.update("assistant")
+        created = self.agent.tasks.create(
+            "Проверить задачу",
+            [{"skill": "system.volume", "params": {"level": 30}}],
+            start=False,
+        )
+        self.assertTrue(created["ok"])
+        result = self.agent.tasks.start(int(created["task"]["id"]))
+        self.assertFalse(result["ok"])
+        self.assertTrue(result["autonomy_blocked"])
+        self.assertIn("operator", result["reason"])
+
+    def test_provider_ceiling_blocks_task_before_first_step(self):
+        self.agent.autonomy.update("operator", {"personal": "assistant"})
+        created = self.agent.tasks.create(
+            "Личное действие",
+            [{"skill": "reminder.list", "params": {"limit": 5}}],
+            start=False,
+        )
+        self.assertTrue(created["ok"])
+        result = self.agent.tasks.start(int(created["task"]["id"]))
+        self.assertFalse(result["ok"])
+        self.assertTrue(result["autonomy_blocked"])
+        self.assertEqual("planned", result["task"]["status"])
+
+    def test_direct_multistep_learned_skill_requires_operator(self):
+        learned = {
+            "name": "my.chain",
+            "title": "Цепочка",
+            "risk": "read",
+            "host": "agent",
+            "params": {},
+            "requires": (),
+            "steps": [
+                {"skill": "agent.skills", "params": {}},
+                {"skill": "agent.skills", "params": {}},
+            ],
+            "learned": True,
+        }
+        self.agent.autonomy.update("assistant")
+        allowed, reason = self.agent.autonomy.check_skill(learned, "direct")
+        self.assertFalse(allowed)
+        self.assertIn("operator", reason)
 
 
 if __name__ == "__main__":
