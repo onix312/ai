@@ -136,7 +136,21 @@
 
   /* ------------------------------------------------------------- редактор */
   .editor { background: #f4f6fc; border: 1px solid #dde2ef; border-radius: 10px; padding: 12px 14px; margin-top: 10px; }
-  .editor h3 { margin: 0 0 8px; font-size: 12px; letter-spacing: .04em; text-transform: uppercase; color: var(--ink-soft); }
+  .editor h3 { margin: 0; font-size: 12px; letter-spacing: .04em; text-transform: uppercase; color: var(--ink-soft); }
+  .editor-head { display:flex; flex-wrap:wrap; align-items:flex-start; justify-content:space-between; gap:10px 16px; margin-bottom:10px; }
+  .editor-head .sub { display:block; margin-top:3px; color:var(--ink-soft); font-size:11.5px; line-height:1.4; }
+  .editor-tools { display:flex; flex-wrap:wrap; gap:7px 8px; align-items:flex-end; }
+  .editor-tools label { min-width:120px; }
+  .editor-tools .wide { min-width:170px; }
+  .editor-status { min-height:30px; display:flex; align-items:center; font-size:11.5px; color:var(--ink-soft); }
+  .editor-status.ok { color:#027a48; }
+  .editor-status.warn { color:#b54708; }
+  .editor-status.bad { color:#b42318; font-weight:700; }
+  .editor [data-editor-hidden="1"] { display:none !important; }
+  .editor .counter { font-size:10.5px; color:#98a2b8; align-self:flex-end; margin-top:-2px; }
+  .editor .counter.warn { color:#b54708; font-weight:700; }
+  .editor .counter.bad { color:#b42318; font-weight:800; }
+  .editor .row[data-editor-section] { transition:opacity .12s ease; }
   .editor .row { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: flex-start; margin-bottom: 10px; }
   .editor .row:last-child { margin-bottom: 0; }
   .editor label { font-size: 11.5px; color: var(--ink-soft); display: flex; flex-direction: column; gap: 4px; }
@@ -191,56 +205,88 @@
   </div>
 
   <div class="editor">
-    <h3>✏️ Тексты флаера</h3>
-    <div class="row">
+    <div class="editor-head">
+      <div>
+        <h3>✏️ Редактор флаера</h3>
+        <span class="sub">Правки применяются сразу и автоматически сохраняются в этом браузере. «Версия» — отдельная контрольная точка макета.</span>
+      </div>
+      <div class="editor-tools">
+        <label>Пресет
+          <select id="editorPreset">
+            <option value="standard">Основной</option>
+            <option value="short">Короткий</option>
+            <option value="custom">Больше про кастом</option>
+          </select>
+        </label>
+        <button class="btn" id="btnPreset" type="button">Применить</button>
+        <label>Редактировать
+          <select id="editorSection">
+            <option value="all">Весь флаер</option>
+            <option value="front">Только лицо</option>
+            <option value="back">Только оборот</option>
+          </select>
+        </label>
+        <label class="wide">Имя версии
+          <input id="draftName" maxlength="48" placeholder="Например: кофейни центр">
+        </label>
+        <button class="btn" id="btnDraftSave" type="button">Сохранить версию</button>
+        <label class="wide">Сохранённые версии
+          <select id="draftSelect"><option value="">— нет сохранённых —</option></select>
+        </label>
+        <button class="btn" id="btnDraftLoad" type="button">Загрузить</button>
+        <button class="btn danger" id="btnDraftDelete" type="button">Удалить</button>
+        <span class="editor-status" id="editorStatus">Макет проверяется…</span>
+      </div>
+    </div>
+    <div class="row" data-editor-section="front">
       <div class="blk">
         <b>Лицо</b>
         <div class="row" style="margin-bottom:8px">
-          <label>Заголовок <input class="w1" id="f_h1" data-page="f_h1" value="3D-ПЕЧАТЬ"></label>
-          <label>Вторая строка <input class="w2" id="f_h2" data-page="f_h2" value="ДЛЯ ВАШЕГО БИЗНЕСА"></label>
-          <label>Плашка <input class="w2" id="f_chip" data-page="f_chip" value="Образцы в коробке — вам в подарок"></label>
+          <label>Заголовок <input class="w1" id="f_h1" data-page="f_h1" data-editor-limit="28" value="3D-ПЕЧАТЬ"></label>
+          <label>Вторая строка <input class="w2" id="f_h2" data-page="f_h2" data-editor-limit="42" value="ДЛЯ ВАШЕГО БИЗНЕСА"></label>
+          <label>Плашка <input class="w2" id="f_chip" data-page="f_chip" data-editor-limit="58" value="Образцы в коробке — вам в подарок"></label>
         </div>
         <div class="row" style="margin-bottom:0">
-          <label>Подзаголовок <textarea id="f_lead" data-page="f_lead">Игрушки на стакан, таблички с QR и фирменный декор для кофеен. Печатаем сами, на своих принтерах.</textarea></label>
-          <label>Призыв <input class="w1" id="f_cta" data-page="f_cta" value="Давайте обсудим?"></label>
-          <label>Подпись под QR <input class="w1" id="f_qrcap" data-page="f_qrcap" value="наведите камеру — откроется чат"></label>
+          <label>Подзаголовок <textarea id="f_lead" data-page="f_lead" data-editor-limit="180">Игрушки на стакан, таблички с QR и фирменный декор для кофеен. Печатаем сами, на своих принтерах.</textarea></label>
+          <label>Призыв <input class="w1" id="f_cta" data-page="f_cta" data-editor-limit="32" value="Давайте обсудим?"></label>
+          <label>Подпись под QR <input class="w1" id="f_qrcap" data-page="f_qrcap" data-editor-limit="52" value="наведите камеру — откроется чат"></label>
         </div>
       </div>
     </div>
-    <div class="row">
+    <div class="row" data-editor-section="back">
       <div class="blk">
         <b>Оборот · 01</b>
         <div class="row" style="margin-bottom:0">
-          <label>Заголовок <input class="w1" id="s1t" data-page="s1t" value="Привет!"></label>
-          <label>Текст <textarea id="s1d" data-page="s1d">Мы NOZZA — мастерская 3D-печати. Печатаем сами: от одной штуки до партии, без посредников и ожидания доставки.</textarea></label>
+          <label>Заголовок <input class="w1" id="s1t" data-page="s1t" data-editor-limit="42" value="Привет!"></label>
+          <label>Текст <textarea id="s1d" data-page="s1d" data-editor-limit="260">Мы NOZZA — мастерская 3D-печати. Печатаем сами: от одной штуки до партии, без посредников и ожидания доставки.</textarea></label>
         </div>
       </div>
       <div class="blk">
         <b>Оборот · 02</b>
         <div class="row" style="margin-bottom:0">
-          <label>Заголовок <input class="w1" id="s2t" data-page="s2t" value="Это вам, бесплатно"></label>
-          <label>Текст <textarea id="s2d" data-page="s2d">В коробке — тестовые образцы игрушек на стакан. Простая и прикольная фишка: гость надевает фигурку, фотографирует кофе и выкладывает в сторис — с отметкой вашей кофейни.</textarea></label>
+          <label>Заголовок <input class="w1" id="s2t" data-page="s2t" data-editor-limit="42" value="Это вам, бесплатно"></label>
+          <label>Текст <textarea id="s2d" data-page="s2d" data-editor-limit="260">В коробке — тестовые образцы игрушек на стакан. Простая и прикольная фишка: гость надевает фигурку, фотографирует кофе и выкладывает в сторис — с отметкой вашей кофейни.</textarea></label>
         </div>
       </div>
     </div>
-    <div class="row">
+    <div class="row" data-editor-section="back">
       <div class="blk">
         <b>Оборот · 03</b>
         <div class="row" style="margin-bottom:0">
-          <label>Заголовок <input class="w1" id="s3t" data-page="s3t" value="Можем сделать своё"></label>
-          <label>Текст <textarea id="s3d" data-page="s3d">Сейчас печатаем по готовым моделям. Понравится идея — нарисуем оригинальный дизайн под вас: фирменного персонажа, таблички с QR на столы, держатели и декор.</textarea></label>
+          <label>Заголовок <input class="w1" id="s3t" data-page="s3t" data-editor-limit="42" value="Можем сделать своё"></label>
+          <label>Текст <textarea id="s3d" data-page="s3d" data-editor-limit="260">Сейчас печатаем по готовым моделям. Понравится идея — нарисуем оригинальный дизайн под вас: фирменного персонажа, таблички с QR на столы, держатели и декор.</textarea></label>
         </div>
       </div>
       <div class="blk">
         <b>Оборот · 04</b>
         <div class="row" style="margin-bottom:0">
-          <label>Заголовок <input class="w1" id="s4t" data-page="s4t" value="Тестовая партия"></label>
-          <label>Текст <textarea id="s4d" data-page="s4d">Сделаем небольшую партию 10–20 штук, чтобы вы просто посмотрели, как на это реагируют гости. Сроки и условия обсудим в Telegram.</textarea></label>
+          <label>Заголовок <input class="w1" id="s4t" data-page="s4t" data-editor-limit="42" value="Тестовая партия"></label>
+          <label>Текст <textarea id="s4d" data-page="s4d" data-editor-limit="260">Сделаем небольшую партию 10–20 штук, чтобы вы просто посмотрели, как на это реагируют гости. Сроки и условия обсудим в Telegram.</textarea></label>
         </div>
       </div>
     </div>
-    <div class="row">
-      <label style="flex:1">Сноска на обороте <textarea id="fine" data-page="fine" style="min-width:420px;min-height:44px">Фигурка надевается на стакан снаружи и не касается напитка. Пластик PLA, моется тёплой водой. Ставить в микроволновку и посудомойку нельзя.</textarea></label>
+    <div class="row" data-editor-section="back">
+      <label style="flex:1">Сноска на обороте <textarea id="fine" data-page="fine" data-editor-limit="240" style="min-width:420px;min-height:44px">Фигурка надевается на стакан снаружи и не касается напитка. Пластик PLA, моется тёплой водой. Ставить в микроволновку и посудомойку нельзя.</textarea></label>
       <label class="inline"><input type="checkbox" id="fineon" data-page="fineon" checked> печатать сноску</label>
       <button class="btn danger" id="btnReset" type="button">↺ Вернуть исходные тексты</button>
     </div>
@@ -279,6 +325,170 @@ const START = {
   s4d: 'Сделаем небольшую партию 10–20 штук, чтобы вы просто посмотрели, как на это реагируют гости. Сроки и условия обсудим в Telegram.',
   fine: 'Фигурка надевается на стакан снаружи и не касается напитка. Пластик PLA, моется тёплой водой. Ставить в микроволновку и посудомойку нельзя.',
 };
+
+const PRESETS = {
+  standard: START,
+  short: {
+    f_h1: '3D-ПЕЧАТЬ', f_h2: 'ДЛЯ КОФЕЙНИ',
+    f_chip: 'Образцы в коробке — можно забрать себе',
+    f_lead: 'Игрушки на стакан, QR-таблички и небольшой фирменный декор. Печатаем локально и можем начать с теста.',
+    f_cta: 'Попробуем?', f_qrcap: 'сканируйте — откроется Telegram',
+    s1t: 'Что это', s1d: 'NOZZA — локальная мастерская 3D-печати. Делаем небольшие партии для бизнеса и тестируем идеи без больших тиражей.',
+    s2t: 'Образцы ваши', s2d: 'Фигурки из коробки можно сразу попробовать на стаканах и показать команде. Они надеваются снаружи и не касаются напитка.',
+    s3t: 'Сделаем под вас', s3d: 'Можем адаптировать форму, цвет и идею под стиль кофейни: персонаж, QR-табличка, держатель или небольшой декор.',
+    s4t: 'Начнём с теста', s4d: 'Сделаем маленькую партию и посмотрим на реакцию гостей. Если идея работает — повторим нужным тиражом.',
+    fine: START.fine,
+  },
+  custom: {
+    f_h1: 'ВАША ИДЕЯ', f_h2: 'В 3D-ФОРМЕ',
+    f_chip: 'Образцы — старт для своего дизайна',
+    f_lead: 'Персонажи, аксессуары на стакан, QR-таблички и элементы интерьера под визуальный стиль вашей кофейни.',
+    f_cta: 'Обсудим макет?', f_qrcap: 'сканируйте — покажем варианты',
+    s1t: 'Начинаем с задачи', s1d: 'Вы показываете стиль, место использования и примерную идею. Мы подбираем форму, размер и способ печати.',
+    s2t: 'Сначала прототип', s2d: 'Перед партией делаем небольшой тест: можно потрогать деталь, проверить посадку и понять, подходит ли идея гостям.',
+    s3t: 'Дальше — своё', s3d: 'После теста можем подготовить оригинальную модель под бренд: фирменного героя, настольную QR-табличку, держатель или декор.',
+    s4t: 'Тираж по факту', s4d: 'Количество и сроки обсуждаем после макета. Можно начать с небольшой партии и масштабировать только удачный вариант.',
+    fine: START.fine,
+  },
+};
+
+const DRAFT_KEY = 'nozza:cafe-flyer:drafts:v1';
+
+function readDrafts() {
+  try {
+    const value = JSON.parse(localStorage.getItem(DRAFT_KEY) || '{}');
+    return value && typeof value === 'object' ? value : {};
+  } catch (e) { return {}; }
+}
+function writeDrafts(value) {
+  try { localStorage.setItem(DRAFT_KEY, JSON.stringify(value)); } catch (e) { /* private mode */ }
+}
+function pageSnapshot() {
+  const page = {};
+  document.querySelectorAll('[data-page]').forEach((el) => {
+    const key = el.getAttribute('data-page');
+    page[key] = el.type === 'checkbox' ? !!el.checked : el.value;
+  });
+  return page;
+}
+function applySnapshot(page) {
+  Object.keys(page || {}).forEach((key) => {
+    const el = document.querySelector('[data-page="' + CSS.escape(key) + '"]');
+    if (!el) return;
+    if (el.type === 'checkbox') el.checked = !!page[key];
+    else el.value = page[key] == null ? '' : String(page[key]);
+  });
+  NZ.pageStateSave(page || {});
+  updateCounters();
+  draw();
+}
+function refreshDraftSelect(selected) {
+  const select = $('draftSelect');
+  if (!select) return;
+  const drafts = readDrafts();
+  const names = Object.keys(drafts).sort((a, b) => a.localeCompare(b, 'ru'));
+  select.innerHTML = names.length
+    ? '<option value="">— выберите версию —</option>' + names.map((name) =>
+        '<option value="' + NZ.esc(name) + '">' + NZ.esc(name) + '</option>').join('')
+    : '<option value="">— нет сохранённых —</option>';
+  if (selected && names.includes(selected)) select.value = selected;
+}
+function setEditorStatus(text, kind) {
+  const status = $('editorStatus');
+  if (!status) return;
+  status.className = 'editor-status' + (kind ? ' ' + kind : '');
+  status.textContent = text;
+}
+function updateCounters() {
+  let over = 0;
+  document.querySelectorAll('[data-editor-limit]').forEach((el) => {
+    const limit = Number(el.dataset.editorLimit) || 0;
+    const n = String(el.value || '').length;
+    let counter = el.parentElement && el.parentElement.querySelector('[data-counter-for="' + el.id + '"]');
+    if (!counter && el.parentElement) {
+      counter = document.createElement('small');
+      counter.className = 'counter';
+      counter.dataset.counterFor = el.id;
+      el.parentElement.appendChild(counter);
+    }
+    if (!counter) return;
+    counter.textContent = n + ' / ' + limit;
+    counter.className = 'counter' + (n > limit ? ' bad' : n > limit * .88 ? ' warn' : '');
+    if (n > limit) over++;
+  });
+  return over;
+}
+function updateEditorHealth(layoutOverflow) {
+  const textOver = updateCounters();
+  const link = qrTarget();
+  if (!link) {
+    setEditorStatus('⚠ Укажите Telegram или ссылку QR перед печатью', 'bad');
+    return;
+  }
+  if (layoutOverflow) {
+    setEditorStatus('⚠ Текст оборота не помещается: сократите отмеченные блоки', 'bad');
+    return;
+  }
+  if (textOver) {
+    setEditorStatus('⚠ Несколько полей длиннее рекомендуемого лимита', 'warn');
+    return;
+  }
+  setEditorStatus('✓ Макет готов к пробной печати', 'ok');
+}
+function setEditorSection(value) {
+  document.querySelectorAll('[data-editor-section]').forEach((row) => {
+    const section = row.dataset.editorSection;
+    row.dataset.editorHidden = value !== 'all' && section !== value ? '1' : '0';
+  });
+}
+function setupEditor() {
+  document.querySelectorAll('[data-editor-limit]').forEach((el) => {
+    el.addEventListener('input', updateCounters);
+  });
+  updateCounters();
+
+  const section = $('editorSection');
+  section.addEventListener('change', () => setEditorSection(section.value));
+  setEditorSection(section.value);
+
+  $('btnPreset').addEventListener('click', () => {
+    const preset = PRESETS[$('editorPreset').value] || PRESETS.standard;
+    applySnapshot(preset);
+    setEditorStatus('Пресет применён · изменения автосохранены', 'ok');
+  });
+
+  $('btnDraftSave').addEventListener('click', () => {
+    const name = String($('draftName').value || '').trim().slice(0, 48);
+    if (!name) { setEditorStatus('Введите имя версии', 'warn'); $('draftName').focus(); return; }
+    const drafts = readDrafts();
+    drafts[name] = { savedAt: new Date().toISOString(), page: pageSnapshot() };
+    writeDrafts(drafts);
+    refreshDraftSelect(name);
+    setEditorStatus('✓ Версия «' + name + '» сохранена', 'ok');
+  });
+
+  $('btnDraftLoad').addEventListener('click', () => {
+    const name = $('draftSelect').value;
+    const draft = readDrafts()[name];
+    if (!name || !draft || !draft.page) { setEditorStatus('Выберите сохранённую версию', 'warn'); return; }
+    applySnapshot(draft.page);
+    $('draftName').value = name;
+    setEditorStatus('✓ Загружена версия «' + name + '»', 'ok');
+  });
+
+  $('btnDraftDelete').addEventListener('click', () => {
+    const name = $('draftSelect').value;
+    if (!name) { setEditorStatus('Выберите версию для удаления', 'warn'); return; }
+    if (!confirm('Удалить сохранённую версию «' + name + '»?')) return;
+    const drafts = readDrafts();
+    delete drafts[name];
+    writeDrafts(drafts);
+    refreshDraftSelect();
+    setEditorStatus('Версия удалена. Текущий макет не изменён.', '');
+  });
+
+  refreshDraftSelect();
+}
 
 /* Ссылка QR: по умолчанию — Telegram владельца (домен не куплен, зашивать
    его в макет нельзя: тираж уйдёт в никуда). */
@@ -447,6 +657,7 @@ function fitBacks() {
   const warn = $('overWarn');
   warn.hidden = !over;
   warn.textContent = over ? `⚠ текст не помещается на ${over} ${plural(over, 'флаере', 'флаерах', 'флаерах')} — сократите блоки 01–04` : '';
+  return over;
 }
 
 /* «1 лист», «2 листа», «5 листов» — иначе счётчик тиража читается как ошибка. */
@@ -532,7 +743,8 @@ function draw() {
   }
 
   $('sheets').innerHTML = out.join('');
-  fitBacks();
+  const overflow = fitBacks();
+  updateEditorHealth(overflow);
 
   const perSheet = fold ? (compact ? 2 : 1) : (compact ? 4 : 2);
   const paper = fold ? Math.ceil(count / perSheet) : Math.ceil(count / perSheet) * 2;
@@ -554,6 +766,7 @@ document.querySelectorAll('[data-nz="tg"]').forEach((el) => {
 });
 
 NZ.mount(draw);
+setupEditor();
 $('qrlink').placeholder = tgLink(NZ.contact().tg) || 'по умолчанию — ваш Telegram';
 </script>
 </body></html>
