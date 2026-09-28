@@ -232,7 +232,7 @@ class ControlCenter(QMainWindow):
         sl.addWidget(self.settings_status)
         self.settings_hotkey = QLabel("Быстрая команда: Ctrl + Shift + Space")
         sl.addWidget(self.settings_hotkey)
-        self.mic_button = QPushButton("🎤 Включить микрофон")
+        self.mic_button = QPushButton("🎤 Включить wake word")
         self.mic_button.clicked.connect(self.mic_toggle)
         sl.addWidget(self.mic_button)
         note = QLabel(
@@ -283,13 +283,13 @@ class ControlCenter(QMainWindow):
         if connected:
             bits = ["агент ✓", "модель ✓" if model_ok else "модель –",
                     "PrintFlow ✓" if panel_ok else "PrintFlow –",
-                    "микрофон ✓" if armed else "микрофон –"]
+                    "wake ✓" if armed else "wake –"]
             self.footer.setText("   ".join(bits))
             self.settings_status.setText("Backend: подключён · 127.0.0.1:8799")
         else:
             self.footer.setText("Агент недоступен" + (f": {error}" if error else ""))
             self.settings_status.setText("Backend: недоступен" + (f" · {error}" if error else ""))
-        self.mic_button.setText("🎤 Выключить микрофон" if armed else "🎤 Включить микрофон")
+        self.mic_button.setText("🎤 Выключить wake word" if armed else "🎤 Включить wake word")
 
     def set_page_payload(self, key: str, payload: Any) -> None:
         page = self.pages.get(key)

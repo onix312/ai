@@ -53,6 +53,26 @@ class BackendClientTests(unittest.TestCase):
             client.arm_mic(25)
         self.assertEqual(urls, ["http://127.0.0.1:8791/mic/arm"])
 
+    def test_persistent_voice_controls_use_speech_port(self):
+        client = BackendClient()
+        calls = []
+
+        def fake(req, timeout=0):
+            calls.append((req.get_method(), req.full_url))
+            return _Response({"ok": True, "enabled": True, "state": "idle"})
+
+        with mock.patch("urllib.request.urlopen", fake):
+            client.voice_status()
+            client.enable_voice()
+            client.stop_voice()
+            client.disable_voice()
+        self.assertEqual([
+            ("GET", "http://127.0.0.1:8791/voice/status"),
+            ("POST", "http://127.0.0.1:8791/voice/enable"),
+            ("POST", "http://127.0.0.1:8791/voice/stop"),
+            ("POST", "http://127.0.0.1:8791/voice/disable"),
+        ], calls)
+
     def test_network_failure_is_friendly(self):
         client = BackendClient()
         with mock.patch("urllib.request.urlopen", side_effect=OSError("down")):
@@ -72,6 +92,22 @@ class UiStateTests(unittest.TestCase):
         self.assertTrue(state.armed)
         self.assertEqual(state.pending[0]["id"], "1")
         self.assertEqual(state.last_error, "")
+
+    def test_voice_runtime_state_is_authoritative(self):
+        state = UiState()
+        state.apply_status({
+            "ok": True,
+            "armed": False,
+            "voice": {
+                "enabled": True,
+                "armed": True,
+                "state": "speaking",
+                "last_error": "",
+            },
+        })
+        self.assertTrue(state.voice_enabled)
+        self.assertTrue(state.armed)
+        self.assertEqual("speaking", state.assistant_state)
 
 
 if __name__ == "__main__":

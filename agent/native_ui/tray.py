@@ -74,7 +74,7 @@ class NozzaTray(QSystemTrayIcon):
             lambda reason: open_quick() if reason == QSystemTrayIcon.Trigger else None
         )
 
-    def apply_status(self, connected: bool, armed: bool, model_ok: bool,
+    def apply_status(self, connected: bool, mic_enabled: bool, model_ok: bool,
                      assistant_state: str = "idle", error: str = "") -> None:
         state = assistant_state if connected else "offline"
         if error:
@@ -84,7 +84,7 @@ class NozzaTray(QSystemTrayIcon):
             "● NOZZA работает" if connected else "● NOZZA недоступна"
         )
         self.model_action.setText("Модель: готова" if model_ok else "Модель: недоступна")
-        self.mic_action.setText("🎤 Выключить микрофон" if armed else "🎤 Включить микрофон")
+        self.mic_action.setText("🎤 Выключить wake word" if mic_enabled else "🎤 Включить wake word")
         tooltip = "NOZZA Assistant"
         if error:
             tooltip += f" · {error}"

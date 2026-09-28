@@ -280,6 +280,23 @@ class SpeechRuntimeTests(ServerTestCase):
         self.assertTrue(payload["wake_word"])
         self.assertIn("печатается", payload["phrase"])
 
+    def test_voice_status_route_is_available(self):
+        payload = self.get(self.speech_port, "/voice/status")
+        self.assertTrue(payload["ok"])
+        self.assertIn("enabled", payload)
+        self.assertIn("state", payload)
+        self.assertIn("conversation_active", payload)
+
+    def test_voice_disable_route_is_idempotent(self):
+        payload = self.post(self.speech_port, "/voice/disable")
+        self.assertTrue(payload["ok"])
+        self.assertFalse(payload["enabled"])
+
+    def test_voice_stop_route_is_safe_without_active_tts(self):
+        payload = self.post(self.speech_port, "/voice/stop")
+        self.assertTrue(payload["ok"])
+        self.assertIn("stopped", payload)
+
 
 class WakeWordTests(unittest.TestCase):
     def test_exact_word_is_heard(self):

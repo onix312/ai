@@ -12,7 +12,7 @@
 
 | Порт | Роль | Маршруты |
 | --- | --- | --- |
-| 8791 | Речь | `GET /health`, `POST /transcribe`, `POST /mic/arm`, `POST /mic/disarm`, `GET /capabilities` |
+| 8791 | Речь | `GET /health`, `GET /voice/status`, `POST /voice/enable`, `POST /voice/disable`, `POST /voice/stop`, `POST /transcribe`, `POST /mic/arm`, `POST /mic/disarm`, `GET /capabilities` |
 | 8799 | Личный ассистент + компьютер | `GET /health`, `GET /status`, `GET /windows`, `GET /screen`, `GET /pending`, `POST /click`, `POST /type`, `POST /key`, `POST /activate`, `POST /action/confirm`, `GET /skills`, `POST /skill`, `GET /journal`, `GET /ui`, `POST /chat`, `GET|POST /memory`, `GET|POST /personal`, `GET|POST /learning`, `POST /feedback`, `GET /notifications` |
 
 Портов два, потому что панель настраивает их раздельно: `assistant_speech_url`
@@ -21,9 +21,12 @@
 
 - **Речь** считает на процессоре: видеопамять уже делят текстовая модель и
   WebGPU-нарезка сечений.
-- **Стоп-слово** (по умолчанию «ноза») включает микрофон на короткое окно
-  времени — постоянно открытого микрофона нет. Услышанная фраза уходит в панель
-  (`POST /api/assistant/phrase`) как запись журнала, а не как выполнение.
+- **Voice Engine 2.0** по умолчанию локально слушает wake word «ноза». Аудио
+  не сохраняется: в Brain передаётся только команда после wake word и короткие
+  продолжения активного разговора. После ответа несколько секунд можно говорить
+  без повторного «ноза». «Стоп / хватит» во время озвучки обрывает TTS.
+- Старый ручной `POST /mic/arm` сохранён для совместимости и открывает
+  ограниченное окно ожидания wake word.
 - **Действия в чужих окнах** (клик, ввод текста, клавиша, активация окна)
   сначала становятся «ожидающими» и выполняются только после окна подтверждения
   на этом же компьютере. Неподтверждённое действие умирает через 60 секунд.
@@ -178,7 +181,13 @@ python -m agent
 | `PRINTFLOW_URL` | `http://127.0.0.1:8765` | адрес панели PrintFlow |
 | `PRINTFLOW_WAKE_WORD` | `ноза` | стоп-слово |
 | `PRINTFLOW_SPEECH_LANG` | `ru` | язык расшифровки |
-| `PRINTFLOW_MIC_ARM_SECONDS` | `25` | сколько секунд микрофон открыт после включения |
+| `PRINTFLOW_MIC_ARM_SECONDS` | `25` | окно ручного режима `/mic/arm` |
+| `PRINTFLOW_SPEECH_MODEL_PATH` | `` | явный путь к локальной Vosk-модели; иначе ищется автоматически |
+| `PRINTFLOW_VOICE_ALWAYS_ON` | `1` | постоянный локальный wake-word режим |
+| `PRINTFLOW_VOICE_FOLLOWUP_SECONDS` | `8` | сколько секунд после ответа можно продолжать без wake word |
+| `PRINTFLOW_VOICE_VAD_THRESHOLD` | `320` | порог локального VAD |
+| `PRINTFLOW_VOICE_SILENCE_SECONDS` | `0.8` | пауза, завершающая голосовую фразу |
+| `PRINTFLOW_VOICE_MAX_PHRASE_SECONDS` | `15` | максимальная длина одной фразы |
 | `PRINTFLOW_MODEL_URL` | `http://127.0.0.1:11434` | адрес рантайма текстовой модели (loopback) |
 | `PRINTFLOW_MODEL_NAME` | `` | имя модели: без него навыки чтения работают, а ответы по текстам — нет |
 | `PRINTFLOW_MODEL_TIMEOUT_SEC` | `90` | таймаут модели |
