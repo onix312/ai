@@ -311,23 +311,25 @@ class VoiceRuntime:
             except Exception:
                 speaking_now = False
             threshold = int(config.VOICE_VAD_THRESHOLD)
-            if speaking_now and not started:
-                alpha = float(config.VOICE_ECHO_FLOOR_ALPHA)
-                if self.echo_floor <= 0:
-                    self.echo_floor = float(level)
-                else:
-                    self.echo_floor = (1.0 - alpha) * self.echo_floor + alpha * float(level)
+            if speaking_now and not started and self.echo_floor > 0:
                 threshold = max(
                     threshold,
                     int(self.echo_floor * float(config.VOICE_ECHO_GATE_MULTIPLIER)),
                     int(self.echo_floor + int(config.VOICE_ECHO_GATE_MARGIN)),
                 )
-            elif not speaking_now and not started:
-                self.echo_floor *= 0.92
             self.echo_threshold = threshold
             loud = level >= threshold
-            if speaking_now and not started and not loud and level >= config.VOICE_VAD_THRESHOLD:
-                self.echo_suppressed += 1
+            if speaking_now and not started:
+                if not loud:
+                    alpha = float(config.VOICE_ECHO_FLOOR_ALPHA)
+                    if self.echo_floor <= 0:
+                        self.echo_floor = float(level)
+                    else:
+                        self.echo_floor = (1.0 - alpha) * self.echo_floor + alpha * float(level)
+                    if level >= config.VOICE_VAD_THRESHOLD:
+                        self.echo_suppressed += 1
+            elif not started:
+                self.echo_floor *= 0.92
 
             if not started and not loud:
                 pre_roll.append(data)
