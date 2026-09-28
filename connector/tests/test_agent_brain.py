@@ -445,6 +445,35 @@ class BrainChatTests(unittest.TestCase):
         self.assertEqual("", result.get("reply"))
         self.assertEqual([], self.store.dialog("voice"))
 
+    def test_voice_free_answer_marks_streamed_chars(self):
+        spoken = []
+
+        class FakeSpeechQueue:
+            def write(self, text):
+                spoken.append(text)
+                return True
+            def close(self):
+                pass
+            def stop(self):
+                pass
+
+        raw = '{"skill":"","params":{},"reply":"Первая фраза. Вторая фраза.","ask":""}'
+
+        def fake_chat(*_args, on_stream=None, **_kwargs):
+            self.assertIsNotNone(on_stream)
+            on_stream('{"skill":"","params":{},"reply":"Первая фраза.')
+            on_stream(raw)
+            return {"ok": True, "text": raw, "reason": "", "model": "qwen"}
+
+        with patch.object(model, "status", return_value={"ok": True, "model": "qwen", "reason": "", "url": "http://127.0.0.1:11434"}), \
+             patch.object(model, "chat", side_effect=fake_chat), \
+             patch.object(pc, "SpeechQueue", return_value=FakeSpeechQueue()):
+            answer = self.brain.chat("расскажи что-нибудь", session="voice")
+
+        self.assertEqual("answer", answer["kind"])
+        self.assertGreater(answer.get("voice_streamed_chars", 0), 0)
+        self.assertEqual(["Первая фраза.", "Вторая фраза."], spoken)
+
     def test_model_plan_is_checked_by_registry(self):
         with patch.object(model, "status", return_value={"ok": True, "model": "qwen2.5:3b", "reason": ""}), \
                 patch.object(model, "chat", return_value={"ok": True, "text": json.dumps(
