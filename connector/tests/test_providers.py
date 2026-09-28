@@ -4,7 +4,7 @@ from __future__ import annotations
 import pathlib
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from agent import browser, executor, skills
 from agent.panel_client import Client
@@ -83,7 +83,7 @@ class ProviderImplementationTests(unittest.TestCase):
     def test_personal_provider_delegates_only_to_personal_handlers(self):
         provider = registry.for_skill("reminder.list")
         runner = object()
-        handler = __import__('unittest.mock').mock.Mock(return_value={
+        handler = Mock(return_value={
             "ok": True, "reminders": [], "say": "Напоминаний нет.",
         })
         with patch("agent.providers.personal.personal_skills.handlers",
