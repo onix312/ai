@@ -151,6 +151,35 @@ class FlyerContentTests(unittest.TestCase):
         self.assertIn("NZ.mount(draw)", self.text)
 
 
+    def test_editor_has_presets_named_versions_and_soft_limits(self):
+        """Редактор — не просто набор полей: есть пресеты, версии и подсказки длины."""
+        for marker in (
+            'id="editorPreset"', 'id="editorSection"', 'id="draftName"',
+            'id="draftSelect"', 'id="btnDraftSave"', 'id="btnDraftLoad"',
+            'id="btnDraftDelete"', 'id="editorStatus"',
+            "const PRESETS = {", "const DRAFT_KEY = 'nozza:cafe-flyer:drafts:v1'",
+            "function pageSnapshot()", "function applySnapshot(page)",
+            "function updateCounters()", "function updateEditorHealth(",
+        ):
+            with self.subTest(marker=marker):
+                self.assertIn(marker, self.text)
+        self.assertGreaterEqual(self.text.count('data-editor-limit='), 15)
+
+    def test_editor_can_focus_front_or_back_without_changing_print_layout(self):
+        """Фильтр редактора скрывает только поля управления, а не печатные карточки."""
+        self.assertIn('data-editor-section="front"', self.text)
+        self.assertGreaterEqual(self.text.count('data-editor-section="back"'), 3)
+        self.assertIn("function setEditorSection(value)", self.text)
+        self.assertIn('[data-editor-hidden="1"]', self.text)
+
+    def test_editor_health_runs_after_real_layout_fit(self):
+        """Статус готовности учитывает фактическое переполнение оборота."""
+        self.assertIn("return over;", self.text)
+        self.assertIn("const overflow = fitBacks();", self.text)
+        self.assertIn("updateEditorHealth(overflow);", self.text)
+        self.assertIn("Макет готов к пробной печати", self.text)
+
+
 class FlyerWiringTests(unittest.TestCase):
     """Макет, которого нет в витрине, владелец не найдёт."""
 
@@ -161,6 +190,15 @@ class FlyerWiringTests(unittest.TestCase):
     def test_listed_in_panel_library(self):
         text = PANEL.read_text(encoding="utf-8")
         self.assertIn('href="materials/флаер-кофейням.html"', text)
+
+
+    def test_editor_is_inside_print_workspace_not_only_library(self):
+        text = PANEL.read_text(encoding="utf-8")
+        print_view = text.split('id="view-print"', 1)[1].split('id="view-conveyor"', 1)[0]
+        self.assertIn('id="pr_cafe_flyer_editor_card"', print_view)
+        self.assertIn('id="pr_cafe_flyer_editor"', print_view)
+        self.assertIn('href="materials/флаер-кофейням.html"', print_view)
+        self.assertIn("Редактор флаера для кофеен", print_view)
 
 
 if __name__ == "__main__":
