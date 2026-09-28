@@ -1218,6 +1218,7 @@ class SpeechQueue:
     def __init__(self, rate: int = 0, volume: int = 100) -> None:
         self.rate = rate
         self.volume = volume
+        self.available = bool(speech_engine())
         self._queue: "queue.Queue[str | None]" = queue.Queue()
         self._stop = threading.Event()
         self._closed = threading.Event()
@@ -1226,7 +1227,7 @@ class SpeechQueue:
 
     def write(self, text: str) -> bool:
         clean = " ".join(str(text or "").split())
-        if not clean or self._stop.is_set() or self._closed.is_set():
+        if not clean or not self.available or self._stop.is_set() or self._closed.is_set():
             return False
         self._queue.put(clean[:600])
         return True
