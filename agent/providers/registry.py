@@ -48,7 +48,8 @@ def catalog(capabilities: dict[str, Any]) -> list[dict[str, Any]]:
                 "name": owned.name,
                 "risk": skills.risk_of(skill) if skill else "read",
                 "confirm": skills.confirm_required(skill) if skill else False,
-                "reversible": bool(owned.reversible),
+                "reversible": skills.reversible_of(skill) if skill else bool(owned.reversible),
+                "danger": skills.danger_of(skill) if skill else False,
             })
         rows.append({
             "name": provider.spec.name,
