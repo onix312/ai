@@ -103,6 +103,8 @@ class TasksPage(QWidget):
     replan_command = Signal(str, str)
     persona_save = Signal(object)
     persona_reset = Signal()
+    autonomy_save = Signal(str, object)
+    autonomy_reset = Signal()
     refresh_requested = Signal()
 
     def __init__(self) -> None:
@@ -458,6 +460,53 @@ class ControlCenter(QMainWindow):
         self.persona_status = QLabel("Загрузка профиля…")
         self.persona_status.setObjectName("muted")
         sl.addWidget(self.persona_status)
+        autonomy_title = QLabel("Autonomy")
+        autonomy_title.setStyleSheet("font-size:16px; font-weight:700; margin-top:12px;")
+        sl.addWidget(autonomy_title)
+
+        level_row = QHBoxLayout()
+        level_label = QLabel("Глобальный уровень")
+        level_label.setMinimumWidth(130)
+        self.autonomy_level = QComboBox()
+        self.autonomy_level.setObjectName("autonomy_level")
+        level_row.addWidget(level_label)
+        level_row.addWidget(self.autonomy_level, 1)
+        sl.addLayout(level_row)
+
+        self.autonomy_provider_boxes: dict[str, QComboBox] = {}
+        for provider_name, title_text in (
+            ("browser", "Browser"),
+            ("desktop", "Desktop"),
+            ("printflow", "PrintFlow"),
+            ("personal", "Personal"),
+            ("core", "Core"),
+        ):
+            row = QHBoxLayout()
+            label = QLabel(title_text)
+            label.setMinimumWidth(130)
+            combo = QComboBox()
+            combo.setObjectName("autonomy_provider_" + provider_name)
+            row.addWidget(label)
+            row.addWidget(combo, 1)
+            sl.addLayout(row)
+            self.autonomy_provider_boxes[provider_name] = combo
+
+        autonomy_buttons = QHBoxLayout()
+        save_autonomy = QPushButton("Сохранить автономность")
+        save_autonomy.setObjectName("autonomy_save")
+        save_autonomy.clicked.connect(self._emit_autonomy_save)
+        reset_autonomy = QPushButton("По умолчанию")
+        reset_autonomy.setObjectName("autonomy_reset")
+        reset_autonomy.clicked.connect(lambda: self.autonomy_reset.emit())
+        autonomy_buttons.addWidget(save_autonomy)
+        autonomy_buttons.addWidget(reset_autonomy)
+        autonomy_buttons.addStretch(1)
+        sl.addLayout(autonomy_buttons)
+
+        self.autonomy_status = QLabel("Загрузка policy…")
+        self.autonomy_status.setObjectName("muted")
+        self.autonomy_status.setWordWrap(True)
+        sl.addWidget(self.autonomy_status)
         providers_title = QLabel("Providers")
         providers_title.setStyleSheet("font-size:16px; font-weight:700; margin-top:12px;")
         sl.addWidget(providers_title)
@@ -527,6 +576,44 @@ class ControlCenter(QMainWindow):
             for key, combo in self.persona_boxes.items()
         }
         self.persona_save.emit(profile)
+
+    def _emit_autonomy_save(self) -> None:
+        level = str(self.autonomy_level.currentData() or self.autonomy_level.currentText())
+        providers = {
+            key: str(combo.currentData() or combo.currentText())
+            for key, combo in self.autonomy_provider_boxes.items()
+        }
+        self.autonomy_save.emit(level, providers)
+
+    def set_autonomy_payload(self, payload: dict[str, Any]) -> None:
+        levels = [str(value) for value in (payload.get("levels") or [])]
+        labels = dict(payload.get("labels") or {})
+        current = str(payload.get("level") or "agent")
+        self.autonomy_level.blockSignals(True)
+        self.autonomy_level.clear()
+        for value in levels:
+            self.autonomy_level.addItem(str(labels.get(value) or value), value)
+        index = self.autonomy_level.findData(current)
+        if index >= 0:
+            self.autonomy_level.setCurrentIndex(index)
+        self.autonomy_level.blockSignals(False)
+
+        provider_rows = dict(payload.get("providers") or {})
+        for name, combo in self.autonomy_provider_boxes.items():
+            row = dict(provider_rows.get(name) or {})
+            hard = str(row.get("hard_max") or "agent")
+            selected = str(row.get("level") or hard)
+            combo.clear()
+            hard_index = levels.index(hard) if hard in levels else len(levels) - 1
+            for value in levels[:hard_index + 1]:
+                combo.addItem(str(labels.get(value) or value), value)
+            idx = combo.findData(selected)
+            if idx >= 0:
+                combo.setCurrentIndex(idx)
+        self.autonomy_status.setText(str(payload.get("invariant") or ""))
+
+    def set_autonomy_message(self, text: str) -> None:
+        self.autonomy_status.setText(str(text or ""))
 
     def set_persona_payload(self, payload: dict[str, Any]) -> None:
         profile = dict(payload.get("profile") or {})
