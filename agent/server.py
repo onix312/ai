@@ -340,7 +340,9 @@ class Agent:
             # и её потом покажет навык `agent.why`.
             return runner.run(key, params)
         if skills.confirm_required(skill):
-            return self.queue_action("skill", {"name": key, "params": clean}, ask=ask)
+            return self.queue_action(
+                "skill", {"name": key, "params": clean}, ask=ask,
+                autonomy_mode=autonomy_mode)
         return runner.run(key, clean)
 
     def discard_action(self, action_id: str) -> bool:
@@ -431,7 +433,8 @@ class Agent:
                 "stats": self.runner.store.stats()}
 
     # --- действия в чужих окнах -------------------------------------------
-    def queue_action(self, kind: str, params: dict[str, Any], ask: bool = True) -> dict[str, Any]:
+    def queue_action(self, kind: str, params: dict[str, Any], ask: bool = True,
+                     autonomy_mode: str = "direct") -> dict[str, Any]:
         """Действие становится ожидающим: без человека оно не выполняется.
 
         `ask=False` — просьба пришла из окна агента: там же карточка
@@ -452,7 +455,7 @@ class Agent:
             self._purge()
             self._pending[action_id] = {
                 "id": action_id, "kind": kind, "params": params, "window": window,
-                "created_at": time.time(),
+                "created_at": time.time(), "autonomy_mode": str(autonomy_mode or "direct"),
                 "text": _describe(kind, params, window),
             }
         self.state.last_action = f"ждёт подтверждения: {kind}"
@@ -479,8 +482,19 @@ class Agent:
             return result
         if action["kind"] == "skill":
             params = action["params"] if isinstance(action["params"], dict) else {}
-            result = self.runner.run(str(params.get("name") or ""),
-                                     params.get("params") or {}, confirmed=True)
+            key = str(params.get("name") or "").strip().casefold()
+            skill = skills.get(key, self.runner.learned())
+            if skill is not None:
+                allowed, why = self.autonomy.check_skill(
+                    skill, str(action.get("autonomy_mode") or "direct"))
+                if not allowed:
+                    result = {"ok": False, "skill": key, "reason": why,
+                              "autonomy_blocked": True, "autonomy": self.autonomy.payload()}
+                    if self._tasks is not None:
+                        self.tasks.on_action_result(str(action_id), result, True)
+                    return {"ok": False, "done": False, "reason": why, "result": result,
+                            "autonomy_blocked": True}
+            result = self.runner.run(key, params.get("params") or {}, confirmed=True)
             ok = bool(result.get("ok"))
             reason = str(result.get("reason") or "")
             self.state.last_action = (f"навык {params.get('name')}: "
