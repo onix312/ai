@@ -286,6 +286,8 @@ class VoiceRuntime:
         receives exactly one finalized phrase, so streaming cannot execute a
         half-heard command.
         """
+        from . import pc
+
         chunks: list[bytes] = []
         pre_roll: deque[bytes] = deque(maxlen=max(0, int(config.VOICE_PREROLL_CHUNKS)))
         started = False
@@ -344,7 +346,6 @@ class VoiceRuntime:
                 started = True
                 started_at = time.time()
                 try:
-                    from . import pc
                     during_output = pc.is_speaking()
                 except Exception:
                     during_output = False
