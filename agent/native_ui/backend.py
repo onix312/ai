@@ -111,7 +111,7 @@ class BackendClient:
         return self.get("/learning")
 
     def memory(self, query: str = "") -> dict[str, Any]:
-        suffix = "?" + urllib.parse.urlencode({"q": query}) if query else ""
+        suffix = "?" + urllib.parse.urlencode({"q": query, "session": "native"})
         return self.get("/memory" + suffix)
 
     def skills(self) -> dict[str, Any]:
