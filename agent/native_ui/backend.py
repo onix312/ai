@@ -86,6 +86,12 @@ class BackendClient:
     def task_op(self, op: str, task_id: int = 0, **payload: Any) -> dict[str, Any]:
         return self.post("/tasks", {"op": op, "id": int(task_id), **payload})
 
+    def plans(self) -> dict[str, Any]:
+        return self.get("/plans")
+
+    def plan_op(self, op: str, plan_id: str = "", **payload: Any) -> dict[str, Any]:
+        return self.post("/plans", {"op": op, "id": str(plan_id), **payload})
+
     def decide(self, action_id: str, confirmed: bool) -> dict[str, Any]:
         return self.post("/action/confirm", {"id": action_id, "confirmed": bool(confirmed)})
 
