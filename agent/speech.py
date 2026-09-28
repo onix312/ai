@@ -45,33 +45,51 @@ def _levenshtein(left: str, right: str) -> int:
     return previous[-1]
 
 
+def wake_words(wake_word: str = config.WAKE_WORD) -> tuple[str, ...]:
+    primary = str(wake_word or "").strip().lower()
+    words = [primary, *getattr(config, "LEGACY_WAKE_WORDS", ())]
+    out: list[str] = []
+    for word in words:
+        clean = str(word or "").strip().lower()
+        if clean and clean not in out:
+            out.append(clean)
+    return tuple(out)
+
+
+def _matches_wake(word: str, target: str, tolerance: int) -> bool:
+    clean = _clean(word)
+    if not clean:
+        return False
+    return _levenshtein(clean, target) <= tolerance or target in clean
+
+
 def is_wake_phrase(text: str, wake_word: str = config.WAKE_WORD,
                    tolerance: int = WAKE_WORD_TOLERANCE) -> bool:
-    """Стоп-слово в фразе: отдельным словом, с одной ошибкой распознавания."""
-    target = str(wake_word or "").strip().lower()
-    if not target:
-        return False
-    if any(_levenshtein(word, target) <= tolerance for word in _words(text) if word):
-        return True
-    # Воспроизведение вслух двух коротких слов («но за») распознаватель
-    # нередко склеивает в одно — такое совпадение тоже считаем стоп-словом.
-    joined = "".join(_words(text))
-    return bool(target) and target in joined
+    """Wake word or temporary legacy alias in a phrase."""
+    words = _words(text)
+    joined = "".join(words)
+    for target in wake_words(wake_word):
+        if any(_levenshtein(word, target) <= tolerance for word in words if word):
+            return True
+        if target in joined:
+            return True
+    return False
 
 
 def phrase_after_wake_word(text: str, wake_word: str = config.WAKE_WORD,
                            tolerance: int = WAKE_WORD_TOLERANCE) -> str:
-    """Команда без стоп-слова: «ноза, что печатается» → «что печатается»."""
-    target = str(wake_word or "").strip().lower()
+    """Command without the primary or legacy wake word."""
     words = str(text or "").split()
+    targets = wake_words(wake_word)
     for index, word in enumerate(words):
         cleaned = _clean(word)
-        if cleaned and _levenshtein(cleaned, target) <= tolerance:
-            return " ".join(words[index + 1:]).strip()
-        if target and target in cleaned:
-            rest = cleaned.split(target, 1)[1]
-            tail = " ".join(words[index + 1:])
-            return (rest + " " + tail).strip()
+        for target in targets:
+            if cleaned and _levenshtein(cleaned, target) <= tolerance:
+                return " ".join(words[index + 1:]).strip()
+            if target and target in cleaned:
+                rest = cleaned.split(target, 1)[1]
+                tail = " ".join(words[index + 1:])
+                return (rest + " " + tail).strip()
     return str(text or "").strip()
 
 
