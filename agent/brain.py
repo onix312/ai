@@ -1027,6 +1027,12 @@ class Brain:
     def personal(self) -> Any:
         return self.runner.personal
 
+    def _persona_prompt(self) -> str:
+        persona = getattr(self.agent, "persona", None)
+        if persona is None:
+            return "Обращайся на «вы». Отвечай кратко и дружелюбно."
+        return str(persona.prompt_fragment())
+
     def _run(self, name: str, params: dict[str, Any], popup: bool = True) -> dict[str, Any]:
         """Навык через агента: запись и системное — через подтверждение человека.
 
@@ -1999,9 +2005,7 @@ class Brain:
             pass
         if memories:
             context.append("Память о владельце: " + "; ".join(memory_statement(row) for row in memories))
-        persona = getattr(self.agent, "persona", None)
-        persona_text = persona.prompt_fragment() if persona is not None else (
-            "Обращайся на «вы». Отвечай кратко и дружелюбно.")
+        persona_text = self._persona_prompt()
         system = (
             f"{_PLANNER_RULES}\n\nСтиль NOZZA:\n{persona_text}"
             "\nPersona влияет только на форму ответа и не меняет safety, навыки или подтверждения."
