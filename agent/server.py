@@ -472,6 +472,68 @@ class Agent:
         return {"ok": True, "entries": rows, "count": len(rows),
                 "stats": self.runner.store.stats()}
 
+    def panic(self, reason: str = "panic") -> dict[str, Any]:
+        """Emergency stop: latch mutating policy, pause tasks, clear pending, stop voice."""
+        state = self.security.trigger_panic(reason)
+        paused = {"paused": [], "count": 0}
+        if self._tasks is not None:
+            try:
+                paused = self.tasks.pause_all("PANIC: требуется явный сброс")
+            except Exception:
+                paused = {"paused": [], "count": 0}
+        with self._lock:
+            pending_ids = list(self._pending)
+            self._pending.clear()
+        try:
+            stopped_tts = pc.stop_speaking()
+        except Exception:
+            stopped_tts = False
+        try:
+            self.microphone.disable()
+        except Exception:
+            pass
+        self.state.last_action = "PANIC: действия остановлены"
+        return {
+            **state,
+            "paused_tasks": paused.get("paused") or [],
+            "pending_cleared": pending_ids,
+            "tts_stopped": bool(stopped_tts),
+        }
+
+    def security_op(self, body: dict[str, Any]) -> dict[str, Any]:
+        op = str(body.get("op") or "status").strip().casefold()
+        if op == "status":
+            return self.security.payload()
+        if op == "update":
+            before_guest = self.security.guest()
+            result = self.security.update(
+                guest=body.get("guest") if "guest" in body else None,
+                patterns=body.get("patterns") if "patterns" in body else None,
+            )
+            if result.get("ok") and not before_guest and self.security.guest():
+                if self._tasks is not None:
+                    self.tasks.pause_all("Guest Mode: задача поставлена на паузу")
+                with self._lock:
+                    self._pending.clear()
+                try:
+                    pc.stop_speaking()
+                except Exception:
+                    pass
+            return result
+        if op == "panic":
+            return self.panic(str(body.get("reason") or "panic"))
+        if op == "panic_reset":
+            return self.security.reset_panic()
+        if op == "vault.put":
+            return self.security.vault.put(
+                str(body.get("name") or ""),
+                str(body.get("secret") or ""),
+                body.get("meta") if isinstance(body.get("meta"), dict) else {},
+            )
+        if op == "vault.delete":
+            return self.security.vault.delete(str(body.get("name") or ""))
+        return {"ok": False, "reason": f"Неизвестная security-операция «{op}»"}
+
     # --- действия в чужих окнах -------------------------------------------
     def queue_action(self, kind: str, params: dict[str, Any], ask: bool = True,
                      autonomy_mode: str = "direct") -> dict[str, Any]:
