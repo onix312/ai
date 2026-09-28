@@ -328,6 +328,10 @@ class TaskEngine:
             if task["status"] not in STARTABLE:
                 return {"ok": False, "reason": f"Задачу в статусе {task['status']} нельзя запустить",
                         "task": task}
+            allowed_steps, why_steps, policy_steps = self._autonomy_preflight(task, "task")
+            if not allowed_steps:
+                return {"ok": False, "reason": why_steps, "task": task,
+                        "autonomy_blocked": True, "autonomy": policy_steps}
             if int(task_id) in self._running:
                 return {"ok": False, "reason": "Задача уже выполняется"}
             self._running.add(int(task_id))
