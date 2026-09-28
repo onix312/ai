@@ -643,10 +643,12 @@ class AgentHandler(BaseHTTPRequestHandler):
             return self._json(200, {"ok": True, **agent.microphone.status()})
         if path == "/capabilities":
             caps = dict(agent.refresh_capabilities())
-            # Живые связи для шапки окна: панель цеха и модель (короткие пинги).
+            # Живые связи: PrintFlow, модель и локальный Chromium DevTools.
             live = agent.runner.refresh_capabilities()
-            caps.update({key: live.get(key) for key in ("panel", "panel_reason", "model", "model_reason")
-                         if key in live})
+            caps.update({key: live.get(key) for key in (
+                "panel", "panel_reason", "model", "model_reason",
+                "browser", "browser_reason",
+            ) if key in live})
             return self._json(200, {"ok": True, "capabilities": caps, "missing": capabilities.missing(caps),
                                     "panel_url": agent.runner.panel.url})
         if self.role != "agent":
