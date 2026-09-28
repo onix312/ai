@@ -1,0 +1,33 @@
+name: native-ui
+
+on:
+  pull_request:
+    paths:
+      - "agent/native_ui/**"
+      - "agent/window.py"
+      - "agent/capabilities.py"
+      - "agent/requirements.txt"
+      - "connector/tests/test_native_ui.py"
+      - ".github/workflows/native-ui.yml"
+  push:
+    branches:
+      - "feature/nozza-pyside6-ui"
+    paths:
+      - "agent/native_ui/**"
+      - "agent/window.py"
+      - "agent/capabilities.py"
+      - "agent/requirements.txt"
+      - "connector/tests/test_native_ui.py"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Compile native UI
+        run: python -m compileall -q agent/native_ui agent/window.py agent/capabilities.py
+      - name: Native UI contract tests
+        run: python -m unittest connector.tests.test_native_ui
