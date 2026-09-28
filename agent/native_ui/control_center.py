@@ -94,12 +94,69 @@ class ChatPage(QWidget):
         self.feed.append(f"<p><b>{who}</b><br>{text}</p>")
 
 
+class TasksPage(QWidget):
+    decision = Signal(str, bool)
+    refresh_requested = Signal()
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.layout = QVBoxLayout(self)
+        head = QHBoxLayout()
+        title = QLabel("Задачи")
+        title.setObjectName("pageTitle")
+        head.addWidget(title)
+        head.addStretch(1)
+        refresh = QPushButton("Обновить")
+        refresh.clicked.connect(self.refresh_requested)
+        head.addWidget(refresh)
+        self.layout.addLayout(head)
+        self.host = QVBoxLayout()
+        self.layout.addLayout(self.host)
+        self.layout.addStretch(1)
+
+    def _clear(self) -> None:
+        while self.host.count():
+            item = self.host.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+
+    def set_payload(self, payload: dict[str, Any]) -> None:
+        self._clear()
+        pending = list(payload.get("pending") or [])
+        notifications = list(payload.get("notifications") or [])
+        if not pending and not notifications:
+            self.host.addWidget(QLabel("Ничего не ждёт."))
+            return
+        for row in pending:
+            card = QFrame()
+            card.setStyleSheet("QFrame { background:#111827; border:1px solid #334155; border-radius:12px; }")
+            box = QVBoxLayout(card)
+            box.addWidget(QLabel(str(row.get("text") or row.get("skill") or "Действие требует решения")))
+            buttons = QHBoxLayout()
+            no = QPushButton("Отмена")
+            yes = QPushButton("Разрешить")
+            yes.setObjectName("primary")
+            action_id = str(row.get("id") or "")
+            no.clicked.connect(lambda _=False, i=action_id: self.decision.emit(i, False))
+            yes.clicked.connect(lambda _=False, i=action_id: self.decision.emit(i, True))
+            buttons.addStretch(1)
+            buttons.addWidget(no)
+            buttons.addWidget(yes)
+            box.addLayout(buttons)
+            self.host.addWidget(card)
+        for row in notifications:
+            text = f"{row.get('title') or 'Уведомление'}: {row.get('text') or ''}"
+            label = QLabel(text)
+            label.setWordWrap(True)
+            self.host.addWidget(label)
+
+
 class ControlCenter(QMainWindow):
     chat_submitted = Signal(str)
     refresh_page = Signal(str)
     clear_chat = Signal()
-    mic_toggle = Signal()
-
+    mic_toggle = Signal()\n    task_decision = Signal(str, bool)\n
     NAV = [
         ("chat", "💬  Разговор"),
         ("today", "☀  Сегодня"),
@@ -140,9 +197,18 @@ class ControlCenter(QMainWindow):
         self.pages["chat"] = self.chat
         self.stack.addWidget(self.chat)
 
+        today = TextPage("Сегодня", "Личные дела и краткий контекст дня.")
+        today.refresh_requested.connect(lambda: self.refresh_page.emit("today"))
+        self.pages["today"] = today
+        self.stack.addWidget(today)
+
+        tasks = TasksPage()
+        tasks.refresh_requested.connect(lambda: self.refresh_page.emit("tasks"))
+        tasks.decision.connect(self.task_decision)
+        self.pages["tasks"] = tasks
+        self.stack.addWidget(tasks)
+
         defs = {
-            "today": ("Сегодня", "Личные дела и краткий контекст дня."),
-            "tasks": ("Задачи", "Ожидающие действия и уведомления."),
             "memory": ("Память", "Факты, предпочтения и то, что вы просили запомнить."),
             "learning": ("Обучение", "Чему NOZZA научилась и что пока не понимает."),
             "skills": ("Навыки", "Доступные способности и их состояние."),
@@ -226,6 +292,8 @@ class ControlCenter(QMainWindow):
     def set_page_payload(self, key: str, payload: Any) -> None:
         page = self.pages.get(key)
         if isinstance(page, TextPage):
+            page.set_payload(payload)
+        elif isinstance(page, TasksPage) and isinstance(payload, dict):
             page.set_payload(payload)
 
     def closeEvent(self, event) -> None:
