@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import queue
 import struct
+from collections import deque
 import threading
 import time
 from typing import Any
@@ -56,6 +57,9 @@ class VoiceRuntime:
         self.conversation_until = 0.0
         self.listening = False
         self.last_phrase = ""
+        self.partial_phrase = ""
+        self.audio_level = 0
+        self.streaming_asr = False
         self.last_error = ""
         self.state = "idle"
         self._thread: threading.Thread | None = None
@@ -90,6 +94,10 @@ class VoiceRuntime:
             "conversation_until": self.conversation_until,
             "wake_word": config.WAKE_WORD,
             "last_phrase": self.last_phrase,
+            "partial_phrase": self.partial_phrase,
+            "audio_level": int(self.audio_level),
+            "streaming_asr": bool(self.streaming_asr),
+            "asr_engine": str(getattr(self.recognizer, "name", "") or ""),
             "last_error": self.last_error,
         }
 
@@ -204,13 +212,17 @@ class VoiceRuntime:
                 if self.state == "error":
                     self.state = "idle"
                 while self._should_run():
-                    audio, during_output = self._next_phrase(frames)
+                    audio, during_output, streamed_text = self._next_phrase(frames)
                     self._expire_conversation()
                     if not audio:
                         continue
-                    text, reason = self.recognizer.transcribe_wav(
-                        speech.pack_wav(audio), config.LANGUAGE
-                    )
+                    if streamed_text:
+                        text, reason = streamed_text, ""
+                    else:
+                        text, reason = self.recognizer.transcribe_wav(
+                            speech.pack_wav(audio), config.LANGUAGE
+                        )
+                    self.partial_phrase = ""
                     if reason:
                         self.last_error = reason
                         continue
@@ -222,6 +234,9 @@ class VoiceRuntime:
             self.state = "error"
         finally:
             self.listening = False
+            self.audio_level = 0
+            self.partial_phrase = ""
+            self.streaming_asr = False
             self._thread = None
             if self.persistent_enabled and self.state == "error":
                 self._schedule_retry()
@@ -241,39 +256,88 @@ class VoiceRuntime:
         timer.daemon = True
         timer.start()
 
-    def _next_phrase(self, frames: "queue.Queue[bytes]") -> tuple[list[bytes], bool]:
-        """Простой VAD; помечает звук, начавшийся во время TTS, против эха."""
+    def _next_phrase(self, frames: "queue.Queue[bytes]") -> tuple[list[bytes], bool, str]:
+        """VAD + RAM pre-roll + incremental Vosk when available.
+
+        Partial hypotheses are exposed through status for UI only. Brain still
+        receives exactly one finalized phrase, so streaming cannot execute a
+        half-heard command.
+        """
         chunks: list[bytes] = []
+        pre_roll: deque[bytes] = deque(maxlen=max(0, int(config.VOICE_PREROLL_CHUNKS)))
         started = False
         silence = 0.0
         started_at = 0.0
         during_output = False
+        stream: Any = None
+        self.partial_phrase = ""
+        self.streaming_asr = False
+
         while self._should_run():
             try:
                 data = frames.get(timeout=0.2)
             except queue.Empty:
+                self.audio_level = 0
                 self._expire_conversation()
                 continue
-            loud = peak_level(data) >= config.VOICE_VAD_THRESHOLD
-            if loud:
-                if not started:
-                    started = True
-                    started_at = time.time()
-                    try:
-                        from . import pc
-                        during_output = pc.is_speaking()
-                    except Exception:
-                        during_output = False
+
+            level = peak_level(data)
+            self.audio_level = level
+            loud = level >= config.VOICE_VAD_THRESHOLD
+
+            if not started and not loud:
+                pre_roll.append(data)
+                continue
+
+            if loud and not started:
+                started = True
+                started_at = time.time()
+                try:
+                    from . import pc
+                    during_output = pc.is_speaking()
+                except Exception:
+                    during_output = False
+
+                if pre_roll:
+                    chunks.extend(pre_roll)
+                chunks.append(data)
+                try:
+                    stream = self.recognizer.start_stream(16000)
+                except (AttributeError, TypeError):
+                    stream = None
+                self.streaming_asr = stream is not None
+                if stream is not None:
+                    for chunk in chunks:
+                        partial = str(stream.feed(chunk) or "").strip()
+                    if not during_output and len(partial) >= config.VOICE_PARTIAL_MIN_CHARS:
+                        self.partial_phrase = partial
                 silence = 0.0
-                chunks.append(data)
-            elif started:
-                chunks.append(data)
+                continue
+
+            chunks.append(data)
+            if stream is not None:
+                partial = str(stream.feed(data) or "").strip()
+                if not during_output and len(partial) >= config.VOICE_PARTIAL_MIN_CHARS:
+                    self.partial_phrase = partial
+
+            if loud:
+                silence = 0.0
+            else:
                 silence += 0.1
                 if silence >= config.VOICE_SILENCE_SECONDS:
                     break
             if started and time.time() - started_at >= config.VOICE_MAX_PHRASE_SECONDS:
                 break
-        return chunks, during_output
+
+        self.audio_level = 0
+        final = ""
+        if stream is not None:
+            try:
+                final = str(stream.finish() or "").strip()
+            except (RuntimeError, ValueError):
+                final = ""
+        self.partial_phrase = final or self.partial_phrase
+        return chunks, during_output, final
 
     def _handle_text(self, text: str, during_output: bool = False) -> None:
         clean = " ".join(str(text or "").split())
