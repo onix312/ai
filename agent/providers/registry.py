@@ -6,8 +6,15 @@ from typing import Any
 from .base import CapabilityProvider
 from .browser import PROVIDER as BROWSER
 from .desktop import PROVIDER as DESKTOP
+from .personal import PROVIDER as PERSONAL
+from .printflow import PROVIDER as PRINTFLOW
 
-_PROVIDERS: tuple[CapabilityProvider, ...] = (BROWSER, DESKTOP)
+_PROVIDERS: tuple[CapabilityProvider, ...] = (
+    BROWSER,
+    DESKTOP,
+    PRINTFLOW,
+    PERSONAL,
+)
 _BY_NAME = {provider.spec.name: provider for provider in _PROVIDERS}
 _BY_SKILL = {
     skill.name: provider
