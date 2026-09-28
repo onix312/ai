@@ -34,7 +34,7 @@ import time
 from typing import Any, Callable
 
 from . import avito as avito_mod
-from . import capabilities, config, documents, fileops, model, pc, personal_skills, skills, tg as tg_mod, when, winapi
+from . import capabilities, config, documents, fileops, model, pc, skills, tg as tg_mod, when, winapi
 from .providers import registry as provider_registry
 from .learning import Learning
 from .panel_client import Client
@@ -314,7 +314,7 @@ class Runner:
         skill_name = str(skill.get("name") or "")
         provider = provider_registry.for_skill(skill_name)
         if provider is not None:
-            return provider.run(skill_name, params)
+            return provider.run(skill_name, params, self)
         handlers: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
             "panel.actions": self._panel_actions,
             "panel.do": self._panel_do,
@@ -425,8 +425,6 @@ class Runner:
             "memory.recall": self._memory_recall,
             "memory.forget": self._memory_forget,
         }
-        # 18.22: личные навыки и обучение живут в своём модуле.
-        handlers.update(personal_skills.handlers(self))
         handler = handlers.get(str(skill.get("name") or ""))
         if handler is None:
             return {"ok": False,
