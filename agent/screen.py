@@ -1,7 +1,4 @@
-"""Экран и поиск по нему (18.17): область, поиск текста, клик по найденному.
-
-Без внешних зависимостей кроме Pillow/mss (опционально). На не-Windows — отказ.
-"""
+"""Screen region capture and compatibility entry point for perception search."""
 from __future__ import annotations
 
 import sys
@@ -35,20 +32,6 @@ def region_shot(left: int, top: int, right: int, bottom: int, max_side: int = 80
 
 
 def find_text_on_screen(text: str) -> tuple[dict, str]:
-    """Заглушка поиска текста: без OCR ищем только в заголовках окон."""
-    if not IS_WINDOWS:
-        return {}, "Поиск по экрану возможен только в Windows"
-    if not text:
-        return {}, "Пустой запрос"
-    try:
-        from .winapi import list_windows
-        titles, reason = list_windows(limit=100)
-        if reason:
-            return {}, reason
-        needle = str(text).casefold()
-        for title in titles:
-            if needle in title.casefold():
-                return {"found": True, "where": "window_title", "title": title, "hint": "Найдено в заголовке окна — клик по окну возможен через window.focus"}, ""
-        return {}, f"Текст «{text}» на экране не найден (OCR отсутствует — ищем только в заголовках окон)"
-    except Exception as exc:
-        return {}, f"Поиск не удался: {exc}"
+    """Compatibility entry point for the desktop perception search."""
+    from .perception import find_text
+    return find_text(text)

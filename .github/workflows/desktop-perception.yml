@@ -1,0 +1,35 @@
+name: Desktop perception
+
+on:
+  push:
+    paths:
+      - "agent/perception.py"
+      - "agent/capabilities.py"
+      - "agent/executor.py"
+      - "agent/brain.py"
+      - "agent/screen.py"
+      - "agent/skills.py"
+      - "connector/tests/test_desktop_perception.py"
+      - ".github/workflows/desktop-perception.yml"
+  pull_request:
+    paths:
+      - "agent/perception.py"
+      - "agent/capabilities.py"
+      - "agent/executor.py"
+      - "agent/brain.py"
+      - "agent/screen.py"
+      - "agent/skills.py"
+      - "connector/tests/test_desktop_perception.py"
+      - ".github/workflows/desktop-perception.yml"
+
+jobs:
+  perception:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install pywinauto==0.6.9 rapidocr-onnxruntime==1.3.24 mss==9.0.1 pillow==10.4.0
+      - run: python -c "import pywinauto, rapidocr_onnxruntime, mss, PIL"
+      - run: python -m unittest connector.tests.test_desktop_perception
