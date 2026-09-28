@@ -127,8 +127,17 @@ def _detect_now() -> dict:
 
 
 def _speech_model() -> str:
-    """Какая модель речи найдена на диске. Ищем по обычным местам."""
+    """Какая модель речи найдена на диске. Ищем явный путь и обычные места."""
     import pathlib
+    from . import config
+
+    explicit = str(getattr(config, "SPEECH_MODEL_PATH", "") or "").strip()
+    if explicit:
+        path = pathlib.Path(explicit).expanduser()
+        if path.is_dir():
+            return f"vosk:{path.name}"
+        if path.is_file():
+            return f"whisper:{path.name}"
 
     candidates = [pathlib.Path("models"), pathlib.Path.home() / ".printflow" / "models",
                   pathlib.Path(__file__).resolve().parent / "models"]
