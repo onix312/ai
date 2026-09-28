@@ -367,6 +367,12 @@ class TaskEngine:
                     return
                 if not result.get("ok"):
                     reason = str(result.get("reason") or "Шаг не выполнен")
+                    if result.get("autonomy_blocked"):
+                        self._set_step(task_id, seq, status="pending",
+                                       pending_action="", result=result)
+                        self._set_task(task_id, status="paused", current_step=seq,
+                                       error=reason)
+                        return
                     self._set_step(task_id, seq, status="failed", finished_at=now_iso(),
                                    result=result)
                     self._set_task(task_id, status="failed", current_step=seq, error=reason)
@@ -406,6 +412,11 @@ class TaskEngine:
             self._set_step(task_id, seq, status="pending", pending_action="", result={})
             self._set_task(task_id, status="paused", current_step=seq,
                            error="Шаг отменён человеком")
+            return self.get(task_id)
+        if result.get("autonomy_blocked"):
+            reason = str(result.get("reason") or "Уровень автономности изменён")
+            self._set_step(task_id, seq, status="pending", pending_action="", result=result)
+            self._set_task(task_id, status="paused", current_step=seq, error=reason)
             return self.get(task_id)
         if result.get("ok"):
             task = self.get(task_id)
