@@ -160,6 +160,17 @@ class Replanner:
             checked, reason = self._validate(draft["steps"], int(draft["replace_from"]))
             if reason:
                 return {"ok": False, "reason": reason}
+            policy = getattr(self.agent, "autonomy", None)
+            if policy is not None:
+                learned = self.agent.runner.learned()
+                for row in checked:
+                    skill = skills.get(str(row.get("skill") or ""), learned)
+                    if skill is None:
+                        continue
+                    allowed_step, why_step = policy.check_skill(skill, "plan")
+                    if not allowed_step:
+                        return {"ok": False, "reason": why_step, "autonomy_blocked": True,
+                                "autonomy": policy.payload()}
             result = self.agent.tasks.replace_remaining(
                 int(draft["task_id"]), int(draft["replace_from"]), checked,
                 str(draft["reason"]), expected_tail=str(draft["_tail"]))
