@@ -78,6 +78,62 @@ class Agent:
         # Голос: фраза после стоп-слова идёт мозгу, ответ звучит вслух.
         self.microphone.handler = self.voice_phrase
         self.microphone.cancel_handler = lambda: self.brain.cancel_session("voice")
+        self.microphone.vocabulary_provider = self.voice_vocabulary
+
+    def voice_vocabulary(self) -> list[str]:
+        """Dynamic local terms that ASR should prefer without hard grammar."""
+        now = time.time()
+        cache = getattr(self, "_voice_vocab_cache", None)
+        if isinstance(cache, tuple) and now - cache[0] < 30:
+            return list(cache[1])
+
+        terms: list[str] = [config.WAKE_WORD, "NOZZA", "Ноза", "Нозза"]
+        for spec in pc.APPS.values():
+            terms.append(str(spec.get("title") or ""))
+            terms.extend(str(word) for word in (spec.get("words") or ()))
+
+        try:
+            terms.extend(str(row.get("app_name") or "") for row in self.runner.store.list_whitelist(100))
+            terms.extend(str(row.get("name") or "") for row in self.runner.store.list_macros(50))
+            terms.extend(str(name) for name in self.runner.store.learned_skills().keys())
+            terms.extend(str(row.get("subject") or "") for row in self.runner.store.memories(80))
+        except Exception:
+            pass
+
+        try:
+            personal = self.runner.personal
+            terms.extend(str(row.get("name") or "") for row in personal.lists())
+            terms.extend(str(row.get("title") or "") for row in personal.goals())
+            terms.extend(str(row.get("title") or "") for row in personal.habits_raw())
+        except Exception:
+            pass
+
+        # PrintFlow context is loopback-only and cached here for 30 s. Extract
+        # only human-readable names/titles, never phone numbers or free-form notes.
+        try:
+            context = self.runner.panel.context()
+            if context.get("ok"):
+                def collect(value: Any, key: str = "") -> None:
+                    if isinstance(value, dict):
+                        for child_key, child in value.items():
+                            collect(child, str(child_key))
+                    elif isinstance(value, list):
+                        for child in value[:40]:
+                            collect(child, key)
+                    elif key.casefold() in {
+                        "name", "title", "printer", "printer_name", "customer",
+                        "customer_name", "product", "project", "model"
+                    }:
+                        text = " ".join(str(value or "").split())
+                        if text and not any(char.isdigit() for char in text[:4]):
+                            terms.append(text)
+                collect(context)
+        except Exception:
+            pass
+
+        vocab = speech.normalize_vocabulary(terms)
+        self._voice_vocab_cache = (now, vocab)
+        return list(vocab)
 
     @property
     def runner(self) -> executor.Runner:

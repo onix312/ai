@@ -8,7 +8,7 @@ import time
 import unittest
 from unittest.mock import patch
 
-from agent import pc, voice_runtime
+from agent import pc, speech, voice_runtime
 
 
 class _Recognizer:
@@ -91,6 +91,29 @@ class VoiceStreamingTests(unittest.TestCase):
         self.assertEqual(1234, status["audio_level"])
         self.assertTrue(status["streaming_asr"])
         self.assertEqual("vosk", status["asr_engine"])
+
+
+class DynamicVocabularyTests(unittest.TestCase):
+    def test_conservative_correction_prefers_known_name(self):
+        self.assertEqual(
+            "открой Orca",
+            speech.apply_dynamic_vocabulary("открой Orka", ["Orca"]),
+        )
+        self.assertEqual(
+            "проверь Альфа",
+            speech.apply_dynamic_vocabulary("проверь Алфа", ["Альфа"]),
+        )
+
+    def test_unknown_words_are_not_forced_into_vocabulary(self):
+        text = "расскажи про квантовую механику"
+        self.assertEqual(text, speech.apply_dynamic_vocabulary(text, ["Orca", "Альфа", "P1S"]))
+
+    def test_vocabulary_is_deduplicated_and_bounded(self):
+        terms = ["Orca", "orca", "  Альфа  "] + [f"Проект {i}" for i in range(200)]
+        vocab = speech.normalize_vocabulary(terms, limit=10)
+        self.assertEqual("Orca", vocab[0])
+        self.assertEqual("Альфа", vocab[1])
+        self.assertEqual(10, len(vocab))
 
 
 class VoiceRuntimeStateTests(unittest.TestCase):

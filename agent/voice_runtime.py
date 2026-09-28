@@ -53,6 +53,8 @@ class VoiceRuntime:
         self.recognizer = recognizer
         self.handler: Any = None
         self.cancel_handler: Any = None
+        self.vocabulary_provider: Any = None
+        self.vocabulary_terms: list[str] = []
         self.persistent_enabled = False
         self.manual_until = 0.0
         self.conversation_until = 0.0
@@ -99,6 +101,7 @@ class VoiceRuntime:
             "audio_level": int(self.audio_level),
             "streaming_asr": bool(self.streaming_asr),
             "asr_engine": str(getattr(self.recognizer, "name", "") or ""),
+            "vocabulary_count": len(self.vocabulary_terms),
             "last_error": self.last_error,
         }
 
@@ -230,6 +233,12 @@ class VoiceRuntime:
                         text, reason = self.recognizer.transcribe_wav(
                             speech.pack_wav(audio), config.LANGUAGE
                         )
+                    try:
+                        terms = self.vocabulary_provider() if callable(self.vocabulary_provider) else []
+                        self.vocabulary_terms = speech.normalize_vocabulary(terms)
+                        text = speech.apply_dynamic_vocabulary(text, self.vocabulary_terms)
+                    except Exception:
+                        self.vocabulary_terms = []
                     self.partial_phrase = ""
                     if reason:
                         self.last_error = reason
