@@ -316,9 +316,6 @@ class Runner:
         if provider is not None:
             return provider.run(skill_name, params, self)
         handlers: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
-            "panel.actions": self._panel_actions,
-            "panel.do": self._panel_do,
-            "panel.ask": self._panel_ask,
             "files.index": self._files_index,
             "files.search": self._files_search,
             "files.recent": self._files_recent,
@@ -328,8 +325,6 @@ class Runner:
             "files.tidy_plan": self._files_tidy_plan,
             "files.tidy_apply": self._files_tidy_apply,
             "knowledge.shop": self._knowledge_shop,
-            "day.briefing": lambda p: self._day("briefing", p),
-            "day.summary": lambda p: self._day("summary", p),
             "agent.skills": self._agent_skills,
             "agent.why": self._agent_why,
             "agent.journal": self._agent_journal,
