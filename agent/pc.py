@@ -29,6 +29,7 @@ import re
 import shutil
 import subprocess
 import sys
+import threading
 import time
 import uuid
 import webbrowser
@@ -1174,6 +1175,41 @@ _SAPI_SCRIPT = (
     "$s.Speak($env:PF_TTS_TEXT)"
 )
 
+_TTS_LOCK = threading.RLock()
+_TTS_PROCESS: subprocess.Popen | None = None
+
+
+def is_speaking() -> bool:
+    """Идёт ли сейчас системная озвучка NOZZA."""
+    global _TTS_PROCESS
+    with _TTS_LOCK:
+        process = _TTS_PROCESS
+        if process is None:
+            return False
+        if process.poll() is None:
+            return True
+        _TTS_PROCESS = None
+        return False
+
+
+def stop_speaking() -> bool:
+    """Немедленно остановить текущий TTS. Используется для barge-in."""
+    global _TTS_PROCESS
+    with _TTS_LOCK:
+        process = _TTS_PROCESS
+        _TTS_PROCESS = None
+    if process is None or process.poll() is not None:
+        return False
+    try:
+        process.terminate()
+        try:
+            process.wait(timeout=0.8)
+        except subprocess.TimeoutExpired:
+            process.kill()
+        return True
+    except (OSError, ValueError):
+        return False
+
 
 def speak(text: str, rate: int = 0, volume: int = 100) -> tuple[dict[str, Any], str]:
     """Сказать вслух. Текст — данные (stdin или переменная окружения), не команда.
@@ -1202,6 +1238,7 @@ def speak(text: str, rate: int = 0, volume: int = 100) -> tuple[dict[str, Any], 
     else:
         command = [engine, "-v", "ru", "-s", str(170 + rate * 12), "-a", str(volume * 2), "--stdin"]
     flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if IS_WINDOWS else 0
+    stop_speaking()
     try:
         process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
                                    stderr=subprocess.DEVNULL, env=env, creationflags=flags)
@@ -1211,4 +1248,7 @@ def speak(text: str, rate: int = 0, volume: int = 100) -> tuple[dict[str, Any], 
             process.stdin.close()
     except (OSError, ValueError) as exc:
         return {}, f"Озвучка не запустилась: {exc}"
+    global _TTS_PROCESS
+    with _TTS_LOCK:
+        _TTS_PROCESS = process
     return {"engine": engine, "chars": len(clean), "pid": process.pid}, ""
