@@ -26,6 +26,12 @@ class NativeQtSmokeTests(unittest.TestCase):
         orb.set_state("thinking")
         quick.show_answer("готово")
         center.update_status(True, False, True, True)
+        center.set_providers_payload({"ok": True, "providers": [
+            {"name": "browser", "title": "Браузер", "available": True, "reason": "",
+             "skills": [{"name": "browser.page"}]},
+            {"name": "desktop", "title": "Рабочий стол", "available": False,
+             "reason": "нужен Windows", "skills": [{"name": "desktop.observe"}]},
+        ]})
         center.set_page_payload("memory", {"memories": [{"text": "пример"}]})
         center.set_page_payload("tasks", {
             "plans": [{
@@ -62,6 +68,9 @@ class NativeQtSmokeTests(unittest.TestCase):
         self.assertEqual(orb.label.text(), "Думаю")
         self.assertIn("готово", quick.answer.text())
         self.assertIn("агент", center.footer.text())
+        self.assertIn("Браузер", center.providers_view.toPlainText())
+        self.assertIn("browser.page", center.providers_view.toPlainText())
+        self.assertIn("нужен Windows", center.providers_view.toPlainText())
         self.assertIsInstance(center.pages["tasks"], TasksPage)
         task_page = center.pages["tasks"]
         labels = [w.text() for w in task_page.findChildren(QLabel)]
