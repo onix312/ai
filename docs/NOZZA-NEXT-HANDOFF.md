@@ -1,5 +1,14 @@
 # NOZZA — handoff и roadmap после Verification Engine 1.0
 
+> **Актуализация 29.09.2026, Voice 3 Phase 6:** Люма и Phase 5 уже в `main`.
+> Текущая ветка добавляет adaptive acoustic echo gate: во время собственного
+> TTS Люма обучает только фон утечки динамика, поднимает VAD-порог над ним и не
+> пускает подавленные speaker frames в ASR pre-roll. Сильный человеческий
+> всплеск проходит, а text-level echo rejection остаётся вторым барьером.
+> Следом: Native UI 2.0 и optional HQ local TTS; true AEC имеет смысл, когда
+> TTS backend сможет отдавать PCM reference stream.
+
+
 > **Актуализация 29.09.2026, Voice 3 Phase 5:** Phase 4 уже в `main`.
 > Новое имя помощника — **Люма**, primary wake-word — `люма`.
 > Старые `ноза/нозза/nozza/noza` временно сохранены как legacy wake aliases.

@@ -48,6 +48,15 @@ VOICE_MAX_PHRASE_SECONDS = float(os.environ.get("PRINTFLOW_VOICE_MAX_PHRASE_SECO
 # status, но не отправляется в Brain до финализации фразы.
 VOICE_PREROLL_CHUNKS = max(0, int(os.environ.get("NOZZA_VOICE_PREROLL_CHUNKS", "3") or 3))
 VOICE_PARTIAL_MIN_CHARS = max(1, int(os.environ.get("NOZZA_VOICE_PARTIAL_MIN_CHARS", "2") or 2))
+VOICE_ECHO_GATE_MULTIPLIER = max(
+    1.0, float(os.environ.get("NOZZA_VOICE_ECHO_GATE_MULTIPLIER", "1.65") or 1.65)
+)
+VOICE_ECHO_GATE_MARGIN = max(
+    0, int(os.environ.get("NOZZA_VOICE_ECHO_GATE_MARGIN", "180") or 180)
+)
+VOICE_ECHO_FLOOR_ALPHA = min(
+    0.95, max(0.05, float(os.environ.get("NOZZA_VOICE_ECHO_FLOOR_ALPHA", "0.22") or 0.22))
+)
 
 # --- 18.14: личный ассистент компьютера ------------------------------------
 # Адрес рантайма модели. Тот же, что у помощника в панели (`assistant.DEFAULT_URL`):
