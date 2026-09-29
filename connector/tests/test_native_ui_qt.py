@@ -99,6 +99,12 @@ class NativeQtSmokeTests(unittest.TestCase):
         self.assertIn("48 kHz", center.home.voice_meta.text())
         self.assertIn("baya", center.voice_page.voice_name.text().casefold())
         self.assertIn("48 kHz", center.voice_page.voice_profile.text())
+        center.home.set_brain(model_ok=True, ready=84, total=96, route="model", repaired=False)
+        self.assertEqual("MODEL", center.home.brain_value.text())
+        self.assertIn("84/96", center.home.brain_meta.text())
+        center.home.set_brain(model_ok=True, ready=84, total=96, route="model", repaired=True)
+        self.assertEqual("SELF-CORRECTED", center.home.brain_value.text())
+        self.assertIn("repair loop", center.home.brain_meta.text())
         center.deleteLater()
         self.app.processEvents()
 
