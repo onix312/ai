@@ -3,8 +3,11 @@ from __future__ import annotations
 
 from typing import Callable
 
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QLineEdit, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtCore import QEasingCurve, QPropertyAnimation, QTimer, Qt, Signal
+from PySide6.QtWidgets import (
+    QFrame, QGraphicsOpacityEffect, QHBoxLayout, QLabel, QLineEdit,
+    QPushButton, QVBoxLayout, QWidget,
+)
 
 from . import theme
 
@@ -17,6 +20,16 @@ class QuickPanel(QWidget):
         self.setWindowFlags(Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
         self.setAttribute(Qt.WA_TranslucentBackground, True)
         self.setFixedWidth(680)
+        self._busy = False
+        self._busy_frame = 0
+        self._show_animation = QPropertyAnimation(self, b"windowOpacity", self)
+        self._show_animation.setDuration(150)
+        self._show_animation.setStartValue(0.0)
+        self._show_animation.setEndValue(1.0)
+        self._show_animation.setEasingCurve(QEasingCurve.OutCubic)
+        self._busy_timer = QTimer(self)
+        self._busy_timer.setInterval(320)
+        self._busy_timer.timeout.connect(self._advance_busy)
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         card = QFrame()
@@ -46,6 +59,16 @@ class QuickPanel(QWidget):
             font-weight:800;
             letter-spacing:1px;
         }
+        QLabel#quickRoute {
+            background:#191733;
+            color:#BFAEFF;
+            border:1px solid #4E4083;
+            border-radius:9px;
+            padding:3px 8px;
+            font-size:9px;
+            font-weight:800;
+            letter-spacing:1px;
+        }
         QPushButton {
             background:#181B35;
             color:#D8D4E8;
@@ -65,6 +88,9 @@ class QuickPanel(QWidget):
         brand = QLabel("LUMA")
         brand.setObjectName("quickBrand")
         header.addWidget(brand)
+        self.route = QLabel("READY")
+        self.route.setObjectName("quickRoute")
+        header.addWidget(self.route)
         header.addStretch(1)
         header.addWidget(QLabel("Esc — закрыть"))
         box.addLayout(header)
@@ -77,6 +103,14 @@ class QuickPanel(QWidget):
         self.answer = QLabel("")
         self.answer.setWordWrap(True)
         self.answer.setStyleSheet("color:#E7E3F3; font-size:14px; background:transparent;")
+        self._answer_opacity = QGraphicsOpacityEffect(self.answer)
+        self._answer_opacity.setOpacity(1.0)
+        self.answer.setGraphicsEffect(self._answer_opacity)
+        self._answer_animation = QPropertyAnimation(self._answer_opacity, b"opacity", self)
+        self._answer_animation.setDuration(170)
+        self._answer_animation.setStartValue(0.15)
+        self._answer_animation.setEndValue(1.0)
+        self._answer_animation.setEasingCurve(QEasingCurve.OutCubic)
         box.addWidget(self.answer)
         self.hints = QHBoxLayout()
         for text in ("Что у меня сегодня?", "Как там PrintFlow?", "Открой загрузки"):
@@ -86,6 +120,38 @@ class QuickPanel(QWidget):
         self.hints.addStretch(1)
         box.addLayout(self.hints)
         root.addWidget(card)
+
+    @staticmethod
+    def _route_label(source: str, repaired: bool = False) -> str:
+        if repaired:
+            return "SELF-CORRECTED"
+        clean = str(source or "").casefold()
+        return {
+            "model": "MODEL",
+            "rules": "RULES",
+            "rule": "RULES",
+            "panel": "PRINTFLOW",
+            "panel-camera": "VISION",
+            "task": "TASK",
+            "planner": "PLANNER",
+            "memory": "MEMORY",
+            "agent-loop": "AGENT LOOP",
+            "talk": "TALK",
+            "clock": "LOCAL",
+            "math": "LOCAL",
+            "util": "LOCAL",
+        }.get(clean, clean.upper()[:18] or "READY")
+
+    def _set_route(self, source: str = "", skill: str = "", repaired: bool = False) -> None:
+        route = self._route_label(source, repaired)
+        skill_clean = str(skill or "").strip()
+        self.route.setText(route + (f" · {skill_clean}" if skill_clean else ""))
+
+    def _advance_busy(self) -> None:
+        if not self._busy:
+            return
+        self._busy_frame = (self._busy_frame + 1) % 4
+        self.answer.setText("Думаю" + "." * (self._busy_frame + 1))
 
     def _pick(self, text: str) -> None:
         self.input.setText(text)
@@ -101,19 +167,34 @@ class QuickPanel(QWidget):
         if screen:
             geo = screen.availableGeometry()
             self.move(geo.center().x() - self.width() // 2, geo.top() + int(geo.height() * .22))
+        self._show_animation.stop()
+        self.setWindowOpacity(0.0)
         self.show()
         self.raise_()
         self.activateWindow()
+        self._show_animation.start()
         self.input.setFocus()
         self.input.selectAll()
 
     def set_busy(self, busy: bool) -> None:
-        self.input.setEnabled(not busy)
-        if busy:
-            self.answer.setText("Думаю…")
+        self._busy = bool(busy)
+        self.input.setEnabled(not self._busy)
+        if self._busy:
+            self._busy_frame = 0
+            self._set_route("model")
+            self.route.setText("THINKING")
+            self.answer.setText("Думаю.")
+            self._busy_timer.start()
+        else:
+            self._busy_timer.stop()
 
-    def show_answer(self, text: str) -> None:
-        self.answer.setText(text)
+    def show_answer(self, text: str, *, source: str = "", skill: str = "",
+                    repaired: bool = False) -> None:
+        self._set_route(source, skill, repaired)
+        self.answer.setText(str(text or ""))
+        self._answer_animation.stop()
+        self._answer_opacity.setOpacity(0.15)
+        self._answer_animation.start()
 
     def keyPressEvent(self, event) -> None:
         if event.key() == Qt.Key_Escape:
