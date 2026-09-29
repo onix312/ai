@@ -440,7 +440,7 @@ class NativeApp:
         self.run_async(self.backend.persona_reset, done)
 
     # --------------------------------------------------------------- mic
-    def tune_voice(self, multiplier: float, margin: int, alpha: float) -> None:
+    def tune_voice(self, vad_threshold: int, multiplier: float, margin: int, alpha: float) -> None:
         def done(payload: dict[str, Any]) -> None:
             if payload.get("ok"):
                 self.center.set_voice_diagnostics_message(
@@ -452,7 +452,7 @@ class NativeApp:
                     str(payload.get("reason") or "Не удалось применить Voice Diagnostics.")
                 )
         self.run_async(
-            lambda: self.backend.tune_voice(multiplier, margin, alpha),
+            lambda: self.backend.tune_voice(vad_threshold, multiplier, margin, alpha),
             done,
         )
 
