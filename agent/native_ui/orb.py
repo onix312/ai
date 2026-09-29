@@ -213,10 +213,10 @@ class VoiceOrb(QWidget):
         )
         self.setAttribute(Qt.WA_TranslucentBackground, True)
         self.setFixedWidth(390)
-        self.setFixedHeight(82)
+        self.setFixedHeight(72)
 
         row = QHBoxLayout(self)
-        row.setContentsMargins(12, 10, 16, 10)
+        row.setContentsMargins(8, 5, 14, 5)
         row.setSpacing(10)
         self.core = LumaOrbCore(self, compact=True)
         row.addWidget(self.core, 0, Qt.AlignVCenter)
@@ -290,7 +290,7 @@ class VoiceOrb(QWidget):
 
         self.context_label.setVisible(bool(self.context_label.text()))
         self.reply_label.setVisible(bool(self.reply_label.text()))
-        target_height = 118 if self.context_label.text() or self.reply_label.text() else 82
+        target_height = 112 if self.context_label.text() or self.reply_label.text() else 72
         if self.height() != target_height:
             self.setFixedHeight(target_height)
             if self.isVisible():
