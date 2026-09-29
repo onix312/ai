@@ -8,6 +8,23 @@
 окнах и индекса документов не должны попадать в окружение, которое `pf.py` ставит каждому, включая
 телефон-кассу. Поэтому `pf.py` агент не запускает и не импортирует.
 
+## Переменные окружения Люмы
+
+Для настроек самого ассистента canonical-префикс теперь `LUMA_*`. Старые `NOZZA_*` и соответствующие `PRINTFLOW_*` остаются совместимыми алиасами и не требуют миграции существующей установки.
+
+Примеры canonical-настроек:
+
+- `LUMA_ASSISTANT_NAME`
+- `LUMA_WAKE_WORD`
+- `LUMA_SPEECH_PORT`, `LUMA_AGENT_PORT`
+- `LUMA_SPEECH_MODEL_PATH`
+- `LUMA_VOICE_ALWAYS_ON`, `LUMA_VOICE_VAD_THRESHOLD`
+- `LUMA_MODEL_URL`, `LUMA_MODEL_NAME`
+- `LUMA_ASSISTANT_DB`, `LUMA_ASSISTANT_FOLDERS`
+- `LUMA_BROWSER_CDP_URL`
+
+Если одновременно заданы новый и legacy-ключ, значение `LUMA_*` имеет приоритет.
+
 ## Что он умеет
 
 | Порт | Роль | Маршруты |
