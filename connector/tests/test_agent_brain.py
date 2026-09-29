@@ -170,6 +170,12 @@ class ModelClientTests(unittest.TestCase):
         self.assertIn("app.open", app_prompt)
         self.assertLessEqual(len(app_prompt), 5600)
 
+        colloquial = skills.expand_tool_query("глянь глазами что там видно")
+        self.assertIn("экран", colloquial)
+        self.assertIn("камера", colloquial)
+        window_prompt = skills.relevant_prompt("что у меня сейчас запущено", caps)
+        self.assertIn("window.", window_prompt)
+
     def test_visible_text_drops_reasoning(self):
         self.assertEqual("Привет!\nКак дела?", model.visible_text("<think>долго</think>\nПривет!\n\nКак дела?"))
 
@@ -255,6 +261,10 @@ class UnderstandTests(unittest.TestCase):
         "Открой Steam": ("app.open", {"target": "steam"}),
         "Открой стим": ("app.open", {"target": "стим"}),
         "Открой apex": ("app.open", {"target": "apex"}),
+        "зайди в телеграм": ("app.open", {"target": "телеграм"}),
+        "что у меня сейчас запущено": ("window.list", {"limit": 15}),
+        "какая программа сейчас активна": ("window.active", {}),
+        "глянь на экран": ("screen.describe", {}),
         "нажми кнопку сохранить": ("screen.find_and_click", {"text": "сохранить"}),
         "найди на экране отправить и нажми": ("screen.find_and_click", {"text": "отправить"}),
         "как там компьютер": ("system.health", {}),
@@ -272,9 +282,14 @@ class UnderstandTests(unittest.TestCase):
             self.assertEqual((skill, params), (plan["skill"], plan["params"]), phrase)
             self.assertIn(plan["skill"], skills.SKILLS, "правило ведёт в несуществующий навык")
 
+    def test_browser_open_question_is_not_stolen_by_window_list_rule(self):
+        plan = brain.understand("что открыто в браузере")
+        self.assertIsNotNone(plan)
+        self.assertEqual("browser.tabs", plan["skill"])
+
     def test_workshop_phrases_are_not_pc_commands(self):
         for phrase in ("запусти печать", "закрой заказ 15", "открой склад", "убавь цену", "сделай звук 3d печати",
-                       "какая погода"):
+                       "что сейчас открыто на принтере", "что сейчас активно печатается", "какая погода"):
             self.assertIsNone(brain.understand(phrase), phrase)
 
     def test_follow_ups_use_previous_turn(self):
@@ -502,6 +517,119 @@ class BrainChatTests(unittest.TestCase):
         self.assertEqual("answer", answer["kind"])
         self.assertGreater(answer.get("voice_streamed_chars", 0), 0)
         self.assertEqual(["Первая фраза.", "Вторая фраза."], spoken)
+
+    def test_compact_tool_result_is_saved_for_follow_up_reasoning(self):
+        with patch.object(self.agent, "run_skill", return_value={
+            "ok": True,
+            "cpu_percent": 42,
+            "memory": {"load": 61, "used_gb": 9.8, "total_gb": 16},
+            "uptime_hours": 12.5,
+            "secret_debug_blob": "must-not-enter-conversation-context",
+        }):
+            answer = self.brain.chat("как там компьютер")
+        self.assertEqual("action", answer["kind"])
+        last = self.store.dialog("main", 2)[-1]
+        result_context = last["meta"].get("result_context") or {}
+        self.assertEqual(42, result_context.get("cpu_percent"))
+        self.assertEqual(61, result_context.get("memory", {}).get("load"))
+        self.assertNotIn("secret_debug_blob", result_context)
+        bounded = brain.compact_result_context({
+            "ok": True,
+            "target": {"name": "x" * 1000, **{f"k{i}": i for i in range(30)}},
+        })
+        self.assertLessEqual(len(bounded["target"]), 10)
+        self.assertLessEqual(len(bounded["target"]["name"]), 320)
+
+    def test_model_plan_validator_reports_missing_function_before_execution(self):
+        problem = brain.model_plan_problem(
+            {"skill": "imaginary.launch", "params": {}, "steps": [], "reply": "", "ask": ""},
+            self.agent.runner.caps,
+            self.agent.runner.learned(),
+        )
+        self.assertIn("нет в реестре", problem)
+
+    def test_model_recovers_non_json_action_reply_into_checked_tool_call(self):
+        replies = [
+            {"ok": True, "text": "Сейчас проведу диагностику компьютера.", "reason": "", "model": "qwen2.5:3b"},
+            {"ok": True, "text": json.dumps({
+                "skill": "system.health", "params": {}, "steps": [],
+                "reply": "", "ask": "",
+            }, ensure_ascii=False), "reason": "", "model": "qwen2.5:3b"},
+        ]
+        with patch.object(model, "status", return_value={
+                "ok": True, "model": "qwen2.5:3b", "reason": "",
+                "url": "http://127.0.0.1:11434", "models": ["qwen2.5:3b"],
+             }), patch.object(model, "chat", side_effect=replies), \
+             patch.object(self.agent, "run_skill", return_value={
+                 "ok": True, "cpu_percent": 12, "memory": {"load": 40},
+             }) as run:
+            answer = self.brain.chat("проведи системную диагностику")
+
+        run.assert_called_once_with("system.health", {})
+        self.assertEqual("action", answer["kind"])
+        titles = [str(step.get("title") or "") for step in answer["steps"]]
+        self.assertIn("Формат planner", titles)
+        self.assertIn("JSON-contract восстановлен", titles)
+
+    def test_model_tool_retrieval_uses_recent_user_context(self):
+        self.store.add_turn("main", "user", "проверь состояние компьютера")
+        self.store.add_turn("main", "assistant", "Хорошо.", {"source": "talk"})
+        captured = {}
+
+        def fake_chat(*_args, system="", **_kwargs):
+            captured["system"] = system
+            return {
+                "ok": True,
+                "text": json.dumps({
+                    "skill": "system.health", "params": {}, "steps": [],
+                    "reply": "", "ask": "",
+                }, ensure_ascii=False),
+                "reason": "", "model": "qwen2.5:3b",
+            }
+
+        with patch.object(model, "status", return_value={
+                "ok": True, "model": "qwen2.5:3b", "reason": "",
+                "url": "http://127.0.0.1:11434", "models": ["qwen2.5:3b"],
+             }), patch.object(model, "chat", side_effect=fake_chat):
+            answer = self.brain.chat("а теперь сделай это")
+
+        self.assertEqual("system.health", self.agent.calls[-1][0])
+        self.assertIn("system.health", captured["system"])
+        self.assertNotEqual("clarify", answer["kind"])
+
+    def test_model_repairs_bad_tool_choice_before_execution(self):
+        first = json.dumps({
+            "skill": "computer.deep_check",
+            "params": {},
+            "steps": [],
+            "reply": "",
+            "ask": "",
+        }, ensure_ascii=False)
+        repaired = json.dumps({
+            "skill": "system.health",
+            "params": {},
+            "steps": [],
+            "reply": "",
+            "ask": "",
+        }, ensure_ascii=False)
+        calls = []
+
+        def fake_chat(*_args, system="", **_kwargs):
+            calls.append(system)
+            raw = first if len(calls) == 1 else repaired
+            return {"ok": True, "text": raw, "reason": "", "model": "qwen2.5:3b"}
+
+        with patch.object(model, "status", return_value={
+                "ok": True, "model": "qwen2.5:3b", "reason": "",
+                "url": "http://127.0.0.1:11434", "models": ["qwen2.5:3b"],
+             }), patch.object(model, "chat", side_effect=fake_chat):
+            answer = self.brain.chat("проверь состояние компьютера подробно")
+
+        self.assertEqual(2, len(calls))
+        self.assertEqual("system.health", self.agent.calls[-1][0])
+        self.assertTrue(any(step.get("title") == "Самокоррекция плана" for step in answer["steps"]))
+        self.assertIn("Расширенный каталог доступных функций", calls[1])
+        self.assertNotIn("computer.deep_check", [name for name, _params in self.agent.calls])
 
     def test_model_plan_is_checked_by_registry(self):
         with patch.object(model, "status", return_value={"ok": True, "model": "qwen2.5:3b", "reason": ""}), \

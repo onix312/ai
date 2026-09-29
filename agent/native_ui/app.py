@@ -37,6 +37,10 @@ class NativeApp:
         self._workers: set[Worker] = set()
         self._busy_status = False
         self._busy_chat = False
+        self._brain_ready = 0
+        self._brain_total = 0
+        self._brain_route = "ready"
+        self._brain_repaired = False
         self._hotkey_filter: HotkeyFilter | None = None
         self._stop_hotkey_filter: HotkeyFilter | None = None
         self._hotkey_registered = False
@@ -133,6 +137,19 @@ class NativeApp:
             self._render_status()
 
         self.run_async(self.backend.capabilities, done, lambda _message: None)
+
+        def skills_done(payload: dict[str, Any]) -> None:
+            self._brain_ready = int(payload.get("ready") or 0)
+            self._brain_total = int(payload.get("count") or len(payload.get("skills") or []))
+            self.center.home.set_brain(
+                model_ok=self.state.model_ok,
+                ready=self._brain_ready,
+                total=self._brain_total,
+                route=self._brain_route,
+                repaired=self._brain_repaired,
+            )
+
+        self.run_async(self.backend.skills, skills_done, lambda _message: None)
         self.run_async(
             self.backend.providers,
             self.center.set_providers_payload,
@@ -195,6 +212,13 @@ class NativeApp:
             detail=self.state.activity_detail,
             task_id=self.state.activity_task_id,
             safety_stopped=self.state.safety_stopped,
+        )
+        self.center.home.set_brain(
+            model_ok=self.state.model_ok,
+            ready=self._brain_ready,
+            total=self._brain_total,
+            route=self._brain_route,
+            repaired=self._brain_repaired,
         )
         if not self.state.connected:
             if self.orb.isVisible():
@@ -276,9 +300,24 @@ class NativeApp:
             reply = str(payload.get("reply") or payload.get("reason") or "Готово.")
             self.quick.set_busy(False)
             self.quick.show_answer(reply)
-            self.center.chat.append_local("Люма", reply)
-            self.center.chat.show_action_trace(
-                list(payload.get("steps") or []) if isinstance(payload.get("steps"), list) else []
+            self.center.chat.append_local(
+                "Люма", reply,
+                source=str(payload.get("source") or ""),
+                skill=str(payload.get("skill") or ""),
+            )
+            trace_steps = list(payload.get("steps") or []) if isinstance(payload.get("steps"), list) else []
+            self.center.chat.show_action_trace(trace_steps)
+            self._brain_route = str(payload.get("source") or payload.get("kind") or "ready")
+            self._brain_repaired = any(
+                str(step.get("title") or "") == "Самокоррекция плана"
+                for step in trace_steps if isinstance(step, dict)
+            )
+            self.center.home.set_brain(
+                model_ok=self.state.model_ok,
+                ready=self._brain_ready,
+                total=self._brain_total,
+                route=self._brain_route,
+                repaired=self._brain_repaired,
             )
             image = payload.get("image") if isinstance(payload.get("image"), dict) else {}
             image_url = str(image.get("url") or "")

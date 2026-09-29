@@ -1397,6 +1397,28 @@ _PROMPT_GROUP_HINTS: dict[str, tuple[str, ...]] = {
 }
 
 
+_SEMANTIC_QUERY_HINTS: tuple[tuple[tuple[str, ...], str], ...] = (
+    (("зайди ", "зайди в", "запусти мне", "открой мне"), "открой запусти приложение программа браузер окно"),
+    (("что запущено", "что у меня запущено", "что работает", "что открыто"), "окна программы список окно"),
+    (("глянь", "посмотри глазами", "что видно", "увидь", "визуально"), "экран скрин видишь посмотри картинка камера"),
+    (("где лежит", "куда сохранил", "отыщи", "разыщи"), "файл документ папка найди поиск"),
+    (("запиши чтобы не забыть", "не дай забыть", "напомни потом"), "запомни память напоминание reminder"),
+    (("сделай как раньше", "как в прошлый раз", "повтори это", "повтори прошлое"), "сценарий макрос контекст действие"),
+    (("проверь как там", "все нормально", "всё нормально"), "состояние здоровье статус проверить"),
+)
+
+
+def expand_tool_query(query: str) -> str:
+    """Add conversational semantic hints for retrieval without changing permissions."""
+    low = " ".join(str(query or "").casefold().replace("ё", "е").split())
+    additions = [
+        expansion
+        for phrases, expansion in _SEMANTIC_QUERY_HINTS
+        if any(phrase in low for phrase in phrases)
+    ]
+    return " ".join([low, *additions]).strip()
+
+
 def _prompt_line(row: dict[str, Any]) -> str:
     params = ", ".join(f"{k}:{v}" for k, v in row["params"].items())
     mark = " — подтверждение" if row["confirm"] else ""
@@ -1425,7 +1447,7 @@ def relevant_prompt(query: str, caps: dict[str, Any],
     ]
     if not rows:
         return ""
-    low = " ".join(str(query or "").casefold().replace("ё", "е").split())
+    low = expand_tool_query(query)
     tokens = {
         token for token in re.findall(r"[0-9a-zа-я_-]{2,}", low)
         if token not in {"мне", "тебе", "это", "как", "что", "для", "или", "еще", "ещё", "там", "тут"}
@@ -1439,7 +1461,11 @@ def relevant_prompt(query: str, caps: dict[str, Any],
         name = str(row.get("name") or "")
         group = name.split(".", 1)[0]
         hay = " ".join((
-            name, str(row.get("title") or ""), str(row.get("description") or ""),
+            name,
+            str(row.get("title") or ""),
+            str(row.get("description") or ""),
+            str(row.get("doc") or ""),
+            str(row.get("provider") or ""),
             " ".join(str(key) for key in (row.get("params") or {}).keys()),
         )).casefold().replace("ё", "е")
         value = 0

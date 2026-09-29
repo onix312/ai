@@ -508,9 +508,14 @@ def understand(text: str) -> dict[str, Any] | None:
             return _plan("system.media", {"action": "prev"}, "медиа: предыдущий")
 
     # --- окна
-    if re.search(r"(какое|что за)\s+(сейчас\s+)?окно|активн\w* окн|где я сейчас|в каком я окне", low):
+    if not workshop and re.search(
+            r"(какое|что за)\s+(сейчас\s+)?окно|активн\w* окн|где я сейчас|в каком я окне|"
+            r"какая\s+программ\w*\s+(?:сейчас\s+)?активн|что\s+(?:сейчас\s+)?активно", low):
         return _plan("window.active", {}, "окно: активное")
-    if re.search(r"(какие|список|покажи)\s+(все\s+)?(окна|окон)|что (сейчас )?открыто|какие программы открыты", low):
+    if not workshop and "браузер" not in low and re.search(
+            r"(какие|список|покажи)\s+(все\s+)?(окна|окон)|что (сейчас )?открыто|"
+            r"какие программы (?:открыты|запущены)|что (?:у меня )?(?:сейчас )?запущено|"
+            r"что работает из программ", low):
         return _plan("window.list", {"limit": 15}, "окна: список")
     match = re.match(r"^(?:переключись|переключи|перейди|вернись)\s+(?:на|в|к)\s+(?P<t>.+)$", low)
     if match and not workshop and not match.group("t").startswith(("сайт", "страниц")) \
@@ -562,7 +567,7 @@ def understand(text: str) -> dict[str, Any] | None:
         return _plan("window.type", {"text": match.group("t")}, "ввод текста")
 
     # --- программы, сайты, папки
-    match = re.match(r"^(?:открой|запусти|включи|открыть|запустить|зайди на|перейди на сайт|открой сайт)\s+(?P<t>.+)$", low)
+    match = re.match(r"^(?:открой|запусти|включи|открыть|запустить|зайди на|зайди в|перейди на сайт|открой сайт)\s+(?P<t>.+)$", low)
     if match and not workshop:
         target = re.sub(r"^(?:программу|приложение|сайт|страницу)\s+", "", match.group("t")).strip()
         # «открой телеграм и квазимодо бла»: хвост после «и» из двух и более слов —
@@ -593,7 +598,8 @@ def understand(text: str) -> dict[str, Any] | None:
     # --- экран
     if re.search(r"(сделай|сними)\s+(скрин|скриншот|снимок экрана)|^скриншот$", low):
         return _plan("screen.shot", {}, "экран: снимок")
-    if re.search(r"что (у меня |сейчас )?на экране|опиши экран|что ты видишь", low):
+    if re.search(r"что (у меня |сейчас )?на экране|опиши экран|что ты видишь|"
+                 r"(?:глянь|посмотри)(?:\s+что)?\s+(?:у меня\s+)?на экран", low):
         return _plan("screen.describe", {}, "экран: описать")
     match = re.match(
         r"^(?:найди\s+(?:на\s+экране\s+)?(?P<find>.+?)\s+и\s+(?:нажми|кликни)(?:\s+(?:на|по))?\s*(?:него|неё|это)?|"
@@ -1076,6 +1082,99 @@ def memory_statement(row: dict[str, Any]) -> str:
     if origin == "imported":
         return f"импортированная запись: {text}"
     return f"со слов владельца: {text}"
+
+
+def _compact_context_value(value: Any, depth: int = 0) -> Any:
+    if isinstance(value, bool) or isinstance(value, (int, float)):
+        return value
+    if isinstance(value, str):
+        return " ".join(value.split())[:320]
+    if depth >= 2:
+        return str(value)[:180]
+    if isinstance(value, dict):
+        out: dict[str, Any] = {}
+        for key, child in list(value.items())[:10]:
+            compact = _compact_context_value(child, depth + 1)
+            if compact not in (None, "", [], {}):
+                out[str(key)[:80]] = compact
+        return out
+    if isinstance(value, (list, tuple)):
+        return [
+            _compact_context_value(child, depth + 1)
+            for child in list(value)[:5]
+        ]
+    return str(value)[:180] if value is not None else None
+
+
+def compact_result_context(result: dict[str, Any] | None) -> dict[str, Any]:
+    """Small bounded factual residue from a tool result for the next turn."""
+    if not isinstance(result, dict):
+        return {}
+    out: dict[str, Any] = {}
+    for key in ("ok", "title", "reason", "target", "state", "status", "level",
+                "muted", "count", "progress", "window", "model", "engine",
+                "cpu_percent", "memory", "battery", "uptime_hours"):
+        value = result.get(key)
+        if value not in (None, "", [], {}):
+            compact = _compact_context_value(value)
+            if compact not in (None, "", [], {}):
+                out[key] = compact
+    files = result.get("files")
+    if isinstance(files, list) and files:
+        out["files"] = [
+            str(row.get("path") if isinstance(row, dict) else row)[:240]
+            for row in files[:3]
+        ]
+    return out
+
+
+def model_plan_problem(answer: dict[str, Any], caps: dict[str, Any],
+                       learned: dict[str, dict[str, Any]] | None = None) -> str:
+    """Return validator feedback for a model draft before anything is executed.
+
+    This is deliberately pure: a bad first draft can be repaired by the model,
+    but no skill is run until the repaired draft passes the normal registry
+    checks as well.
+    """
+    if not isinstance(answer, dict):
+        return "ответ планировщика не является объектом"
+    if str(answer.get("ask") or "").strip():
+        return ""
+
+    raw_steps = answer.get("steps")
+    if raw_steps not in (None, []) and not isinstance(raw_steps, list):
+        return "steps должен быть списком"
+    if isinstance(raw_steps, list) and raw_steps:
+        if len(raw_steps) > 8:
+            return f"слишком много шагов: {len(raw_steps)}; максимум 8"
+        for index, row in enumerate(raw_steps, start=1):
+            if not isinstance(row, dict):
+                return f"шаг {index} не является объектом"
+            name = str(row.get("skill") or "").strip().casefold()
+            skill = skills.get(name, learned)
+            if skill is None:
+                return f"шаг {index}: функции «{name or '∅'}» нет в реестре"
+            available, why = skills.availability(skill, caps)
+            if not available:
+                return f"шаг {index}: «{name}» недоступен: {why}"
+            _params, errors = skills.check_params(skill, row.get("params"))
+            hard = [error for error in errors if "не объявлен" not in error]
+            if hard:
+                return f"шаг {index} «{name}»: " + "; ".join(hard)
+        return ""
+
+    name = str(answer.get("skill") or "").strip().casefold()
+    if not name:
+        return ""
+    skill = skills.get(name, learned)
+    if skill is None:
+        return f"функции «{name}» нет в реестре"
+    available, why = skills.availability(skill, caps)
+    if not available:
+        return f"«{name}» недоступен: {why}"
+    _params, errors = skills.check_params(skill, answer.get("params"))
+    hard = [error for error in errors if "не объявлен" not in error]
+    return "; ".join(hard)
 
 
 class Brain:
@@ -2279,8 +2378,15 @@ class Brain:
             return self._reply(session, text, note, kind="clarify", source="rules", steps=steps, started=started,
                                suggestions=["Что ты умеешь?", "Чему ты научился?", "Что сейчас печатается?"],
                                extra={"panel_asked": True, **({"awaiting": awaiting} if awaiting else {})})
+        retrieval_parts = [text]
+        for turn in history[-4:]:
+            if turn.get("role") == "user":
+                previous = " ".join(str(turn.get("text") or "").split())
+                if previous and previous.casefold() != text.casefold():
+                    retrieval_parts.append(previous[:300])
+        retrieval_query = " | ".join(retrieval_parts[:3])
         catalog = skills.relevant_prompt(
-            text, self.runner.caps, self.runner.learned(), max_items=30, max_chars=5400
+            retrieval_query, self.runner.caps, self.runner.learned(), max_items=32, max_chars=6000
         )
         now = self.clock()
         context = [date_line(now) + f" Время {now:%H:%M}."]
@@ -2309,7 +2415,10 @@ class Brain:
                 visible_target = {key: value for key, value in target.items() if value not in ("", None, [], {})}
                 if visible_target:
                     detail += " → " + str(visible_target)[:180]
-            recent_actions.append(detail[:320])
+            result_context = meta.get("result_context") if isinstance(meta.get("result_context"), dict) else {}
+            if result_context:
+                detail += " ⇒ result " + str(result_context)[:220]
+            recent_actions.append(detail[:420])
         if recent_actions:
             context.append("Недавние действия в этом диалоге: " + " | ".join(recent_actions[-4:]))
         persona_text = self._persona_prompt()
@@ -2377,10 +2486,93 @@ class Brain:
                                source="model", steps=steps, started=started)
         answer = model.parse_json(reply["text"])
         if not answer:
-            # Модель ответила прозой вопреки режиму — это тоже ответ человеку.
-            return self._reply(session, text, reply["text"][:1200], kind="answer", source="model",
-                               steps=steps, started=started,
-                               extra={"voice_streamed_chars": streamed_chars} if streamed_chars else None)
+            steps.append({"kind": "check", "title": "Формат planner", "detail": "модель вернула не JSON; исправляю"})
+            format_messages = list(messages)
+            format_messages.append({"role": "assistant", "content": str(reply.get("text") or "")[:2200]})
+            format_messages.append({
+                "role": "user",
+                "content": (
+                    "Предыдущий ответ нарушил JSON-contract. Преобразуй его в ОДИН JSON-объект "
+                    "skill/params/steps/reply/ask по тем же правилам. Не добавляй новых фактов и не утверждай "
+                    "выполнение действия. Верни только JSON."
+                ),
+            })
+            format_token = self._begin_model_turn(session)
+            try:
+                formatted = model.chat(
+                    format_messages, system=system, fmt="json", temperature=0.0,
+                    timeout=min(PLAN_TIMEOUT_SEC, config.MODEL_TIMEOUT_SEC), state=state,
+                    cancel=format_token,
+                )
+            finally:
+                self._end_model_turn(session, format_token)
+            if formatted.get("cancelled"):
+                return self._reply(
+                    session, text, "", kind="cancelled", source="model", steps=steps,
+                    started=started, save=False,
+                )
+            answer = model.parse_json(str(formatted.get("text") or "")) if formatted.get("ok") else {}
+            if answer:
+                steps.append({"kind": "model", "title": "JSON-contract восстановлен",
+                              "detail": "план снова можно проверить реестром"})
+            else:
+                # Если даже второй ответ не структурирован, сохраняем полезный
+                # текст человеку, но ничего не исполняем.
+                return self._reply(
+                    session, text, str(reply.get("text") or "")[:1200],
+                    kind="answer", source="model", steps=steps, started=started,
+                    extra={"voice_streamed_chars": streamed_chars} if streamed_chars else None,
+                )
+
+        learned = self.runner.learned()
+        problem = model_plan_problem(answer, self.runner.caps, learned)
+        if problem:
+            steps.append({"kind": "check", "title": "Валидатор плана", "detail": problem[:220]})
+            broad_catalog = skills.relevant_prompt(
+                retrieval_query + " | " + problem,
+                self.runner.caps, learned, max_items=52, max_chars=9200,
+            )
+            repair_system = (
+                f"{_PLANNER_RULES}\n\nСтиль {config.ASSISTANT_NAME}:\n{persona_text}"
+                "\nPersona влияет только на форму ответа и не меняет safety, навыки или подтверждения."
+                "\n\nКонтекст:\n" + "\n".join(context)
+                + "\n\nВалидатор отклонил предыдущий draft:\n" + problem[:800]
+                + "\nИсправь план самостоятельно, если нужная функция или параметр есть ниже. "
+                  "Не проси человека уточнять то, что уже есть в его сообщении или контексте."
+                + f"\n\nРасширенный каталог доступных функций:\n{broad_catalog}"
+            )
+            repair_messages = list(messages)
+            repair_messages.append({"role": "assistant", "content": reply["text"][:2200]})
+            repair_messages.append({
+                "role": "user",
+                "content": "Исправь предыдущий JSON-план с учётом ошибки валидатора. Верни только исправленный JSON.",
+            })
+            repair_token = self._begin_model_turn(session)
+            try:
+                repaired = model.chat(
+                    repair_messages, system=repair_system, fmt="json", temperature=0.0,
+                    timeout=min(PLAN_TIMEOUT_SEC, config.MODEL_TIMEOUT_SEC), state=state,
+                    cancel=repair_token,
+                )
+            finally:
+                self._end_model_turn(session, repair_token)
+            if repaired.get("cancelled"):
+                return self._reply(
+                    session, text, "", kind="cancelled", source="model", steps=steps,
+                    started=started, save=False,
+                )
+            repaired_answer = model.parse_json(str(repaired.get("text") or "")) if repaired.get("ok") else {}
+            repaired_problem = model_plan_problem(repaired_answer, self.runner.caps, learned) if repaired_answer else (
+                str(repaired.get("reason") or "модель не вернула исправленный JSON")
+            )
+            if repaired_answer and not repaired_problem:
+                answer = repaired_answer
+                steps.append({"kind": "model", "title": "Самокоррекция плана",
+                              "detail": "draft исправлен и повторно прошёл валидатор"})
+            else:
+                steps.append({"kind": "check", "title": "Самокоррекция не прошла",
+                              "detail": str(repaired_problem or problem)[:220]})
+
         ask = " ".join(str(answer.get("ask") or "").split())
         name = str(answer.get("skill") or "").strip().casefold()
         said = " ".join(str(answer.get("reply") or "").split())
@@ -2489,6 +2681,9 @@ class Brain:
             self.store.add_turn(session, "user", text, {})
             meta = {"skill": skill, "params": params or {}, "target": target or {}, "kind": kind, "source": source,
                     "ok": bool(result.get("ok")) if isinstance(result, dict) and result else kind not in ("error",)}
+            result_context = compact_result_context(result)
+            if result_context:
+                meta["result_context"] = result_context
             if extra and isinstance(extra.get("link"), dict):
                 meta["link"] = extra["link"]  # «ссылка ниже» должна остаться и после перезагрузки окна
             if extra and extra.get("learned_id"):
