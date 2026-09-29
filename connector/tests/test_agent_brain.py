@@ -255,6 +255,8 @@ class UnderstandTests(unittest.TestCase):
         "Открой Steam": ("app.open", {"target": "steam"}),
         "Открой стим": ("app.open", {"target": "стим"}),
         "Открой apex": ("app.open", {"target": "apex"}),
+        "нажми кнопку сохранить": ("screen.find_and_click", {"text": "сохранить"}),
+        "найди на экране отправить и нажми": ("screen.find_and_click", {"text": "отправить"}),
         "как там компьютер": ("system.health", {}),
         "что грузит компьютер": ("system.process_list", {"limit": 8}),
         "поставь таймер на 25 минут": ("scheduler.focus_timer", {"minutes": 25, "note": ""}),
@@ -952,6 +954,63 @@ class ExecutorRefusalTests(unittest.TestCase):
         result = self.dispatch("app.open", {"target": str(pathlib.Path(self._tmp.name) / "outside.txt")})
         self.assertFalse(result["ok"])
         self.assertIn("вне разрешённых", result["reason"])
+
+    def test_screen_find_and_click_uses_grounded_rect_center(self):
+        found = {
+            "found": True, "method": "uia", "text": "Сохранить",
+            "rect": {"left": 100, "top": 200, "right": 220, "bottom": 260},
+        }
+        with patch.object(self.runner, "_screen_find", return_value={
+                "ok": True, "found": found, "method": "uia", "reason": "",
+             }), patch.object(executor.winapi, "active_window", return_value=("Редактор", "")), \
+             patch.object(executor.winapi, "click", return_value=(True, "")) as click:
+            result = self.runner._screen_find_and_click({"text": "Сохранить"})
+        self.assertTrue(result["ok"], result)
+        click.assert_called_once_with(160, 230)
+        self.assertEqual({"x": 160, "y": 230, "text": "Сохранить", "window": "Редактор"},
+                         result["clicked"])
+
+    def test_screen_find_and_click_never_guesses_missing_coordinates(self):
+        found = {"found": True, "method": "window_title", "title": "Сохранить"}
+        with patch.object(self.runner, "_screen_find", return_value={
+                "ok": True, "found": found, "method": "window_title", "reason": "",
+             }), patch.object(executor.winapi, "click") as click:
+            result = self.runner._screen_find_and_click({"text": "Сохранить"})
+        self.assertFalse(result["ok"])
+        self.assertIn("координаты", result["reason"])
+        click.assert_not_called()
+
+    def test_screen_describe_can_use_separate_installed_vision_model(self):
+        primary = {
+            "ok": True, "url": "http://127.0.0.1:11434", "model": "qwen2.5:3b",
+            "models": ["qwen2.5:3b", "qwen2.5vl:3b"], "reason": "",
+        }
+        vision = {
+            "ok": True, "url": "http://127.0.0.1:11434", "model": "qwen2.5vl:3b",
+            "models": ["qwen2.5:3b", "qwen2.5vl:3b"], "reason": "",
+        }
+
+        def status(*_args, name="", **_kwargs):
+            return dict(vision if name == "qwen2.5vl:3b" else primary)
+
+        def vision_ok(*_args, name="", **_kwargs):
+            return ((True, "") if name == "qwen2.5vl:3b"
+                    else (False, "основная модель без vision"))
+
+        with patch("agent.perception.observe", return_value={"ok": False}), \
+             patch.object(model, "status", side_effect=status), \
+             patch.object(model, "vision_ok", side_effect=vision_ok), \
+             patch.object(executor.winapi, "grab_screen", return_value=(b"PNG", "")), \
+             patch.object(model, "chat", return_value={
+                 "ok": True, "text": "На экране открыт редактор.", "model": "qwen2.5vl:3b",
+                 "reason": "",
+             }) as vision_chat:
+            result = self.runner._screen_describe({})
+
+        self.assertTrue(result["ok"], result)
+        self.assertEqual("qwen2.5vl:3b", result["model"])
+        self.assertEqual("qwen2.5vl:3b", vision_chat.call_args.kwargs["state"]["model"])
+        self.assertEqual([b"PNG"], vision_chat.call_args.kwargs["images"])
 
     def test_new_skills_are_described_for_confirmation(self):
         for name, params in (("system.hotkey", {"keys": "ctrl+s"}), ("window.close", {"title": "Блокнот"}),
