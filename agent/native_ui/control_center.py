@@ -140,7 +140,9 @@ class ActivityPage(QWidget):
 
     def __init__(self) -> None:
         super().__init__()
+        self._payload: dict[str, Any] = {}
         layout = QVBoxLayout(self)
+
         head = QHBoxLayout()
         title = QLabel("Активность")
         title.setObjectName("pageTitle")
@@ -150,16 +152,45 @@ class ActivityPage(QWidget):
         refresh.clicked.connect(self.refresh_requested)
         head.addWidget(refresh)
         layout.addLayout(head)
-        sub = QLabel("Что Люма услышала, решила, выполнила и как проверила результат.")
+
+        sub = QLabel("Фильтруемый маршрут: запрос → skill/task → verification → provider result.")
         sub.setObjectName("muted")
         sub.setWordWrap(True)
         layout.addWidget(sub)
+
+        filters = QHBoxLayout()
+        self.task_filter = QComboBox()
+        self.task_filter.addItem("Все задачи", 0)
+        self.task_filter.currentIndexChanged.connect(self._render)
+        filters.addWidget(self.task_filter)
+
+        self.status_filter = QComboBox()
+        self.status_filter.addItem("Все статусы", "")
+        for status in ("running", "waiting", "paused", "failed", "done", "cancelled", "planned"):
+            self.status_filter.addItem(status, status)
+        self.status_filter.currentIndexChanged.connect(self._render)
+        filters.addWidget(self.status_filter)
+
+        self.search_filter = QLineEdit()
+        self.search_filter.setPlaceholderText("skill / текст / outcome")
+        self.search_filter.textChanged.connect(self._render)
+        filters.addWidget(self.search_filter, 1)
+        layout.addLayout(filters)
+
         self.browser = QTextBrowser()
         layout.addWidget(self.browser, 1)
 
     @staticmethod
     def _e(value: Any) -> str:
         return html.escape(" ".join(str(value or "").split()))
+
+    @staticmethod
+    def _json_compact(value: Any, limit: int = 900) -> str:
+        try:
+            text = json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
+        except Exception:
+            text = str(value or "")
+        return text[:limit]
 
     def _activity_card(self, row: dict[str, Any], title: str) -> str:
         phase = str(row.get("phase") or "idle")
@@ -175,61 +206,157 @@ class ActivityPage(QWidget):
             bits.append(f"<div><small>{self._e(row.get('detail'))}</small></div>")
         return "<div style='margin:8px 0;padding:10px;border:1px solid #334155;border-radius:8px'>" + "".join(bits) + "</div>"
 
-    def set_payload(self, payload: dict[str, Any]) -> None:
-        activity = payload.get("activity") if isinstance(payload.get("activity"), dict) else {}
-        current = activity.get("current") if isinstance(activity.get("current"), dict) else {}
-        recent = list(activity.get("recent") or [])
-        tasks = list(payload.get("tasks") or [])
-        journal = list(payload.get("journal") or [])
+    def _matches(self, *values: Any) -> bool:
+        needle = " ".join(self.search_filter.text().casefold().split())
+        if not needle:
+            return True
+        hay = " ".join(str(value or "") for value in values).casefold()
+        return needle in hay
 
-        chunks = ["<h3>Сейчас</h3>"]
-        if current and (current.get("active") or current.get("phase") != "idle"):
-            chunks.append(self._activity_card(current, "Текущий маршрут"))
-        else:
-            chunks.append("<p>Люма свободна.</p>")
-
-        if recent:
-            chunks.append("<h3>Недавние маршруты</h3>")
-            for row in recent[:4]:
-                chunks.append(self._activity_card(row, "Завершено"))
-
-        chunks.append("<h3>Задачи</h3>")
-        shown = 0
-        for task in tasks[:12]:
-            steps = list(task.get("steps") or [])
-            if not steps:
-                continue
-            shown += 1
-            task_id = int(task.get("id") or 0)
-            title = self._e(task.get("title") or f"Задача {task_id}")
-            status = self._e(task.get("status") or "")
-            chunks.append(
-                f"<div style='margin:10px 0'><b>#{task_id} {title}</b> · {status}"
-                f" · {int(task.get('progress') or 0)}/{int(task.get('total_steps') or len(steps))}<br>"
+    def _step_detail(self, task_id: int, step: dict[str, Any]) -> str:
+        verification = step.get("verification") if isinstance(step.get("verification"), dict) else {}
+        evidence = verification.get("evidence") if isinstance(verification.get("evidence"), dict) else {}
+        result = step.get("result") if isinstance(step.get("result"), dict) else {}
+        safe_result = {key: value for key, value in result.items() if key != "_verification"}
+        bits = [
+            "<div style='margin-left:14px;padding:7px 0'>",
+            f"<b>{int(step.get('seq') or 0) + 1}. {self._e(step.get('skill'))}</b>",
+            f" · {self._e(step.get('status') or 'pending')}",
+        ]
+        stamp = str(step.get("finished_at") or step.get("started_at") or "")
+        if stamp:
+            bits.append(f" · <small>{self._e(stamp)}</small>")
+        if verification:
+            bits.append(
+                f"<div>🔎 verification: <b>{self._e(verification.get('status'))}</b>"
+                f" · {self._e(verification.get('reason'))}</div>"
             )
-            for step in steps:
+        if evidence:
+            bits.append(
+                f"<div><small>evidence: {self._e(self._json_compact(evidence, 700))}</small></div>"
+            )
+        if safe_result:
+            bits.append(
+                f"<div><small>provider result: {self._e(self._json_compact(safe_result, 900))}</small></div>"
+            )
+        pending = str(step.get("pending_action") or "")
+        if pending:
+            bits.append(f"<div><small>pending confirmation: {self._e(pending)}</small></div>")
+        bits.append("</div>")
+        return "".join(bits)
+
+    def _task_card(self, task: dict[str, Any], detailed: bool) -> str:
+        task_id = int(task.get("id") or 0)
+        steps = list(task.get("steps") or [])
+        title = self._e(task.get("title") or f"Задача {task_id}")
+        status = self._e(task.get("status") or "")
+        chunks = [
+            "<div style='margin:10px 0;padding:10px;border:1px solid #334155;border-radius:8px'>",
+            f"<b>#{task_id} {title}</b> · {status}"
+            f" · {int(task.get('progress') or 0)}/{int(task.get('total_steps') or len(steps))}",
+        ]
+        if task.get("error"):
+            chunks.append(f"<div>⚠ {self._e(task.get('error'))}</div>")
+
+        for step in steps:
+            if not self._matches(step.get("skill"), step.get("status"),
+                                 step.get("verification"), step.get("result")):
+                continue
+            if detailed:
+                chunks.append(self._step_detail(task_id, step))
+            else:
                 verification = step.get("verification") if isinstance(step.get("verification"), dict) else {}
                 verify = str(verification.get("status") or "")
-                reason = str(verification.get("reason") or "")
-                stamp = str(step.get("finished_at") or step.get("started_at") or "")
                 line = (
                     f"{int(step.get('seq') or 0) + 1}. {self._e(step.get('skill'))}"
                     f" · {self._e(step.get('status') or 'pending')}"
                 )
                 if verify:
                     line += f" · проверка: {self._e(verify)}"
-                if reason:
-                    line += f" ({self._e(reason)})"
-                if stamp:
-                    line += f" · {self._e(stamp)}"
+                    reason = str(verification.get("reason") or "")
+                    if reason:
+                        line += f" ({self._e(reason)})"
                 chunks.append(f"<div style='margin-left:14px'>{line}</div>")
-            chunks.append("</div>")
-        if not shown:
-            chunks.append("<p>Долгих задач пока нет.</p>")
+
+        replans = list(task.get("replans") or [])
+        if replans:
+            chunks.append("<div style='margin-top:7px'><b>Перепланирование</b></div>")
+            for row in replans[:8]:
+                chunks.append(
+                    f"<div style='margin-left:14px'><small>{self._e(row.get('created_at'))}</small>"
+                    f" · с шага {int(row.get('replace_from') or 0) + 1}"
+                    f" · {self._e(row.get('reason'))}</div>"
+                )
+                if detailed:
+                    old_skills = " → ".join(str(x.get("skill") or "") for x in list(row.get("old_tail") or []))
+                    new_skills = " → ".join(str(x.get("skill") or "") for x in list(row.get("new_tail") or []))
+                    chunks.append(
+                        f"<div style='margin-left:28px'><small>было: {self._e(old_skills) or '—'}"
+                        f"<br>стало: {self._e(new_skills) or '—'}</small></div>"
+                    )
+        chunks.append("</div>")
+        return "".join(chunks)
+
+    def _render(self, *_args: Any) -> None:
+        payload = self._payload
+        activity = payload.get("activity") if isinstance(payload.get("activity"), dict) else {}
+        current = activity.get("current") if isinstance(activity.get("current"), dict) else {}
+        recent = list(activity.get("recent") or [])
+        tasks = list(payload.get("tasks") or [])
+        journal = list(payload.get("journal") or [])
+        drafts = list(payload.get("replans") or [])
+
+        selected_task = int(self.task_filter.currentData() or 0)
+        selected_status = str(self.status_filter.currentData() or "")
+        filtered_tasks = [
+            task for task in tasks
+            if (not selected_task or int(task.get("id") or 0) == selected_task)
+            and (not selected_status or str(task.get("status") or "") == selected_status)
+            and self._matches(task.get("title"), task.get("goal"), task.get("status"), task.get("steps"))
+        ]
+
+        chunks = ["<h3>Сейчас</h3>"]
+        if current and (current.get("active") or current.get("phase") != "idle") and self._matches(current):
+            chunks.append(self._activity_card(current, "Текущий маршрут"))
+        else:
+            chunks.append("<p>Нет активного маршрута по текущему фильтру.</p>")
+
+        if recent and not selected_task:
+            matching_recent = [row for row in recent[:4] if self._matches(row)]
+            if matching_recent:
+                chunks.append("<h3>Недавние маршруты</h3>")
+                for row in matching_recent:
+                    chunks.append(self._activity_card(row, "Завершено"))
+
+        chunks.append("<h3>Задачи</h3>")
+        if filtered_tasks:
+            for task in filtered_tasks[:20]:
+                chunks.append(self._task_card(task, detailed=bool(selected_task)))
+        else:
+            chunks.append("<p>Задач по фильтру нет.</p>")
+
+        matching_drafts = [
+            row for row in drafts
+            if (not selected_task or int(row.get("task_id") or 0) == selected_task)
+            and self._matches(row.get("reason"), row.get("summary"), row.get("steps"))
+        ]
+        if matching_drafts:
+            chunks.append("<h3>Черновики replan</h3>")
+            for row in matching_drafts[:10]:
+                chunks.append(
+                    f"<div><b>Задача #{int(row.get('task_id') or 0)}</b>"
+                    f" · {self._e(row.get('summary') or row.get('reason'))}"
+                    f" · с шага {int(row.get('replace_from') or 0) + 1}</div>"
+                )
 
         chunks.append("<h3>Фактические действия</h3>")
-        if journal:
-            for row in journal[:40]:
+        matching_journal = [
+            row for row in journal
+            if self._matches(row.get("skill"), row.get("outcome"), row.get("detail"),
+                             row.get("target"), row.get("params"))
+        ]
+        if matching_journal:
+            for row in matching_journal[:60]:
                 outcome = self._e(row.get("outcome") or "")
                 detail = self._e(row.get("detail") or "")
                 target = self._e(row.get("target") or "")
@@ -242,9 +369,27 @@ class ActivityPage(QWidget):
                     + "</div>"
                 )
         else:
-            chunks.append("<p>Журнал действий пуст.</p>")
+            chunks.append("<p>Журнал по фильтру пуст.</p>")
 
         self.browser.setHtml("".join(chunks))
+
+    def set_payload(self, payload: dict[str, Any]) -> None:
+        self._payload = dict(payload or {})
+        tasks = list(self._payload.get("tasks") or [])
+        current_task = int(self.task_filter.currentData() or 0)
+        self.task_filter.blockSignals(True)
+        self.task_filter.clear()
+        self.task_filter.addItem("Все задачи", 0)
+        for task in tasks:
+            task_id = int(task.get("id") or 0)
+            self.task_filter.addItem(
+                f"#{task_id} {str(task.get('title') or 'Задача')[:42]}",
+                task_id,
+            )
+        index = self.task_filter.findData(current_task)
+        self.task_filter.setCurrentIndex(index if index >= 0 else 0)
+        self.task_filter.blockSignals(False)
+        self._render()
 
 
 class TasksPage(QWidget):

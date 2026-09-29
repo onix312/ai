@@ -126,14 +126,29 @@ class NativeQtSmokeTests(unittest.TestCase):
                 "steps": [
                     {"seq": 0, "skill": "app.open", "status": "done",
                      "finished_at": "2026-09-29 05:00:00",
-                     "verification": {"status": "verified", "reason": "окно найдено"}},
+                     "result": {"ok": True, "title": "Telegram",
+                                "_verification": {"status": "verified"}},
+                     "verification": {"status": "verified", "reason": "окно найдено",
+                                      "evidence": {"active": "Telegram"}}},
                     {"seq": 1, "skill": "window.focus", "status": "pending",
                      "verification": {}},
                 ],
+                "replans": [{
+                    "id": 1, "created_at": "2026-09-29 05:01:00",
+                    "replace_from": 1, "reason": "Проверка окна не прошла",
+                    "old_tail": [{"skill": "window.focus"}],
+                    "new_tail": [{"skill": "system.health"}, {"skill": "window.focus"}],
+                }],
             }],
             "journal": [{
                 "at": "2026-09-29 05:00:01", "skill": "app.open",
                 "outcome": "ok", "detail": "Telegram открыт", "target": "Telegram",
+            }],
+            "replans": [{
+                "id": "draft-1", "task_id": 4, "replace_from": 1,
+                "reason": "Нужна дополнительная проверка",
+                "summary": "Проверить здоровье системы",
+                "steps": [{"skill": "system.health"}],
             }],
         })
 
@@ -216,6 +231,24 @@ class NativeQtSmokeTests(unittest.TestCase):
         self.assertIn("проверка: verified", timeline)
         self.assertIn("окно найдено", timeline)
         self.assertIn("Telegram открыт", timeline)
+        activity_page = center.pages["activity"]
+        task_index = activity_page.task_filter.findData(4)
+        self.assertGreaterEqual(task_index, 0)
+        activity_page.task_filter.setCurrentIndex(task_index)
+        self.app.processEvents()
+        drill = activity_page.browser.toPlainText()
+        self.assertIn("evidence:", drill)
+        self.assertIn("Telegram", drill)
+        self.assertIn("provider result:", drill)
+        self.assertIn("Проверка окна не прошла", drill)
+        self.assertIn("было: window.focus", drill)
+        self.assertIn("стало: system.health → window.focus", drill)
+        self.assertIn("Проверить здоровье системы", drill)
+        activity_page.search_filter.setText("app.open")
+        self.app.processEvents()
+        filtered = activity_page.browser.toPlainText()
+        self.assertIn("app.open", filtered)
+        self.assertNotIn("window.focus · pending", filtered)
         self.assertIsInstance(center.pages["tasks"], TasksPage)
         task_page = center.pages["tasks"]
         labels = [w.text() for w in task_page.findChildren(QLabel)]

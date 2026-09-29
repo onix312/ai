@@ -281,11 +281,13 @@ class NativeApp:
         status = self.backend.status()
         tasks = self.backend.tasks(20)
         journal = self.backend.journal(60)
+        replans = self.backend.replans()
         activity = status.get("activity") if isinstance(status.get("activity"), dict) else {}
         return {
             "activity": activity,
             "tasks": tasks.get("tasks") or [],
             "journal": journal.get("entries") or [],
+            "replans": replans.get("replans") or [],
         }
 
     def _load_tasks(self) -> dict[str, Any]:
