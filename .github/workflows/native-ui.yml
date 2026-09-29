@@ -7,12 +7,14 @@ on:
       - "agent/server.py"
       - "agent/brain.py"
       - "agent/task_engine.py"
+      - "agent/voice_runtime.py"
       - "agent/window.py"
       - "agent/capabilities.py"
       - "agent/requirements.txt"
       - "connector/tests/test_native_ui.py"
       - "connector/tests/test_agent_brain.py"
       - "connector/tests/test_task_engine.py"
+      - "connector/tests/test_voice_runtime.py"
       - "docs/NATIVE-UI-2-PHASE1.md"
       - "docs/NATIVE-UI-2.md"
       - ".github/workflows/native-ui.yml"
@@ -35,13 +37,14 @@ jobs:
         with:
           python-version: "3.12"
       - name: Compile native UI
-        run: python -m compileall -q agent/native_ui agent/server.py agent/brain.py agent/task_engine.py agent/window.py agent/capabilities.py
+        run: python -m compileall -q agent/native_ui agent/server.py agent/brain.py agent/task_engine.py agent/voice_runtime.py agent/window.py agent/capabilities.py
       - name: Native UI contract tests
         run: >-
           python -m unittest
           connector.tests.test_native_ui
           connector.tests.test_agent_brain.ServerSecurityTests
           connector.tests.test_task_engine
+          connector.tests.test_voice_runtime
 
 
   windows-ui-smoke:
