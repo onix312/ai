@@ -8,7 +8,7 @@ import time
 import unittest
 from unittest.mock import patch
 
-from agent import pc, speech, voice_runtime
+from agent import config, pc, speech, voice_runtime
 
 
 class _Recognizer:
@@ -101,6 +101,29 @@ class VoiceStreamingTests(unittest.TestCase):
         self.assertTrue(during_output)
         self.assertGreaterEqual(runtime.echo_suppressed, 2)
         self.assertEqual(owner, chunks[0], "suppressed TTS leakage must stay out of ASR pre-roll")
+
+    def test_runtime_tuning_is_bounded_and_resettable(self):
+        runtime = voice_runtime.VoiceRuntime(_Recognizer())
+        tuned = runtime.tune({"multiplier": 9, "margin": -5, "alpha": 0.01})
+        self.assertTrue(tuned["ok"])
+        self.assertEqual(4.0, tuned["echo_gate_multiplier"])
+        self.assertEqual(0, tuned["echo_gate_margin"])
+        self.assertEqual(0.05, tuned["echo_floor_alpha"])
+        runtime.echo_floor = 777
+        runtime.echo_suppressed = 9
+        reset = runtime.reset_diagnostics()
+        self.assertTrue(reset["ok"])
+        self.assertEqual(0, reset["echo_floor"])
+        self.assertEqual(0, reset["echo_suppressed"])
+        self.assertAlmostEqual(config.VOICE_ECHO_GATE_MULTIPLIER, reset["echo_gate_multiplier"])
+        self.assertEqual(config.VOICE_ECHO_GATE_MARGIN, reset["echo_gate_margin"])
+        self.assertAlmostEqual(config.VOICE_ECHO_FLOOR_ALPHA, reset["echo_floor_alpha"])
+
+    def test_runtime_tuning_rejects_invalid_values(self):
+        runtime = voice_runtime.VoiceRuntime(_Recognizer())
+        result = runtime.tune({"multiplier": "banana"})
+        self.assertFalse(result["ok"])
+        self.assertIn("Некорректные", result["reason"])
 
     def test_status_exposes_echo_gate_telemetry(self):
         runtime = voice_runtime.VoiceRuntime(_Recognizer())
