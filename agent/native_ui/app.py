@@ -62,6 +62,8 @@ class NativeApp:
         self.center.autonomy_reset.connect(self.reset_autonomy)
         self.center.proactivity_save.connect(self.save_proactivity)
         self.center.proactivity_reset.connect(self.reset_proactivity)
+        self.center.voice_tune.connect(self.tune_voice)
+        self.center.voice_diag_reset.connect(self.reset_voice_diagnostics)
         self.center.task_command.connect(self.task_command)
         self.center.plan_preview.connect(self.plan_preview)
         self.center.plan_command.connect(self.plan_command)
@@ -154,6 +156,18 @@ class NativeApp:
             if self.orb.isVisible():
                 self.orb.set_state("error", 1800)
             return
+        self.center.set_voice_diagnostics(
+            audio_level=self.state.audio_level,
+            echo_floor=self.state.echo_floor,
+            echo_threshold=self.state.echo_threshold,
+            echo_suppressed=self.state.echo_suppressed,
+            multiplier=self.state.echo_gate_multiplier,
+            margin=self.state.echo_gate_margin,
+            alpha=self.state.echo_floor_alpha,
+            vad_threshold=self.state.vad_threshold,
+            asr_engine=self.state.asr_engine,
+            vocabulary_count=self.state.vocabulary_count,
+        )
         self.center.chat.set_live_activity(
             self.state.activity_phase,
             self.state.activity_heard,
@@ -426,6 +440,35 @@ class NativeApp:
         self.run_async(self.backend.persona_reset, done)
 
     # --------------------------------------------------------------- mic
+    def tune_voice(self, multiplier: float, margin: int, alpha: float) -> None:
+        def done(payload: dict[str, Any]) -> None:
+            if payload.get("ok"):
+                self.center.set_voice_diagnostics_message(
+                    "✓ Калибровка применена в RAM. После перезапуска вернутся defaults."
+                )
+                self.refresh_status()
+            else:
+                self.center.set_voice_diagnostics_message(
+                    str(payload.get("reason") or "Не удалось применить Voice Diagnostics.")
+                )
+        self.run_async(
+            lambda: self.backend.tune_voice(multiplier, margin, alpha),
+            done,
+        )
+
+    def reset_voice_diagnostics(self) -> None:
+        def done(payload: dict[str, Any]) -> None:
+            if payload.get("ok"):
+                self.center.set_voice_diagnostics_message(
+                    "Voice Diagnostics сброшены к defaults; echo floor начнёт обучение заново."
+                )
+                self.refresh_status()
+            else:
+                self.center.set_voice_diagnostics_message(
+                    str(payload.get("reason") or "Не удалось сбросить Voice Diagnostics.")
+                )
+        self.run_async(self.backend.reset_voice_diagnostics, done)
+
     def toggle_mic(self) -> None:
         if self.state.voice_enabled:
             self.run_async(self.backend.disable_voice, self._mic_result)
