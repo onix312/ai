@@ -461,6 +461,7 @@ class ChatPage(QWidget):
             "task": "TASK",
             "planner": "PLANNER",
             "memory": "MEMORY",
+            "agent-loop": "AGENT LOOP",
             "registry": "SKILLS",
             "talk": "TALK",
             "clock": "LOCAL",
@@ -560,7 +561,7 @@ class ChatPage(QWidget):
         icons = {
             "rule": "◆", "context": "◇", "model": "◉", "check": "✓",
             "skill": "→", "task": "▰", "panel": "⌁", "learned": "✦",
-            "plan": "≋",
+            "plan": "≋", "agent": "◎",
         }
         lines = []
         for row in rows[-6:]:
@@ -857,6 +858,7 @@ class HomePage(QWidget):
             "task": "TASK",
             "planner": "PLANNER",
             "memory": "MEMORY",
+            "agent-loop": "AGENT LOOP",
             "ready": "READY",
         }
         label = "SELF-CORRECTED" if repaired else labels.get(clean_route, clean_route.upper()[:24] or "READY")
