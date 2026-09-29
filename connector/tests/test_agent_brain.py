@@ -911,6 +911,23 @@ class ServerSecurityTests(unittest.TestCase):
         code, _h, payload = self.request("/chat", {"text": "сколько у нас долгов", "mode": "pc"})
         self.assertFalse(payload["handled"])
 
+    def test_status_exposes_ephemeral_live_activity(self):
+        self.agent.set_activity(
+            "thinking", session="native", heard="первый запрос",
+            reply="старый ответ", skill="old.skill", detail="думаю", active=True,
+        )
+        self.agent.set_activity(
+            "thinking", session="native", heard="новый запрос",
+            reply="", skill="", task_id=0, detail="новый turn", active=True,
+        )
+        code, _h, payload = self.request("/status")
+        self.assertEqual(200, code)
+        current = payload["activity"]["current"]
+        self.assertEqual("новый запрос", current["heard"])
+        self.assertEqual("", current["reply"])
+        self.assertEqual("", current["skill"])
+        self.assertTrue(current["active"])
+
     def test_stop_all_latches_execution_until_resume(self):
         code, _h, stopped = self.request("/safety/stop", {})
         self.assertEqual(200, code)
