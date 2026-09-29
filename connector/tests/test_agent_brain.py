@@ -152,6 +152,11 @@ class ModelClientTests(unittest.TestCase):
         self.assertEqual("qwen2.5:3b", model.pick_default(["nomic-embed-text", "llava:7b", "qwen2.5:3b", "llama3.2"]))
         self.assertEqual("", model.pick_default(["nomic-embed-text"]))
 
+    def test_vision_model_is_selected_separately_from_main_brain(self):
+        models = ["qwen2.5:3b", "llava:7b", "qwen2.5vl:3b", "nomic-embed-text"]
+        self.assertEqual("qwen2.5vl:3b", model.pick_vision(models))
+        self.assertEqual("", model.pick_vision(["qwen2.5:3b", "nomic-embed-text"]))
+
     def test_visible_text_drops_reasoning(self):
         self.assertEqual("Привет!\nКак дела?", model.visible_text("<think>долго</think>\nПривет!\n\nКак дела?"))
 
