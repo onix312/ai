@@ -533,6 +533,32 @@ class BrainChatTests(unittest.TestCase):
         )
         self.assertIn("нет в реестре", problem)
 
+    def test_model_tool_retrieval_uses_recent_user_context(self):
+        self.store.add_turn("main", "user", "проверь состояние компьютера")
+        self.store.add_turn("main", "assistant", "Хорошо.", {"source": "talk"})
+        captured = {}
+
+        def fake_chat(*_args, system="", **_kwargs):
+            captured["system"] = system
+            return {
+                "ok": True,
+                "text": json.dumps({
+                    "skill": "system.health", "params": {}, "steps": [],
+                    "reply": "", "ask": "",
+                }, ensure_ascii=False),
+                "reason": "", "model": "qwen2.5:3b",
+            }
+
+        with patch.object(model, "status", return_value={
+                "ok": True, "model": "qwen2.5:3b", "reason": "",
+                "url": "http://127.0.0.1:11434", "models": ["qwen2.5:3b"],
+             }), patch.object(model, "chat", side_effect=fake_chat):
+            answer = self.brain.chat("а теперь сделай это")
+
+        self.assertEqual("system.health", self.agent.calls[-1][0])
+        self.assertIn("system.health", captured["system"])
+        self.assertNotEqual("clarify", answer["kind"])
+
     def test_model_repairs_bad_tool_choice_before_execution(self):
         first = json.dumps({
             "skill": "computer.deep_check",
