@@ -18,6 +18,14 @@ class UiState:
     audio_level: int = 0
     streaming_asr: bool = False
     safety_stopped: bool = False
+    activity_phase: str = "idle"
+    activity_heard: str = ""
+    activity_reply: str = ""
+    activity_skill: str = ""
+    activity_detail: str = ""
+    activity_task_id: int = 0
+    activity_active: bool = False
+    activity_recent: list[dict[str, Any]] = field(default_factory=list)
     pending: list[dict[str, Any]] = field(default_factory=list)
 
     def apply_status(self, payload: dict[str, Any]) -> None:
@@ -30,6 +38,16 @@ class UiState:
         self.streaming_asr = bool(voice.get("streaming_asr"))
         safety = payload.get("safety") if isinstance(payload.get("safety"), dict) else {}
         self.safety_stopped = bool(safety.get("stopped") or safety.get("latched"))
+        activity = payload.get("activity") if isinstance(payload.get("activity"), dict) else {}
+        current = activity.get("current") if isinstance(activity.get("current"), dict) else {}
+        self.activity_phase = str(current.get("phase") or "idle")
+        self.activity_heard = str(current.get("heard") or "")
+        self.activity_reply = str(current.get("reply") or "")
+        self.activity_skill = str(current.get("skill") or "")
+        self.activity_detail = str(current.get("detail") or "")
+        self.activity_task_id = int(current.get("task_id") or 0)
+        self.activity_active = bool(current.get("active"))
+        self.activity_recent = list(activity.get("recent") or [])[:4]
         voice_state = str(voice.get("state") or payload.get("voice_state") or "idle")
         if voice_state in ("idle", "listening", "thinking", "speaking", "error"):
             self.assistant_state = voice_state
