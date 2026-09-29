@@ -102,6 +102,46 @@ def _request(url: str, payload: dict | None = None, timeout: float = TIMEOUT_SEC
         return False, None, "панель ответила не JSON"
 
 
+def _request_bytes(url: str, timeout: float = TIMEOUT_SEC,
+                   limit: int = 8 * 1024 * 1024) -> tuple[bool, bytes, str]:
+    """Read a small binary payload from PrintFlow over loopback only."""
+    local, why = loopback_ok(url)
+    if not local:
+        return False, b"", why
+    request = urllib.request.Request(
+        url, headers={"Accept": "image/jpeg", "User-Agent": "Luma-PanelClient/1"},
+        method="GET",
+    )
+    try:
+        with _LOCAL_OPENER.open(request, timeout=timeout) as answer:
+            content_type = str(answer.headers.get("Content-Type") or "").casefold()
+            raw = answer.read(int(limit) + 1)
+    except urllib.error.HTTPError as exc:
+        detail = ""
+        try:
+            detail = exc.read(4096).decode("utf-8", "replace")
+            parsed = json.loads(detail or "{}")
+            if isinstance(parsed, dict):
+                detail = str(parsed.get("reason") or parsed.get("error") or "")
+        except Exception:
+            pass
+        return False, b"", detail or f"панель ответила {exc.code}"
+    except urllib.error.URLError as exc:
+        reason = getattr(exc, "reason", exc)
+        if isinstance(reason, socket.timeout):
+            return False, b"", f"панель не ответила за {timeout:.0f} с"
+        return False, b"", f"панель недоступна ({reason})"
+    except (OSError, ValueError) as exc:
+        return False, b"", f"панель недоступна ({exc.__class__.__name__})"
+    if len(raw) > int(limit):
+        return False, b"", "кадр камеры слишком большой"
+    if not raw:
+        return False, b"", "камера вернула пустой кадр"
+    if "image/jpeg" not in content_type and not raw.startswith(b"\xff\xd8\xff"):
+        return False, b"", "панель вернула не JPEG"
+    return True, raw, ""
+
+
 def multipart(fields: dict[str, str], file_path: pathlib.Path,
               file_field: str = "file") -> tuple[bytes, str]:
     """multipart-тело для загрузки файла в панель (байты, как ждёт `uploads.py`)."""
@@ -271,6 +311,40 @@ class Client:
         if not ok or not isinstance(payload, dict):
             return {"ok": False, "reason": reason or "панель не ответила"}
         return payload
+
+    def camera_frame(self, printer_id: str = "") -> dict[str, Any]:
+        """Fresh JPEG from the selected/active PrintFlow printer camera."""
+        pid = str(printer_id or "").strip()
+        printer: dict[str, Any] = {}
+        if not pid:
+            context = self.context()
+            if not context.get("ok"):
+                return {"ok": False, "reason": context.get("reason") or "PrintFlow недоступен",
+                        "printer_id": "", "image": b"", "mime": ""}
+            rows = [row for row in list(context.get("printers") or []) if isinstance(row, dict)]
+            active_states = {"RUNNING", "PRINTING", "PAUSED"}
+            printer = next(
+                (row for row in rows if str(row.get("state") or "").upper() in active_states),
+                rows[0] if rows else {},
+            )
+            pid = str(printer.get("id") or "").strip()
+            if not pid:
+                return {"ok": False, "reason": "В PrintFlow нет настроенного принтера",
+                        "printer_id": "", "image": b"", "mime": ""}
+        query = urllib.parse.urlencode({"printer_id": pid})
+        camera_url = f"{self.url}/api/printer/camera.jpg?{query}"
+        ok, image, reason = _request_bytes(
+            camera_url, timeout=min(self.timeout, 8.0),
+        )
+        return {
+            "ok": bool(ok),
+            "reason": "" if ok else (reason or "Кадр камеры недоступен"),
+            "printer_id": pid,
+            "printer_name": str(printer.get("name") or pid),
+            "image": image if ok else b"",
+            "mime": "image/jpeg" if ok else "",
+            "url": camera_url,
+        }
 
     def clear_dialog(self, session: str) -> dict[str, Any]:
         """Забыть контекст разговора агента в панели («его», «второй») — вместе с лентой окна."""
