@@ -14,7 +14,7 @@ from PySide6.QtWidgets import QApplication, QLabel, QLineEdit, QProgressBar, QPu
 
 from agent.native_ui.app import NativeApp
 from agent.native_ui.components import LumaPortrait
-from agent.native_ui.control_center import ActivityPage, ChatPage, ControlCenter, HomePage, JournalPage, LearningPage, MemoryPage, SkillsPage, TasksPage, TextPage, VoicePage
+from agent.native_ui.control_center import ActivityPage, ChatPage, ControlCenter, HomePage, JournalPage, LearningPage, MemoryPage, SkillsPage, TasksPage, TextPage, TodayPage, VoicePage
 from agent.native_ui.orb import LumaOrbCore, VoiceOrb
 from agent.native_ui.quick_panel import QuickPanel
 
@@ -190,6 +190,57 @@ class NativeQtSmokeTests(unittest.TestCase):
         forget.click()
         self.assertEqual([(77, True)], pins)
         self.assertEqual([77], forgotten)
+        page.deleteLater()
+        self.app.processEvents()
+
+    def test_today_dashboard_metrics_and_actions(self):
+        page = TodayPage()
+        page.set_payload({
+            "reminders": [{
+                "id": 10, "text": "Позвонить", "label": "сегодня в 18:00",
+                "today": True, "repeat": "", "status": "active",
+            }],
+            "fired": [{
+                "id": 11, "text": "Проверить печать", "label": "сработало 17:30",
+                "repeat": "", "status": "fired",
+            }],
+            "habits": [
+                {"id": 7, "title": "Вода", "done_today": True, "streak": 5, "week": 6, "remind_at": "10:00"},
+                {"id": 8, "title": "Чтение", "done_today": False, "streak": 2, "week": 4, "remind_at": ""},
+            ],
+            "goals": [{
+                "id": 9, "title": "Прочитать книги", "progress": 3, "target": 12,
+                "percent": 25, "pace": "отстаёте на 1 книгу", "behind": True,
+                "unit": "книг", "status": "active",
+            }],
+            "lists": [{
+                "name": "покупки", "count": 1,
+                "items": [{"id": 12, "item": "PLA белый"}],
+            }],
+            "expenses": {
+                "month": 1234, "month_text": "1 234 ₽", "today": 250,
+                "top": [["еда", "800 ₽"], ["транспорт", "434 ₽"]],
+            },
+            "mood": 7.4,
+        })
+        self.assertEqual("2", page.reminder_metric.text())
+        self.assertEqual("1/2", page.habit_metric.text())
+        self.assertEqual("1", page.goal_metric.text())
+        self.assertEqual("7.4/10", page.mood_metric.text())
+        self.assertIn("1 234 ₽", page.expense_month.text())
+        self.assertIn("250 ₽", page.expense_today.text())
+
+        actions = []
+        page.action_requested.connect(lambda op, payload: actions.append((op, dict(payload))))
+        next(button for button in page.findChildren(QPushButton) if button.text() == "Отметить").click()
+        next(button for button in page.findChildren(QPushButton) if button.text() == "+1 к прогрессу").click()
+        next(button for button in page.findChildren(QPushButton) if button.text() == "Вычеркнуть").click()
+        next(button for button in page.findChildren(QPushButton) if button.text() == "Отложить 10 мин").click()
+        self.assertIn(("habit_check", {"id": 8}), actions)
+        self.assertIn(("goal_progress", {"id": 9, "amount": 1}), actions)
+        self.assertIn(("list_remove", {"id": 12}), actions)
+        self.assertTrue(any(op == "reminder_snooze" and payload.get("minutes") == 10
+                            for op, payload in actions))
         page.deleteLater()
         self.app.processEvents()
 
@@ -448,6 +499,21 @@ class NativeQtSmokeTests(unittest.TestCase):
         self.assertEqual(2, center.pronunciation_list.count())
         self.assertIn("Пользовательских правил: 2", center.pronunciation_status.text())
 
+        center.set_page_payload("today", {
+            "reminders": [{"id": 10, "text": "Позвонить", "label": "сегодня в 18:00",
+                           "today": True, "repeat": "", "status": "active"}],
+            "fired": [],
+            "habits": [{"id": 7, "title": "Вода", "done_today": False,
+                        "streak": 5, "week": 6, "remind_at": "10:00"}],
+            "goals": [{"id": 9, "title": "Прочитать книги", "progress": 3,
+                       "target": 12, "percent": 25, "pace": "идёте в графике",
+                       "behind": False, "unit": "книг", "status": "active"}],
+            "lists": [{"name": "покупки", "count": 1,
+                       "items": [{"id": 12, "item": "PLA белый"}]}],
+            "expenses": {"month": 1234, "month_text": "1 234 ₽", "today": 250,
+                         "top": [["еда", "800 ₽"]]},
+            "mood": 7.4,
+        })
         center.set_page_payload("memory", {
             "memories": [
                 {
@@ -602,6 +668,12 @@ class NativeQtSmokeTests(unittest.TestCase):
         self.assertIn("Autopilot включён", center.proactivity_status.text())
         self.assertIn("[suppressed] Цель", center.events_view.toPlainText())
         self.assertIn("quiet hours", center.events_view.toPlainText())
+        self.assertIsInstance(center.pages["today"], TodayPage)
+        self.assertEqual("1", center.pages["today"].reminder_metric.text())
+        self.assertEqual("0/1", center.pages["today"].habit_metric.text())
+        self.assertIn("Позвонить", " ".join(
+            label.text() for label in center.pages["today"].findChildren(QLabel)
+        ))
         self.assertIsInstance(center.pages["memory"], MemoryPage)
         memory_page = center.pages["memory"]
         self.assertEqual("2", memory_page.total_metric.text())
