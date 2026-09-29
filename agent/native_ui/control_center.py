@@ -450,7 +450,26 @@ class ChatPage(QWidget):
             self.submitted.emit(text)
 
     @staticmethod
-    def _bubble(role: str, text: str) -> str:
+    def _route_label(source: str) -> str:
+        clean = str(source or "").casefold()
+        return {
+            "model": "MODEL",
+            "rules": "RULES",
+            "rule": "RULES",
+            "panel": "PRINTFLOW",
+            "panel-camera": "VISION",
+            "task": "TASK",
+            "planner": "PLANNER",
+            "memory": "MEMORY",
+            "registry": "SKILLS",
+            "talk": "TALK",
+            "clock": "LOCAL",
+            "math": "LOCAL",
+            "util": "LOCAL",
+        }.get(clean, clean.upper()[:18])
+
+    @classmethod
+    def _bubble(cls, role: str, text: str, source: str = "", skill: str = "") -> str:
         safe = html.escape(str(text or "")).replace("\n", "<br>")
         if role == "user":
             return (
@@ -461,18 +480,36 @@ class ChatPage(QWidget):
                 "<span style='color:#BCAEFF;font-size:11px;font-weight:700;'>ВЫ</span><br>"
                 f"{safe}</div></td></tr></table>"
             )
+        route = html.escape(cls._route_label(source))
+        skill_text = html.escape(str(skill or ""))
+        badge = ""
+        if route or skill_text:
+            bits = [part for part in (route, skill_text) if part]
+            badge = (
+                "&nbsp;&nbsp;<span style='color:#A78BFA;font-size:10px;"
+                "font-weight:700;'>"
+                + " · ".join(bits) + "</span>"
+            )
         return (
             "<table width='100%' cellspacing='0' cellpadding='0' style='margin:8px 0;'>"
             "<tr><td>"
             "<div style='background:#111328;border:1px solid #30345A;"
             "border-radius:14px;padding:11px 14px;color:#ECE9F8;'>"
-            "<span style='color:#58E6B1;font-size:11px;font-weight:700;'>LUMA</span><br>"
-            f"{safe}</div></td><td width='19%'></td></tr></table>"
+            "<span style='color:#58E6B1;font-size:11px;font-weight:700;'>LUMA</span>"
+            + badge + "<br>"
+            + safe + "</div></td><td width='19%'></td></tr></table>"
         )
 
     def _render_turns(self) -> None:
-        html_rows = [self._bubble(row.get("role", "assistant"), row.get("text", ""))
-                     for row in self._turns]
+        html_rows = [
+            self._bubble(
+                row.get("role", "assistant"),
+                row.get("text", ""),
+                row.get("source", ""),
+                row.get("skill", ""),
+            )
+            for row in self._turns
+        ]
         self.feed.setHtml(
             "<div style='margin:12px 16px;background:#0D0F20;'>"
             + "".join(html_rows)
@@ -487,16 +524,27 @@ class ChatPage(QWidget):
         self._turns = []
         for turn in turns:
             role = "user" if str(turn.get("role") or "") == "user" else "assistant"
-            self._turns.append({"role": role, "text": str(turn.get("text") or "")})
+            meta = turn.get("meta") if isinstance(turn.get("meta"), dict) else {}
+            self._turns.append({
+                "role": role,
+                "text": str(turn.get("text") or ""),
+                "source": str(meta.get("source") or "") if role == "assistant" else "",
+                "skill": str(meta.get("skill") or "") if role == "assistant" else "",
+            })
         if not self._turns:
             self.camera_card.hide()
             self.camera_frame.clear()
             self.clear_action_trace()
         self._render_turns()
 
-    def append_local(self, who: str, text: str) -> None:
+    def append_local(self, who: str, text: str, source: str = "", skill: str = "") -> None:
         role = "user" if str(who or "").casefold() in {"вы", "user"} else "assistant"
-        self._turns.append({"role": role, "text": str(text or "")})
+        self._turns.append({
+            "role": role,
+            "text": str(text or ""),
+            "source": str(source or "") if role == "assistant" else "",
+            "skill": str(skill or "") if role == "assistant" else "",
+        })
         self._render_turns()
 
     def clear_action_trace(self) -> None:
