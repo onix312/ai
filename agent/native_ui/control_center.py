@@ -12,6 +12,9 @@ from PySide6.QtWidgets import (
     QScrollArea, QSpinBox, QStackedWidget, QTextBrowser, QVBoxLayout, QWidget,
 )
 
+from .components import AmbientCanvas, BrandCard, StatusHeader
+from . import theme
+
 
 def _pretty(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, indent=2, default=str)
@@ -556,7 +559,8 @@ class TasksPage(QWidget):
             return
         for plan in plans:
             card = QFrame()
-            card.setStyleSheet("QFrame { background:#172033; border:1px solid #3b82f6; border-radius:12px; }")
+            card.setObjectName("glassCard")
+            card.setProperty("accent", "violet")
             box = QVBoxLayout(card)
             title = str(plan.get("title") or "План")
             summary = str(plan.get("summary") or "")
@@ -595,7 +599,8 @@ class TasksPage(QWidget):
 
         for replan in replans:
             card = QFrame()
-            card.setStyleSheet("QFrame { background:#172033; border:1px solid #f59e0b; border-radius:12px; }")
+            card.setObjectName("glassCard")
+            card.setProperty("accent", "amber")
             box = QVBoxLayout(card)
             heading = QLabel(f"Новый маршрут для задачи #{replan.get('task_id')}")
             heading.setObjectName("pageTitle")
@@ -636,7 +641,7 @@ class TasksPage(QWidget):
 
         for task in tasks:
             card = QFrame()
-            card.setStyleSheet("QFrame { background:#111827; border:1px solid #334155; border-radius:12px; }")
+            card.setObjectName("glassCard")
             box = QVBoxLayout(card)
             title = str(task.get("title") or f"Задача {task.get('id')}")
             status = str(task.get("status") or "planned")
@@ -696,7 +701,7 @@ class TasksPage(QWidget):
 
         for row in pending:
             card = QFrame()
-            card.setStyleSheet("QFrame { background:#111827; border:1px solid #334155; border-radius:12px; }")
+            card.setObjectName("glassCard")
             box = QVBoxLayout(card)
             box.addWidget(QLabel(str(row.get("text") or row.get("skill") or "Действие требует решения")))
             buttons = QHBoxLayout()
@@ -745,15 +750,15 @@ class ControlCenter(QMainWindow):
     pronunciation_delete = Signal(str)
 
     NAV = [
-        ("chat", "Разговор"),
-        ("today", "Сегодня"),
-        ("tasks", "Задачи"),
-        ("activity", "Активность"),
-        ("memory", "Память"),
-        ("learning", "Обучение"),
-        ("skills", "Навыки"),
-        ("journal", "Журнал"),
-        ("settings", "Настройки"),
+        ("chat", "◈  Разговор"),
+        ("today", "◇  Сегодня"),
+        ("tasks", "✓  Задачи"),
+        ("activity", "⌁  Активность"),
+        ("memory", "◌  Память"),
+        ("learning", "✦  Обучение"),
+        ("skills", "⬡  Навыки"),
+        ("journal", "≋  Журнал"),
+        ("settings", "⚙  Настройки"),
     ]
 
     def __init__(self) -> None:
@@ -761,22 +766,27 @@ class ControlCenter(QMainWindow):
         self.setWindowTitle("Люма")
         self.setMinimumSize(980, 680)
         self.resize(1180, 780)
-        root = QWidget()
+        root = AmbientCanvas()
+        root.setObjectName("shellRoot")
         self.setCentralWidget(root)
         outer = QVBoxLayout(root)
         outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
 
         body = QHBoxLayout()
         body.setContentsMargins(0, 0, 0, 0)
+        body.setSpacing(0)
+
         sidebar = QWidget()
         sidebar.setObjectName("sidebar")
-        sidebar.setFixedWidth(220)
+        sidebar.setFixedWidth(236)
         side = QVBoxLayout(sidebar)
-        side.setContentsMargins(12, 22, 12, 14)
-        side.setSpacing(18)
-        brand = QLabel("Люма")
-        brand.setObjectName("brand")
-        side.addWidget(brand)
+        side.setContentsMargins(14, 18, 14, 14)
+        side.setSpacing(14)
+
+        self.brand_card = BrandCard()
+        side.addWidget(self.brand_card)
+
         self.nav = QListWidget()
         self.nav.setObjectName("nav")
         for key, label in self.NAV:
@@ -785,6 +795,15 @@ class ControlCenter(QMainWindow):
             self.nav.addItem(item)
         side.addWidget(self.nav, 1)
         body.addWidget(sidebar)
+
+        main = QWidget()
+        main.setObjectName("mainContent")
+        main_layout = QVBoxLayout(main)
+        main_layout.setContentsMargins(18, 16, 18, 12)
+        main_layout.setSpacing(14)
+
+        self.status_header = StatusHeader()
+        main_layout.addWidget(self.status_header)
 
         self.stack = QStackedWidget()
         self.pages: dict[str, QWidget] = {}
@@ -1188,7 +1207,8 @@ class ControlCenter(QMainWindow):
         self.pages["settings"] = settings_scroll
         self.stack.addWidget(settings_scroll)
 
-        body.addWidget(self.stack, 1)
+        main_layout.addWidget(self.stack, 1)
+        body.addWidget(main, 1)
         outer.addLayout(body, 1)
 
         self.footer = QLabel("● подключение…")
@@ -1197,29 +1217,7 @@ class ControlCenter(QMainWindow):
 
         self.nav.currentRowChanged.connect(self._change)
         self.nav.setCurrentRow(0)
-        self.setStyleSheet("""
-        QMainWindow, QWidget { background:#0b1120; color:#e5e7eb; font-size:14px; }
-        QWidget#sidebar { background:#101a2c; border-right:1px solid #253149; }
-        QLabel#brand { background:transparent; color:#f8fafc; font-size:24px; font-weight:700; padding:0 12px; }
-        QListWidget#nav { background:transparent; border:0; outline:0; }
-        QListWidget#nav::item { padding:11px 14px; border-radius:10px; margin:2px 0; color:#b4c2d7; }
-        QListWidget#nav::item:hover { background:#1b2c45; color:white; }
-        QListWidget#nav::item:selected { background:#243d68; color:white; }
-        QLabel#pageTitle { font-size:24px; font-weight:700; }
-        QLabel#welcomeTitle { color:#f8fafc; font-size:32px; font-weight:700; }
-        QLabel#welcomeText { color:#9fb0c9; font-size:15px; }
-        QLabel#muted { color:#94a3b8; }
-        QLabel#footer { background:#111827; color:#94a3b8; padding:8px 14px; }
-        QTextBrowser, QLineEdit { background:#121c2f; color:#e5e7eb; border:1px solid #2c3a52; border-radius:10px; padding:10px; selection-background-color:#335991; }
-        QPushButton { background:#1e293b; color:#e5e7eb; border:0; border-radius:9px; padding:9px 13px; }
-        QPushButton:hover { background:#334155; }
-        QPushButton#primary { background:#2563eb; }
-        QPushButton#primary:hover { background:#1d4ed8; }
-        QPushButton#suggestion { background:#16243a; border:1px solid #32435e; border-radius:12px; padding:15px 18px; text-align:left; }
-        QPushButton#suggestion:hover { background:#223858; border-color:#4f6f9e; }
-        QPushButton#danger { background:#991b1b; color:white; font-weight:700; }
-        QPushButton#danger:hover { background:#b91c1c; }
-        """)
+        self.setStyleSheet(theme.stylesheet())
 
     def _change(self, row: int) -> None:
         if row < 0:
@@ -1312,6 +1310,15 @@ class ControlCenter(QMainWindow):
 
     def update_status(self, connected: bool, armed: bool, model_ok: bool,
                       panel_ok: bool, error: str = "", safety_stopped: bool = False) -> None:
+        self.brand_card.set_online(connected)
+        self.status_header.set_status(
+            connected=connected,
+            armed=armed,
+            model_ok=model_ok,
+            panel_ok=panel_ok,
+            safety_stopped=safety_stopped,
+            error=error,
+        )
         if connected:
             bits = ["Люма ✓", "модель ✓" if model_ok else "модель –",
                     "PrintFlow ✓" if panel_ok else "PrintFlow –",
