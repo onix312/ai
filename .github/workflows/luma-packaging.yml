@@ -40,3 +40,10 @@ jobs:
         run: |
           if (-not (Test-Path ".\dist\LumaPackage\app\Luma.exe")) { throw "Luma.exe missing" }
           if (-not (Test-Path ".\dist\LumaPackage\install.ps1")) { throw "installer missing" }
+          if (-not (Test-Path ".\dist\LumaPackage\INSTALL-LUMA.bat")) { throw "double-click installer missing" }
+      - name: Upload Luma package
+        uses: actions/upload-artifact@v4
+        with:
+          name: LumaPackage-Windows
+          path: dist/LumaPackage
+          if-no-files-found: error
