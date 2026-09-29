@@ -1361,8 +1361,8 @@ class SpeechQueue:
             stop_speaking()
 
 
-def _system_speak(clean: str, rate: int, volume: int) -> tuple[dict[str, Any], str]:
-    engine = _system_speech_engine()
+def _system_speak(clean: str, rate: int, volume: int, engine: str = "") -> tuple[dict[str, Any], str]:
+    engine = engine or _system_speech_engine()
     if not engine:
         return {}, ("Нет движка озвучки: в Windows нужен PowerShell (есть по умолчанию), "
                     "в Linux — espeak-ng")
@@ -1508,9 +1508,11 @@ def speak(text: str, rate: int = 0, volume: int = 100) -> tuple[dict[str, Any], 
     rate = max(-10, min(10, int(rate)))
     volume = max(0, min(100, int(volume)))
 
-    if _piper_available():
+    engine = speech_engine()
+    if engine == "piper":
         state, reason = _piper_speak(clean, rate, volume)
         if state or reason == "Озвучка остановлена":
             return state, reason
+        engine = _system_speech_engine()
 
-    return _system_speak(clean, rate, volume)
+    return _system_speak(clean, rate, volume, engine=engine)
