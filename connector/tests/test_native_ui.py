@@ -248,6 +248,30 @@ class BackendClientTests(unittest.TestCase):
                 client.status()
         self.assertIn("Агент недоступен", str(error.exception))
 
+    def test_camera_image_fetch_accepts_only_loopback_printer_routes(self):
+        client = BackendClient()
+        for url in (
+            "https://example.com/camera.jpg",
+            "http://127.0.0.1:8765/api/uploads?file=x.jpg",
+        ):
+            with self.assertRaises(BackendError, msg=url):
+                client.fetch_local_image(url)
+
+        class ImageResponse:
+            headers = {"Content-Type": "image/jpeg"}
+            def __enter__(self):
+                return self
+            def __exit__(self, *_args):
+                return False
+            def read(self, _limit=-1):
+                return b"\xff\xd8\xffjpeg\xff\xd9"
+
+        with mock.patch("urllib.request.urlopen", return_value=ImageResponse()):
+            data = client.fetch_local_image(
+                "http://127.0.0.1:8765/api/printer/camera.jpg?printer_id=p1"
+            )
+        self.assertTrue(data.startswith(b"\xff\xd8\xff"))
+
 
 class UiStateTests(unittest.TestCase):
     def test_status_and_recovery(self):
