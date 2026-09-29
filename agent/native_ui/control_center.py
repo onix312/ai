@@ -1144,6 +1144,8 @@ class VoicePage(QWidget):
     tts_test = Signal()
     pronunciation_add = Signal(str, str)
     pronunciation_delete = Signal(str)
+    memory_pin = Signal(int, bool)
+    memory_forget = Signal(int)
     voice_tune = Signal(int, float, int, float)
     voice_diag_reset = Signal()
 
@@ -2285,8 +2287,14 @@ class ControlCenter(QMainWindow):
         self.pages["activity"] = activity
         self.stack.addWidget(activity)
 
+        memory_page = MemoryPage()
+        memory_page.refresh_requested.connect(lambda: self.refresh_page.emit("memory"))
+        memory_page.pin_requested.connect(self.memory_pin.emit)
+        memory_page.forget_requested.connect(self.memory_forget.emit)
+        self.pages["memory"] = memory_page
+        self.stack.addWidget(memory_page)
+
         defs = {
-            "memory": ("Память", "Факты, предпочтения и то, что вы просили запомнить."),
             "learning": ("Обучение", "Чему Люма научилась и что пока не понимает."),
             "journal": ("Журнал", "Фактические действия ассистента на компьютере."),
         }
