@@ -66,11 +66,15 @@ class BackendClientTests(unittest.TestCase):
             client.voice_status()
             client.enable_voice()
             client.stop_voice()
+            client.tune_voice(420, 1.8, 220, 0.3)
+            client.reset_voice_diagnostics()
             client.disable_voice()
         self.assertEqual([
             ("GET", "http://127.0.0.1:8791/voice/status"),
             ("POST", "http://127.0.0.1:8791/voice/enable"),
             ("POST", "http://127.0.0.1:8791/voice/stop"),
+            ("POST", "http://127.0.0.1:8791/voice/tune"),
+            ("POST", "http://127.0.0.1:8791/voice/diagnostics/reset"),
             ("POST", "http://127.0.0.1:8791/voice/disable"),
         ], calls)
 
@@ -292,6 +296,33 @@ class UiStateTests(unittest.TestCase):
         self.assertTrue(state.voice_enabled)
         self.assertTrue(state.armed)
         self.assertEqual("speaking", state.assistant_state)
+
+    def test_voice_diagnostics_are_kept_for_settings_surface(self):
+        state = UiState()
+        state.apply_status({
+            "ok": True,
+            "voice": {
+                "audio_level": 910,
+                "echo_floor": 240,
+                "echo_threshold": 620,
+                "echo_suppressed": 17,
+                "echo_gate_multiplier": 1.8,
+                "echo_gate_margin": 220,
+                "echo_floor_alpha": 0.3,
+                "vad_threshold": 320,
+                "asr_engine": "vosk",
+                "vocabulary_count": 42,
+            },
+        })
+        self.assertEqual(910, state.audio_level)
+        self.assertEqual(240, state.echo_floor)
+        self.assertEqual(620, state.echo_threshold)
+        self.assertEqual(17, state.echo_suppressed)
+        self.assertAlmostEqual(1.8, state.echo_gate_multiplier)
+        self.assertEqual(220, state.echo_gate_margin)
+        self.assertAlmostEqual(0.3, state.echo_floor_alpha)
+        self.assertEqual("vosk", state.asr_engine)
+        self.assertEqual(42, state.vocabulary_count)
 
     def test_voice_streaming_activity_is_kept_for_orb(self):
         state = UiState()
