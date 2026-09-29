@@ -11,8 +11,8 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtWidgets import QApplication, QLabel
 
 from agent.native_ui.app import NativeApp
-from agent.native_ui.control_center import ActivityPage, ChatPage, ControlCenter, TasksPage, TextPage
-from agent.native_ui.orb import VoiceOrb
+from agent.native_ui.control_center import ActivityPage, ChatPage, ControlCenter, HomePage, TasksPage, TextPage
+from agent.native_ui.orb import LumaOrbCore, VoiceOrb
 from agent.native_ui.quick_panel import QuickPanel
 
 
@@ -53,6 +53,43 @@ class NativeQtSmokeTests(unittest.TestCase):
         orb.set_live()
         self.assertEqual(orb.height(), 72)
         orb.deleteLater()
+
+    def test_home_hero_and_orb_accept_live_runtime(self):
+        center = ControlCenter()
+        self.assertIsInstance(center.pages["home"], HomePage)
+        self.assertIsInstance(center.home.orb, LumaOrbCore)
+
+        center.set_home_runtime(
+            connected=True,
+            state="thinking",
+            audio_level=1700,
+            heard="люма открой загрузки",
+            reply="",
+            skill="app.open",
+            detail="Открываю папку",
+            task_id=3,
+            safety_stopped=False,
+        )
+        center.set_tts_payload({
+            "engine": "silero",
+            "hq_local": True,
+            "model": "silero_v5_5_ru.pt",
+            "model_path": "C:/voices/silero_v5_5_ru.pt",
+            "piper_path": "",
+            "piper_model_path": "",
+            "piper_speaker": "",
+            "speaker": "baya",
+            "sample_rate": 48000,
+            "model_ready": True,
+            "last_synth_ms": 120,
+            "last_chars": 24,
+        })
+        self.assertEqual("thinking", center.home.orb.state())
+        self.assertIn("Формирую", center.home.activity_value.text())
+        self.assertIn("baya", center.home.voice_value.text().casefold())
+        self.assertIn("48 kHz", center.home.voice_meta.text())
+        center.deleteLater()
+        self.app.processEvents()
 
     def test_windows_construct_and_accept_state(self):
         orb = VoiceOrb()
