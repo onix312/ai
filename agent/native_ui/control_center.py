@@ -1412,13 +1412,13 @@ class ControlCenter(QMainWindow):
         self.stack.addWidget(self.chat)
 
         self.voice_page = VoicePage()
-        self.voice_page.tts_save.connect(self.tts_save)
-        self.voice_page.tts_reset.connect(self.tts_reset)
-        self.voice_page.tts_test.connect(self.tts_test)
-        self.voice_page.pronunciation_add.connect(self.pronunciation_add)
-        self.voice_page.pronunciation_delete.connect(self.pronunciation_delete)
-        self.voice_page.voice_tune.connect(self.voice_tune)
-        self.voice_page.voice_diag_reset.connect(self.voice_diag_reset)
+        self.voice_page.tts_save.connect(self.tts_save.emit)
+        self.voice_page.tts_reset.connect(self.tts_reset.emit)
+        self.voice_page.tts_test.connect(self.tts_test.emit)
+        self.voice_page.pronunciation_add.connect(self.pronunciation_add.emit)
+        self.voice_page.pronunciation_delete.connect(self.pronunciation_delete.emit)
+        self.voice_page.voice_tune.connect(self.voice_tune.emit)
+        self.voice_page.voice_diag_reset.connect(self.voice_diag_reset.emit)
         self.pages["voice"] = self.voice_page
         self.stack.addWidget(self.voice_page)
 
