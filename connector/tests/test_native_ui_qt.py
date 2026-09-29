@@ -116,8 +116,12 @@ class NativeQtSmokeTests(unittest.TestCase):
         center.home.set_brain(model_ok=True, ready=84, total=96, route="model", repaired=True)
         self.assertEqual("SELF-CORRECTED", center.home.brain_value.text())
         self.assertIn("repair loop", center.home.brain_meta.text())
-        center.home.set_brain(model_ok=True, ready=84, total=96, route="agent-loop", repaired=False)
+        center.home.set_brain(
+            model_ok=True, ready=84, total=96, route="agent-loop",
+            repaired=False, agent_iterations=2,
+        )
         self.assertEqual("AGENT LOOP", center.home.brain_value.text())
+        self.assertIn("2 итерац.", center.home.brain_meta.text())
         center.deleteLater()
         self.app.processEvents()
 
