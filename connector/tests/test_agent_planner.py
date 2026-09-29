@@ -70,6 +70,30 @@ class AgentPlannerTests(unittest.TestCase):
              }):
             return self.planner.preview("подготовь компьютер к работе")
 
+    def test_planner_receives_relevant_bounded_skill_catalog(self):
+        captured = {}
+        payload = {
+            "title": "Экран",
+            "summary": "Найти кнопку",
+            "ask": "",
+            "steps": [{"skill": "screen.find", "params": {"text": "сохранить"}, "why": "найти"}],
+        }
+
+        def fake_chat(*_args, system="", **_kwargs):
+            captured["system"] = system
+            return {"ok": True, "text": json.dumps(payload, ensure_ascii=False),
+                    "reason": "", "model": "test-model"}
+
+        self.agent.runner.caps.update({"windows": True, "screen": True})
+        with patch.object(planner.model, "status", return_value=_state()), \
+             patch.object(planner.model, "chat", side_effect=fake_chat):
+            result = self.planner.preview("найди на экране кнопку сохранить")
+
+        self.assertTrue(result["ok"], result)
+        self.assertIn("screen.find", captured["system"])
+        self.assertNotIn("voice.command:", captured["system"])
+        self.assertLess(len(captured["system"]), 8000)
+
     def test_valid_preview_is_not_executed(self):
         result = self._preview({
             "title": "Рабочее место",
