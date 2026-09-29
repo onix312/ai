@@ -10,11 +10,11 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QBuffer, QByteArray, QIODevice
 from PySide6.QtGui import QColor, QImage
-from PySide6.QtWidgets import QApplication, QLabel, QProgressBar
+from PySide6.QtWidgets import QApplication, QLabel, QProgressBar, QPushButton
 
 from agent.native_ui.app import NativeApp
 from agent.native_ui.components import LumaPortrait
-from agent.native_ui.control_center import ActivityPage, ChatPage, ControlCenter, HomePage, SkillsPage, TasksPage, TextPage, VoicePage
+from agent.native_ui.control_center import ActivityPage, ChatPage, ControlCenter, HomePage, MemoryPage, SkillsPage, TasksPage, TextPage, VoicePage
 from agent.native_ui.orb import LumaOrbCore, VoiceOrb
 from agent.native_ui.quick_panel import QuickPanel
 
@@ -160,6 +160,39 @@ class NativeQtSmokeTests(unittest.TestCase):
         center.deleteLater()
         self.app.processEvents()
 
+    def test_memory_workspace_emits_exact_record_actions(self):
+        page = MemoryPage()
+        page.set_payload({
+            "memories": [{
+                "id": 77, "text": "Любит PETG", "kind": "preference",
+                "subject": "Мария", "source": "chat", "origin": "explicit",
+                "confidence": 1.0, "pinned": False, "layer": "user_model",
+                "observed_count": 1,
+            }]
+        })
+        pins = []
+        forgotten = []
+        page.pin_requested.connect(lambda memory_id, value: pins.append((memory_id, value)))
+        page.forget_requested.connect(lambda memory_id: forgotten.append(memory_id))
+
+        pin = next(
+            button for button in page.findChildren(QPushButton)
+            if button.objectName() == "memoryPin"
+        )
+        forget = next(
+            button for button in page.findChildren(QPushButton)
+            if button.objectName() == "danger" and button.text() == "Забыть"
+        )
+        pin.click()
+        forget.click()
+        self.assertEqual([], forgotten, "первый клик только вооружает удаление")
+        self.assertEqual("Подтвердить удаление", forget.text())
+        forget.click()
+        self.assertEqual([(77, True)], pins)
+        self.assertEqual([77], forgotten)
+        page.deleteLater()
+        self.app.processEvents()
+
     def test_skills_page_is_searchable_capability_map(self):
         center = ControlCenter()
         self.assertIsInstance(center.pages["skills"], SkillsPage)
@@ -170,7 +203,7 @@ class NativeQtSmokeTests(unittest.TestCase):
                     "name": "app.open", "title": "Открыть программу",
                     "description": "Открывает локальную программу.", "available": True,
                     "reason": "", "risk": "soft", "confirm": False,
-                    "provider": "core", "params": {"target": "text"},
+                    "provider": "core", "params": {"target": "text"}, "learned": True,
                 },
                 {
                     "name": "screen.describe", "title": "Описать экран",
@@ -185,6 +218,9 @@ class NativeQtSmokeTests(unittest.TestCase):
         self.assertEqual("1", page.ready_metric.text())
         self.assertEqual("2", page.total_metric.text())
         self.assertEqual("1", page.off_metric.text())
+        self.assertEqual("1", page.learned_metric.text())
+        self.assertGreaterEqual(page.provider_filter.findData("core"), 0)
+        self.assertGreaterEqual(page.provider_filter.findData("desktop"), 0)
         visible = page.browser.toPlainText()
         self.assertIn("Открыть программу", visible)
         self.assertIn("Описать экран", visible)
@@ -195,6 +231,20 @@ class NativeQtSmokeTests(unittest.TestCase):
         filtered = page.browser.toPlainText()
         self.assertIn("Описать экран", filtered)
         self.assertNotIn("Открыть программу", filtered)
+
+        page.search.clear()
+        page.provider_filter.setCurrentIndex(page.provider_filter.findData("core"))
+        self.app.processEvents()
+        by_provider = page.browser.toPlainText()
+        self.assertIn("Открыть программу", by_provider)
+        self.assertNotIn("Описать экран", by_provider)
+
+        page.provider_filter.setCurrentIndex(0)
+        page.risk_filter.setCurrentIndex(page.risk_filter.findData("read"))
+        self.app.processEvents()
+        by_risk = page.browser.toPlainText()
+        self.assertIn("Описать экран", by_risk)
+        self.assertNotIn("Открыть программу", by_risk)
         center.deleteLater()
         self.app.processEvents()
 
@@ -300,7 +350,24 @@ class NativeQtSmokeTests(unittest.TestCase):
         self.assertEqual(2, center.pronunciation_list.count())
         self.assertIn("Пользовательских правил: 2", center.pronunciation_status.text())
 
-        center.set_page_payload("memory", {"memories": [{"text": "пример"}]})
+        center.set_page_payload("memory", {
+            "memories": [
+                {
+                    "id": 11, "text": "Мария любит PETG", "kind": "preference",
+                    "subject": "Мария", "source": "chat", "origin": "explicit",
+                    "confidence": 1.0, "pinned": True, "layer": "user_model",
+                    "observed_count": 1, "uses": 3, "provenance": "chat",
+                },
+                {
+                    "id": 12, "text": "Обычно печать начинается вечером", "kind": "fact",
+                    "subject": "печать", "source": "observed", "origin": "observed",
+                    "confidence": 0.8, "pinned": False, "layer": "semantic",
+                    "observed_count": 4, "uses": 0, "provenance": "наблюдения",
+                },
+            ],
+            "count": 2,
+            "layers": {"working": [], "episodic": [], "semantic": [], "user_model": []},
+        })
         center.set_page_payload("activity", {
             "activity": {
                 "current": {
@@ -414,6 +481,24 @@ class NativeQtSmokeTests(unittest.TestCase):
         self.assertIn("Autopilot включён", center.proactivity_status.text())
         self.assertIn("[suppressed] Цель", center.events_view.toPlainText())
         self.assertIn("quiet hours", center.events_view.toPlainText())
+        self.assertIsInstance(center.pages["memory"], MemoryPage)
+        memory_page = center.pages["memory"]
+        self.assertEqual("2", memory_page.total_metric.text())
+        self.assertEqual("1", memory_page.pinned_metric.text())
+        self.assertEqual("1", memory_page.model_metric.text())
+        self.assertEqual("1", memory_page.semantic_metric.text())
+        memory_labels = [w.text() for w in memory_page.findChildren(QLabel)]
+        self.assertTrue(any("Мария любит PETG" in value for value in memory_labels))
+        self.assertTrue(any("Обычно печать начинается вечером" in value for value in memory_labels))
+        memory_page.search.setText("Мария")
+        self.app.processEvents()
+        filtered_memory = []
+        for index in range(memory_page.host.count()):
+            card = memory_page.host.itemAt(index).widget()
+            if card is not None:
+                filtered_memory.extend(label.text() for label in card.findChildren(QLabel))
+        self.assertTrue(any("Мария любит PETG" in value for value in filtered_memory))
+        self.assertFalse(any("Обычно печать начинается вечером" in value for value in filtered_memory))
         self.assertIsInstance(center.pages["activity"], ActivityPage)
         timeline = center.pages["activity"].browser.toPlainText()
         self.assertIn("открой телеграм", timeline)

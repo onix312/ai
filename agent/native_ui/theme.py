@@ -217,6 +217,51 @@ def stylesheet() -> str:
         color: #F5B84C;
     }
 
+    QLabel#memoryText {
+        background: transparent;
+        color: #F7F5FF;
+        font-size: 15px;
+        font-weight: 650;
+    }
+
+    QLabel#memoryConfidence {
+        background: #10272B;
+        color: #8BEACD;
+        border: 1px solid #255A54;
+        border-radius: 9px;
+        padding: 3px 8px;
+        font-size: 10px;
+        font-weight: 750;
+    }
+
+    QLabel#memoryMeta {
+        background: #0F1124;
+        color: #777493;
+        border-left: 2px solid #343861;
+        border-radius: 7px;
+        padding: 5px 8px;
+        font-size: 10px;
+    }
+
+    QLabel#settingsState {
+        background: transparent;
+        color: #F5F2FF;
+        font-size: 14px;
+        font-weight: 650;
+        padding: 3px 0;
+    }
+
+    QPushButton#memoryPin {
+        background: #151C31;
+        color: #9DE9D0;
+        border: 1px solid #2B5B55;
+    }
+
+    QPushButton#memoryPin:hover {
+        background: #18302F;
+        border-color: #3B8176;
+    }
+
     QLabel#skillMetric, QLabel#skillMetricReady {
         background: transparent;
         color: #F5F2FF;

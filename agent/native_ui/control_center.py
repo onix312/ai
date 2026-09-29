@@ -111,6 +111,268 @@ class TextPage(QWidget):
                 "</td></tr></table>")
 
 
+class MemoryPage(QWidget):
+    """Long-term memory map with explicit pin/forget controls."""
+
+    refresh_requested = Signal()
+    pin_requested = Signal(int, bool)
+    forget_requested = Signal(int)
+
+    KIND_LABELS = {
+        "fact": "Факт",
+        "profile": "Профиль",
+        "preference": "Предпочтение",
+        "rule": "Правило",
+        "note": "Заметка",
+    }
+    ORIGIN_LABELS = {
+        "explicit": "со слов владельца",
+        "observed": "наблюдение",
+        "inferred": "предположение",
+        "imported": "импорт",
+    }
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._payload: dict[str, Any] = {}
+        root = QVBoxLayout(self)
+        root.setContentsMargins(2, 2, 2, 2)
+        root.setSpacing(12)
+
+        head = QHBoxLayout()
+        copy = QVBoxLayout()
+        title = QLabel("Память")
+        title.setObjectName("pageTitle")
+        copy.addWidget(title)
+        subtitle = QLabel("Что Люма знает, откуда это взялось и насколько этому можно доверять.")
+        subtitle.setObjectName("muted")
+        subtitle.setWordWrap(True)
+        copy.addWidget(subtitle)
+        head.addLayout(copy, 1)
+        refresh = QPushButton("Обновить")
+        refresh.clicked.connect(self.refresh_requested)
+        head.addWidget(refresh)
+        root.addLayout(head)
+
+        metrics = QHBoxLayout()
+        metrics.setSpacing(10)
+        self.total_metric = QLabel("0")
+        self.total_metric.setObjectName("opsMetric")
+        self.pinned_metric = QLabel("0")
+        self.pinned_metric.setObjectName("opsMetricReady")
+        self.model_metric = QLabel("0")
+        self.model_metric.setObjectName("opsMetric")
+        self.semantic_metric = QLabel("0")
+        self.semantic_metric.setObjectName("opsMetric")
+        for caption, value, accent in (
+            ("ВСЕГО", self.total_metric, "violet"),
+            ("PINNED", self.pinned_metric, "cyan"),
+            ("USER MODEL", self.model_metric, ""),
+            ("SEMANTIC", self.semantic_metric, ""),
+        ):
+            card = GlassCard(accent)
+            box = QVBoxLayout(card)
+            box.setContentsMargins(13, 10, 13, 10)
+            label = QLabel(caption)
+            label.setObjectName("metricLabel")
+            box.addWidget(label)
+            box.addWidget(value)
+            metrics.addWidget(card, 1)
+        root.addLayout(metrics)
+
+        filters = QHBoxLayout()
+        self.search = QLineEdit()
+        self.search.setPlaceholderText("Найти в памяти: человек, проект, предпочтение, факт…")
+        self.search.textChanged.connect(self._render)
+        filters.addWidget(self.search, 1)
+        self.kind_filter = QComboBox()
+        self.kind_filter.addItem("Все типы", "")
+        self.kind_filter.currentIndexChanged.connect(self._render)
+        filters.addWidget(self.kind_filter)
+        self.origin_filter = QComboBox()
+        self.origin_filter.addItem("Все источники", "")
+        for key, label in self.ORIGIN_LABELS.items():
+            self.origin_filter.addItem(label, key)
+        self.origin_filter.currentIndexChanged.connect(self._render)
+        filters.addWidget(self.origin_filter)
+        root.addLayout(filters)
+
+        note = QLabel(
+            "MEMORY LAYERS · working context → episodic events → semantic facts → user model. "
+            "Закреплённые записи получают приоритет при recall."
+        )
+        note.setObjectName("voiceChain")
+        note.setWordWrap(True)
+        root.addWidget(note)
+
+        self.scroll = QScrollArea()
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setFrameShape(QFrame.NoFrame)
+        self.host_widget = QWidget()
+        self.host = QVBoxLayout(self.host_widget)
+        self.host.setAlignment(Qt.AlignTop)
+        self.host.setSpacing(9)
+        self.scroll.setWidget(self.host_widget)
+        root.addWidget(self.scroll, 1)
+
+    def _forget_click(self, button: QPushButton, memory_id: int) -> None:
+        armed = bool(button.property("confirmArmed"))
+        if not armed:
+            button.setProperty("confirmArmed", True)
+            button.setText("Подтвердить удаление")
+            button.setToolTip("Повторный клик удалит эту запись памяти без возможности отмены.")
+            button.style().unpolish(button)
+            button.style().polish(button)
+            return
+        button.setProperty("confirmArmed", False)
+        button.setText("Забыть")
+        button.setToolTip("")
+        self.forget_requested.emit(int(memory_id))
+
+    def _clear(self) -> None:
+        while self.host.count():
+            item = self.host.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+
+    def set_payload(self, payload: dict[str, Any]) -> None:
+        self._payload = dict(payload or {})
+        rows = [row for row in list(self._payload.get("memories") or []) if isinstance(row, dict)]
+        kinds = sorted({str(row.get("kind") or "fact") for row in rows})
+        current = str(self.kind_filter.currentData() or "")
+        self.kind_filter.blockSignals(True)
+        self.kind_filter.clear()
+        self.kind_filter.addItem("Все типы", "")
+        for kind in kinds:
+            self.kind_filter.addItem(self.KIND_LABELS.get(kind, kind), kind)
+        index = self.kind_filter.findData(current)
+        self.kind_filter.setCurrentIndex(index if index >= 0 else 0)
+        self.kind_filter.blockSignals(False)
+
+        self.total_metric.setText(str(len(rows)))
+        self.pinned_metric.setText(str(sum(1 for row in rows if row.get("pinned"))))
+        self.model_metric.setText(str(sum(
+            1 for row in rows if str(row.get("layer") or "") == "user_model"
+        )))
+        self.semantic_metric.setText(str(sum(
+            1 for row in rows if str(row.get("layer") or "") == "semantic"
+        )))
+        self._render()
+
+    def _matches(self, row: dict[str, Any]) -> bool:
+        needle = " ".join(self.search.text().casefold().split())
+        wanted_kind = str(self.kind_filter.currentData() or "")
+        wanted_origin = str(self.origin_filter.currentData() or "")
+        if wanted_kind and str(row.get("kind") or "") != wanted_kind:
+            return False
+        if wanted_origin and str(row.get("origin") or "") != wanted_origin:
+            return False
+        if needle:
+            hay = " ".join(str(row.get(key) or "") for key in (
+                "text", "subject", "kind", "source", "origin", "provenance",
+            )).casefold()
+            if needle not in hay:
+                return False
+        return True
+
+    def _render(self, *_args: Any) -> None:
+        self._clear()
+        rows = [
+            row for row in list(self._payload.get("memories") or [])
+            if isinstance(row, dict) and self._matches(row)
+        ]
+        rows.sort(key=lambda row: (
+            not bool(row.get("pinned")),
+            -float(row.get("confidence") or 0.0),
+            -int(row.get("id") or 0),
+        ))
+        if not rows:
+            empty = GlassCard()
+            box = QVBoxLayout(empty)
+            title = QLabel("По этому фильтру ничего нет")
+            title.setObjectName("metricValueSmall")
+            box.addWidget(title)
+            hint = QLabel("Измени поиск или источник. Новая память появляется из диалога и явных команд «запомни».")
+            hint.setObjectName("muted")
+            hint.setWordWrap(True)
+            box.addWidget(hint)
+            self.host.addWidget(empty)
+            return
+
+        for row in rows:
+            pinned = bool(row.get("pinned"))
+            origin = str(row.get("origin") or "explicit")
+            confidence = max(0.0, min(1.0, float(row.get("confidence") or 0.0)))
+            card = GlassCard("cyan" if pinned else "")
+            box = QVBoxLayout(card)
+            box.setContentsMargins(14, 11, 14, 11)
+            box.setSpacing(6)
+
+            top = QHBoxLayout()
+            badges = []
+            if pinned:
+                badges.append("PINNED")
+            badges.append(self.KIND_LABELS.get(str(row.get("kind") or "fact"), str(row.get("kind") or "fact")))
+            badges.append(self.ORIGIN_LABELS.get(origin, origin))
+            badge = QLabel(" · ".join(badges).upper())
+            badge.setObjectName("heroKicker")
+            top.addWidget(badge)
+            top.addStretch(1)
+            score = QLabel(f"{confidence:.0%}")
+            score.setObjectName("memoryConfidence")
+            top.addWidget(score)
+            box.addLayout(top)
+
+            text = QLabel(str(row.get("text") or "Запись памяти"))
+            text.setObjectName("memoryText")
+            text.setWordWrap(True)
+            box.addWidget(text)
+
+            subject = str(row.get("subject") or "").strip()
+            source = str(row.get("source") or "").strip()
+            observed = int(row.get("observed_count") or row.get("evidence_count") or 1)
+            uses = int(row.get("uses") or 0)
+            meta_bits = []
+            if subject:
+                meta_bits.append(f"subject: {subject}")
+            if source:
+                meta_bits.append(f"source: {source}")
+            meta_bits.append(f"evidence: {observed}")
+            if uses:
+                meta_bits.append(f"recall: {uses}")
+            meta = QLabel(" · ".join(meta_bits))
+            meta.setObjectName("muted")
+            meta.setWordWrap(True)
+            box.addWidget(meta)
+
+            provenance = str(row.get("provenance") or "").strip()
+            if provenance and provenance != source:
+                provenance_label = QLabel(f"provenance: {provenance}")
+                provenance_label.setObjectName("memoryMeta")
+                provenance_label.setWordWrap(True)
+                box.addWidget(provenance_label)
+
+            actions = QHBoxLayout()
+            actions.addStretch(1)
+            memory_id = int(row.get("id") or 0)
+            pin = QPushButton("Открепить" if pinned else "Закрепить")
+            pin.setObjectName("memoryPin")
+            pin.clicked.connect(
+                lambda _=False, i=memory_id, value=not pinned: self.pin_requested.emit(i, value)
+            )
+            actions.addWidget(pin)
+            forget = QPushButton("Забыть")
+            forget.setObjectName("danger")
+            forget.setProperty("confirmArmed", False)
+            forget.clicked.connect(
+                lambda _=False, button=forget, i=memory_id: self._forget_click(button, i)
+            )
+            actions.addWidget(forget)
+            box.addLayout(actions)
+            self.host.addWidget(card)
+
+
 class SkillsPage(QWidget):
     """Searchable capability map: what Luma can really use on this computer."""
 
@@ -156,10 +418,13 @@ class SkillsPage(QWidget):
         self.total_metric.setObjectName("skillMetric")
         self.off_metric = QLabel("0")
         self.off_metric.setObjectName("skillMetric")
+        self.learned_metric = QLabel("0")
+        self.learned_metric.setObjectName("skillMetricReady")
         for title_text, widget in (
             ("ГОТОВО", self.ready_metric),
             ("ВСЕГО", self.total_metric),
             ("НЕДОСТУПНО", self.off_metric),
+            ("ОБУЧЕНО", self.learned_metric),
         ):
             card = GlassCard("cyan" if title_text == "ГОТОВО" else "")
             box = QVBoxLayout(card)
@@ -182,6 +447,16 @@ class SkillsPage(QWidget):
         self.state_filter.addItem("Что не работает", "off")
         self.state_filter.currentIndexChanged.connect(self._render)
         filter_row.addWidget(self.state_filter)
+        self.provider_filter = QComboBox()
+        self.provider_filter.addItem("Все providers", "")
+        self.provider_filter.currentIndexChanged.connect(self._render)
+        filter_row.addWidget(self.provider_filter)
+        self.risk_filter = QComboBox()
+        self.risk_filter.addItem("Любой риск", "")
+        for value in ("read", "soft", "write", "system"):
+            self.risk_filter.addItem(value, value)
+        self.risk_filter.currentIndexChanged.connect(self._render)
+        filter_row.addWidget(self.risk_filter)
         root.addLayout(filter_row)
 
         brain_note = QLabel(
@@ -203,18 +478,35 @@ class SkillsPage(QWidget):
         self.ready_metric.setText(str(ready))
         self.total_metric.setText(str(len(rows)))
         self.off_metric.setText(str(len(rows) - ready))
+        self.learned_metric.setText(str(sum(1 for row in rows if row.get("learned"))))
+        current_provider = str(self.provider_filter.currentData() or "")
+        providers = sorted({str(row.get("provider") or "local") for row in rows})
+        self.provider_filter.blockSignals(True)
+        self.provider_filter.clear()
+        self.provider_filter.addItem("Все providers", "")
+        for provider in providers:
+            self.provider_filter.addItem(provider, provider)
+        provider_index = self.provider_filter.findData(current_provider)
+        self.provider_filter.setCurrentIndex(provider_index if provider_index >= 0 else 0)
+        self.provider_filter.blockSignals(False)
         self._render()
 
     def _render(self) -> None:
         rows = [row for row in list(self._payload.get("skills") or []) if isinstance(row, dict)]
         needle = " ".join(self.search.text().casefold().split())
         mode = str(self.state_filter.currentData() or "all")
+        wanted_provider = str(self.provider_filter.currentData() or "")
+        wanted_risk = str(self.risk_filter.currentData() or "")
         filtered = []
         for row in rows:
             available = bool(row.get("available"))
             if mode == "ready" and not available:
                 continue
             if mode == "off" and available:
+                continue
+            if wanted_provider and str(row.get("provider") or "local") != wanted_provider:
+                continue
+            if wanted_risk and str(row.get("risk") or "read") != wanted_risk:
                 continue
             hay = " ".join(
                 str(row.get(key) or "") for key in ("name", "title", "description", "reason", "provider")
@@ -1903,6 +2195,8 @@ class TasksPage(QWidget):
 
 class ControlCenter(QMainWindow):
     chat_submitted = Signal(str)
+    memory_pin = Signal(int, bool)
+    memory_forget = Signal(int)
     refresh_page = Signal(str)
     clear_chat = Signal()
     mic_toggle = Signal()
@@ -2040,8 +2334,14 @@ class ControlCenter(QMainWindow):
         self.pages["activity"] = activity
         self.stack.addWidget(activity)
 
+        memory_page = MemoryPage()
+        memory_page.refresh_requested.connect(lambda: self.refresh_page.emit("memory"))
+        memory_page.pin_requested.connect(self.memory_pin)
+        memory_page.forget_requested.connect(self.memory_forget)
+        self.pages["memory"] = memory_page
+        self.stack.addWidget(memory_page)
+
         defs = {
-            "memory": ("Память", "Факты, предпочтения и то, что вы просили запомнить."),
             "learning": ("Обучение", "Чему Люма научилась и что пока не понимает."),
             "journal": ("Журнал", "Фактические действия ассистента на компьютере."),
         }
@@ -2058,16 +2358,31 @@ class ControlCenter(QMainWindow):
 
         settings = QWidget()
         sl = QVBoxLayout(settings)
+        sl.setSpacing(12)
         title = QLabel("Настройки")
         title.setObjectName("pageTitle")
         sl.addWidget(title)
+        subtitle = QLabel("Persona, автономность, инициативность, providers и аварийное управление.")
+        subtitle.setObjectName("muted")
+        subtitle.setWordWrap(True)
+        sl.addWidget(subtitle)
+
+        runtime_card = GlassCard("cyan")
+        runtime_box = QVBoxLayout(runtime_card)
+        runtime_box.setContentsMargins(14, 11, 14, 12)
+        runtime_head = QLabel("RUNTIME // SAFETY")
+        runtime_head.setObjectName("heroKicker")
+        runtime_box.addWidget(runtime_head)
         self.settings_status = QLabel("Backend: …")
+        self.settings_status.setObjectName("settingsState")
         self.settings_status.setWordWrap(True)
-        sl.addWidget(self.settings_status)
+        runtime_box.addWidget(self.settings_status)
         self.settings_hotkey = QLabel(
-            "Быстрая команда: Ctrl + Shift + Space · STOP ALL: Ctrl + Alt + Shift + Space"
+            "Quick command: Ctrl + Shift + Space · STOP ALL: Ctrl + Alt + Shift + Space"
         )
-        sl.addWidget(self.settings_hotkey)
+        self.settings_hotkey.setObjectName("muted")
+        self.settings_hotkey.setWordWrap(True)
+        runtime_box.addWidget(self.settings_hotkey)
         controls = QHBoxLayout()
         self.mic_button = QPushButton("🎤 Включить wake word")
         self.mic_button.clicked.connect(self.mic_toggle)
@@ -2076,15 +2391,17 @@ class ControlCenter(QMainWindow):
         self.stop_all_button.setObjectName("danger")
         self.stop_all_button.clicked.connect(self.safety_toggle)
         controls.addWidget(self.stop_all_button)
-        sl.addLayout(controls)
+        controls.addStretch(1)
+        runtime_box.addLayout(controls)
+        sl.addWidget(runtime_card)
 
-        voice_link = QLabel("Голос, Baya, произношение и диагностика вынесены в отдельный раздел «Голос».")
-        voice_link.setObjectName("muted")
+        voice_link = QLabel("VOICE · Baya, произношение и диагностика находятся в отдельном разделе «Голос».")
+        voice_link.setObjectName("voiceChain")
         voice_link.setWordWrap(True)
         sl.addWidget(voice_link)
 
         persona_title = QLabel("Persona Люмы")
-        persona_title.setStyleSheet("font-size:16px; font-weight:700; margin-top:12px;")
+        persona_title.setObjectName("sectionTitle")
         sl.addWidget(persona_title)
         self.persona_boxes: dict[str, QComboBox] = {}
         persona_fields = (
@@ -2119,7 +2436,7 @@ class ControlCenter(QMainWindow):
         self.persona_status.setObjectName("muted")
         sl.addWidget(self.persona_status)
         autonomy_title = QLabel("Autonomy")
-        autonomy_title.setStyleSheet("font-size:16px; font-weight:700; margin-top:12px;")
+        autonomy_title.setObjectName("sectionTitle")
         sl.addWidget(autonomy_title)
 
         level_row = QHBoxLayout()
@@ -2167,7 +2484,7 @@ class ControlCenter(QMainWindow):
         sl.addWidget(self.autonomy_status)
 
         proactivity_title = QLabel("Proactivity")
-        proactivity_title.setStyleSheet("font-size:16px; font-weight:700; margin-top:12px;")
+        proactivity_title.setObjectName("sectionTitle")
         sl.addWidget(proactivity_title)
 
         pro_mode_row = QHBoxLayout()
@@ -2241,7 +2558,7 @@ class ControlCenter(QMainWindow):
         self.events_view.setPlainText("Событий пока нет.")
         sl.addWidget(self.events_view)
         providers_title = QLabel("Providers")
-        providers_title.setStyleSheet("font-size:16px; font-weight:700; margin-top:12px;")
+        providers_title.setObjectName("sectionTitle")
         sl.addWidget(providers_title)
         self.providers_view = QTextBrowser()
         self.providers_view.setMaximumHeight(220)
@@ -2573,6 +2890,8 @@ class ControlCenter(QMainWindow):
         elif isinstance(page, TasksPage) and isinstance(payload, dict):
             page.set_payload(payload)
         elif isinstance(page, ActivityPage) and isinstance(payload, dict):
+            page.set_payload(payload)
+        elif isinstance(page, MemoryPage) and isinstance(payload, dict):
             page.set_payload(payload)
         elif isinstance(page, SkillsPage) and isinstance(payload, dict):
             page.set_payload(payload)
