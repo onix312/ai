@@ -457,6 +457,9 @@ class Agent:
         return {"ok": True, "stopped": self._emergency_stop.is_set(),
                 "latched": self._emergency_stop.is_set()}
 
+    def execution_stopped(self) -> bool:
+        return self._emergency_stop.is_set()
+
     # --- навыки ассистента (18.14) ----------------------------------------
     def run_skill(self, name: str, params: Any = None, ask: bool = True,
                   autonomy_mode: str = "direct") -> dict[str, Any]:
