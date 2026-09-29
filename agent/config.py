@@ -88,9 +88,10 @@ BROWSER_CDP_URL = _env(
 STORE_PATH = _env("LUMA_ASSISTANT_DB", "PRINTFLOW_ASSISTANT_DB").strip()
 
 # Папка загрузок — то, что навык `files.tidy_downloads` раскладывает по делам.
-DOWNLOADS_FOLDER = os.environ.get(
+DOWNLOADS_FOLDER = _env(
     "LUMA_DOWNLOADS_FOLDER", "PRINTFLOW_DOWNLOADS_FOLDER",
-    default=str(pathlib.Path.home() / "Downloads")).strip()
+    default=str(pathlib.Path.home() / "Downloads"),
+).strip()
 # Личные документы, которые попадают в индекс (`files.index` без параметра).
 DOCUMENT_FOLDERS = tuple(
     part.strip() for part in
