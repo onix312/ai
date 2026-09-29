@@ -209,6 +209,43 @@ def stylesheet() -> str:
         font-weight: 700;
     }
 
+    QLabel#chatLive {
+        background: transparent;
+        color: #ECE9F8;
+        font-size: 13px;
+        font-weight: 650;
+    }
+
+    QLabel#voiceChain {
+        background: #15162D;
+        color: #B9AEF5;
+        border: 1px solid #3B3E67;
+        border-radius: 10px;
+        padding: 9px 12px;
+        font-size: 11px;
+        font-weight: 750;
+        letter-spacing: 1px;
+    }
+
+    QTextBrowser#chatFeed {
+        background: #0D0F20;
+        border: 0;
+        border-radius: 12px;
+        padding: 4px;
+    }
+
+    QLineEdit#chatInput {
+        background: transparent;
+        border: 0;
+        padding: 11px 12px;
+        font-size: 15px;
+    }
+
+    QLineEdit#chatInput:focus {
+        background: transparent;
+        border: 0;
+    }
+
     QLabel#welcomeTitle {
         color: #FFFFFF;
         font-size: 34px;
