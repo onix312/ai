@@ -1502,8 +1502,6 @@ class ActivityPage(QWidget):
         self.task_filter.blockSignals(True)
         self.task_filter.clear()
         self.task_filter.addItem("Все задачи", 0)
-        if tasks:
-            self._section("Задачи", "TASK ENGINE")
         for task in tasks:
             task_id = int(task.get("id") or 0)
             self.task_filter.addItem(
