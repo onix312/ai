@@ -23,6 +23,14 @@ class AmbientCanvas(QWidget):
         self._animation.setLoopCount(-1)
         self._animation.start()
 
+    def set_reduced_motion(self, enabled: bool) -> None:
+        if enabled:
+            self._animation.stop()
+            self._glow = 0.58
+            self.update()
+        elif self._animation.state() != QPropertyAnimation.Running:
+            self._animation.start()
+
     def get_glow(self) -> float:
         return float(self._glow)
 
@@ -76,6 +84,7 @@ class LumaPortrait(QWidget):
         self._state = "idle"
         self._phase = 0.0
         self._compact = bool(compact)
+        self._reduced_motion = False
         self._portrait = QPixmap(str(Path(__file__).resolve().parent / "assets" / "luma-portrait.png"))
         self.setAttribute(Qt.WA_TranslucentBackground, True)
         self.setMinimumSize(108, 132)
@@ -92,6 +101,13 @@ class LumaPortrait(QWidget):
             clean = "working"
         self._state = clean if clean in self.STATE_COLORS else "idle"
         self.update()
+
+    def set_reduced_motion(self, enabled: bool) -> None:
+        self._reduced_motion = bool(enabled)
+        if enabled:
+            self._timer.stop()
+        elif not self._timer.isActive():
+            self._timer.start()
 
     def _tick(self) -> None:
         if self.isVisible() and self._state not in ("stopped",):

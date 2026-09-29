@@ -381,6 +381,12 @@ class NativeQtSmokeTests(unittest.TestCase):
         filtered = page.browser.toPlainText()
         self.assertIn("Описать экран", filtered)
         self.assertNotIn("Открыть программу", filtered)
+        page.search.clear()
+        page._select_group("app")
+        self.assertIn("Открыть программу", page.browser.toPlainText())
+        self.assertNotIn("Описать экран", page.browser.toPlainText())
+        page._select_group("app")
+        self.assertIn("Описать экран", page.browser.toPlainText())
 
         page.search.clear()
         page.provider_filter.setCurrentIndex(page.provider_filter.findData("core"))

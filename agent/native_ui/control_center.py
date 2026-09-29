@@ -5,10 +5,10 @@ import html
 import json
 from typing import Any
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QSettings, Qt, Signal
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
-    QComboBox, QDoubleSpinBox, QFrame, QHBoxLayout, QLabel, QLineEdit,
+    QCheckBox, QComboBox, QDoubleSpinBox, QFrame, QHBoxLayout, QLabel, QLineEdit,
     QListWidget, QListWidgetItem, QMainWindow, QProgressBar, QPushButton,
     QScrollArea, QSpinBox, QStackedWidget, QTextBrowser, QVBoxLayout, QWidget,
 )
@@ -1154,7 +1154,7 @@ class SkillsPage(QWidget):
 
         head = QHBoxLayout()
         title_box = QVBoxLayout()
-        title = QLabel("Навыки")
+        title = QLabel("Приложения и навыки")
         title.setObjectName("pageTitle")
         title_box.addWidget(title)
         subtitle = QLabel("Карта реальных функций Люмы на этом компьютере.")
@@ -1190,6 +1190,26 @@ class SkillsPage(QWidget):
             box.addWidget(widget)
             metrics.addWidget(card)
         root.addLayout(metrics)
+
+        self.group_filter = ""
+        self.group_tiles: list[QPushButton] = []
+        for row_items in (
+            (("◫", "Приложения", "app"), ("▣", "Работа с файлами", "files"),
+             ("▤", "Управление ПК", "system")),
+            (("◎", "Интернет и поиск", "browser"), ("⌘", "Сценарии", "assistant"),
+             ("◈", "Печать", "printer")),
+        ):
+            tiles = QHBoxLayout()
+            for icon, label, group in row_items:
+                button = QPushButton(f"{icon}\n{label}")
+                button.setObjectName("capabilityTile")
+                button.setProperty("group", group)
+                button.setCheckable(True)
+                button.setMinimumHeight(70)
+                button.clicked.connect(lambda _=False, value=group: self._select_group(value))
+                self.group_tiles.append(button)
+                tiles.addWidget(button, 1)
+            root.addLayout(tiles)
 
         filter_row = QHBoxLayout()
         self.search = QLineEdit()
@@ -1247,6 +1267,12 @@ class SkillsPage(QWidget):
         self.provider_filter.blockSignals(False)
         self._render()
 
+    def _select_group(self, group: str) -> None:
+        self.group_filter = "" if self.group_filter == group else group
+        for button in self.group_tiles:
+            button.setChecked(button.property("group") == self.group_filter)
+        self._render()
+
     def _render(self) -> None:
         rows = [row for row in list(self._payload.get("skills") or []) if isinstance(row, dict)]
         needle = " ".join(self.search.text().casefold().split())
@@ -1255,6 +1281,8 @@ class SkillsPage(QWidget):
         wanted_risk = str(self.risk_filter.currentData() or "")
         filtered = []
         for row in rows:
+            if self.group_filter and str(row.get("name") or "").split(".", 1)[0] != self.group_filter:
+                continue
             available = bool(row.get("available"))
             if mode == "ready" and not available:
                 continue
@@ -3004,7 +3032,7 @@ class ControlCenter(QMainWindow):
         ("activity", "⌁  Активность"),
         ("memory", "◌  Память"),
         ("learning", "✦  Обучение"),
-        ("skills", "⬡  Навыки"),
+        ("skills", "⬡  Приложения"),
         ("journal", "≋  Журнал"),
         ("settings", "⚙  Настройки"),
     ]
@@ -3016,6 +3044,7 @@ class ControlCenter(QMainWindow):
         self.resize(1180, 780)
         root = AmbientCanvas()
         root.setObjectName("shellRoot")
+        self.ambient = root
         self.setCentralWidget(root)
         outer = QVBoxLayout(root)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -3138,10 +3167,24 @@ class ControlCenter(QMainWindow):
         title = QLabel("Настройки")
         title.setObjectName("pageTitle")
         sl.addWidget(title)
-        subtitle = QLabel("Persona, автономность, инициативность, providers и аварийное управление.")
+        subtitle = QLabel("Внешний вид, характер Люмы, разрешения и управление голосом.")
         subtitle.setObjectName("muted")
         subtitle.setWordWrap(True)
         sl.addWidget(subtitle)
+
+        appearance = GlassCard("violet")
+        appearance_box = QHBoxLayout(appearance)
+        appearance_box.setContentsMargins(16, 13, 16, 13)
+        appearance_copy = QVBoxLayout()
+        appearance_title = QLabel("Внешний вид")
+        appearance_title.setObjectName("sectionTitle")
+        appearance_copy.addWidget(appearance_title)
+        appearance_copy.addWidget(QLabel("Тёмная тема · фиолетовый и синий свет"))
+        appearance_box.addLayout(appearance_copy, 1)
+        self.motion_toggle = QCheckBox("Уменьшить анимацию")
+        self.motion_toggle.toggled.connect(self._set_reduced_motion)
+        appearance_box.addWidget(self.motion_toggle)
+        sl.addWidget(appearance)
 
         runtime_card = GlassCard("cyan")
         runtime_box = QVBoxLayout(runtime_card)
@@ -3176,7 +3219,7 @@ class ControlCenter(QMainWindow):
         voice_link.setWordWrap(True)
         sl.addWidget(voice_link)
 
-        persona_title = QLabel("Persona Люмы")
+        persona_title = QLabel("Характер Люмы")
         persona_title.setObjectName("sectionTitle")
         sl.addWidget(persona_title)
         self.persona_boxes: dict[str, QComboBox] = {}
@@ -3211,7 +3254,7 @@ class ControlCenter(QMainWindow):
         self.persona_status = QLabel("Загрузка профиля…")
         self.persona_status.setObjectName("muted")
         sl.addWidget(self.persona_status)
-        autonomy_title = QLabel("Autonomy")
+        autonomy_title = QLabel("Самостоятельность")
         autonomy_title.setObjectName("sectionTitle")
         sl.addWidget(autonomy_title)
 
@@ -3259,7 +3302,7 @@ class ControlCenter(QMainWindow):
         self.autonomy_status.setWordWrap(True)
         sl.addWidget(self.autonomy_status)
 
-        proactivity_title = QLabel("Proactivity")
+        proactivity_title = QLabel("Инициативность")
         proactivity_title.setObjectName("sectionTitle")
         sl.addWidget(proactivity_title)
 
@@ -3333,20 +3376,13 @@ class ControlCenter(QMainWindow):
         self.events_view.setMaximumHeight(150)
         self.events_view.setPlainText("Событий пока нет.")
         sl.addWidget(self.events_view)
-        providers_title = QLabel("Providers")
+        providers_title = QLabel("Подключения")
         providers_title.setObjectName("sectionTitle")
         sl.addWidget(providers_title)
         self.providers_view = QTextBrowser()
         self.providers_view.setMaximumHeight(220)
         self.providers_view.setPlainText("Загрузка…")
         sl.addWidget(self.providers_view)
-        note = QLabel(
-            "Нативный интерфейс не содержит мозг ассистента. Он подключается "
-            "к локальному agent core на 127.0.0.1; старый /ui остаётся fallback."
-        )
-        note.setWordWrap(True)
-        note.setObjectName("muted")
-        sl.addWidget(note)
         sl.addStretch(1)
         settings_scroll = QScrollArea()
         settings_scroll.setWidgetResizable(True)
@@ -3366,6 +3402,16 @@ class ControlCenter(QMainWindow):
         self.nav.currentRowChanged.connect(self._change)
         self.nav.setCurrentRow(0)
         self.setStyleSheet(theme.stylesheet())
+        self.motion_toggle.setChecked(QSettings("Luma", "Luma").value("reduced_motion", False, type=bool))
+        self._set_reduced_motion(self.motion_toggle.isChecked())
+
+    def _set_reduced_motion(self, enabled: bool) -> None:
+        QSettings("Luma", "Luma").setValue("reduced_motion", bool(enabled))
+        self.ambient.set_reduced_motion(enabled)
+        for widget in self.findChildren(LumaPortrait):
+            widget.set_reduced_motion(enabled)
+        for widget in self.findChildren(LumaOrbCore):
+            widget.set_reduced_motion(enabled)
 
     def _change(self, row: int) -> None:
         if row < 0:

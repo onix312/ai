@@ -576,6 +576,20 @@ def stylesheet() -> str:
         border-color: #6654B8;
     }
 
+    QPushButton#capabilityTile {
+        background: qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #17264A,stop:1 #10172E);
+        border: 1px solid #405891;
+        border-radius: 12px;
+        color: #F5F2FF;
+        font-size: 14px;
+        font-weight: 700;
+    }
+
+    QPushButton#capabilityTile:hover, QPushButton#capabilityTile:checked {
+        background: #28236A;
+        border: 1px solid #AA80FF;
+    }
+
     QPushButton#danger {
         background: #35141E;
         color: #FFBCC8;
