@@ -175,6 +175,27 @@ class NativeApp:
             self.state.panel_ok, self.state.last_error,
             self.state.safety_stopped, self.state.assistant_state,
         )
+        activity_state = {
+            "thinking": "thinking",
+            "speaking": "speaking",
+            "executing": "working",
+            "task": "working",
+            "waiting": "waiting",
+            "error": "error",
+        }.get(self.state.activity_phase, "")
+        voice_state = self.state.assistant_state
+        display_state = activity_state if self.state.activity_active and activity_state else voice_state
+        self.center.set_home_runtime(
+            connected=self.state.connected,
+            state=display_state,
+            audio_level=self.state.audio_level,
+            heard=self.state.activity_heard or self.state.voice_partial,
+            reply=self.state.activity_reply,
+            skill=self.state.activity_skill,
+            detail=self.state.activity_detail,
+            task_id=self.state.activity_task_id,
+            safety_stopped=self.state.safety_stopped,
+        )
         if not self.state.connected:
             if self.orb.isVisible():
                 self.orb.set_state("error", 1800)
@@ -220,16 +241,6 @@ class NativeApp:
             self.orb.set_activity(0, "")
             self.orb.set_live(detail="STOP ALL активен", recent=self.state.activity_recent)
             return
-        activity_state = {
-            "thinking": "thinking",
-            "speaking": "speaking",
-            "executing": "working",
-            "task": "working",
-            "waiting": "waiting",
-            "error": "error",
-        }.get(self.state.activity_phase, "")
-        voice_state = self.state.assistant_state
-        display_state = activity_state if self.state.activity_active and activity_state else voice_state
         if display_state in ("listening", "thinking", "speaking", "working", "waiting", "error"):
             self.orb.set_state(display_state, 1800 if display_state == "error" else 0)
             self.orb.set_activity(self.state.audio_level, self.state.voice_partial)
