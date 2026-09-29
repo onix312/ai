@@ -9,7 +9,7 @@ from __future__ import annotations
 import math
 
 from PySide6.QtCore import QPointF, QRectF, QSize, Qt, QTimer
-from PySide6.QtGui import QColor, QPainter, QPen, QRadialGradient
+from PySide6.QtGui import QBrush, QColor, QPainter, QPen, QRadialGradient
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 
@@ -125,7 +125,7 @@ class LumaOrbCore(QWidget):
         halo.setColorAt(0.72, self._alpha(color, 12))
         halo.setColorAt(1.0, self._alpha(color, 0))
         painter.setPen(Qt.NoPen)
-        painter.setBrush(halo)
+        painter.setBrush(QBrush(halo))
         painter.drawEllipse(center, outer_r * 1.12, outer_r * 1.12)
 
         ring_rect = QRectF(
@@ -173,7 +173,7 @@ class LumaOrbCore(QWidget):
         core.setColorAt(0.80, QColor("#241C4C"))
         core.setColorAt(1.0, QColor("#0A0B19"))
         painter.setPen(QPen(self._alpha(color.lighter(150), 120), max(1.0, side * 0.007)))
-        painter.setBrush(core)
+        painter.setBrush(QBrush(core))
         painter.drawEllipse(center, core_r, core_r)
 
         inner_r = core_r * (0.42 + (0.025 * breath if self._state != "stopped" else 0.0))
@@ -182,7 +182,7 @@ class LumaOrbCore(QWidget):
         inner.setColorAt(0.22, self._alpha(color.lighter(170), 220))
         inner.setColorAt(1.0, self._alpha(color, 5))
         painter.setPen(Qt.NoPen)
-        painter.setBrush(inner)
+        painter.setBrush(QBrush(inner))
         painter.drawEllipse(center, inner_r, inner_r)
 
         if not self._compact and self._state == "speaking":
