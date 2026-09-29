@@ -1053,6 +1053,10 @@ class AgentHandler(BaseHTTPRequestHandler):
             return self._json(200, agent.disable_voice())
         if self.role == "speech" and path == "/voice/stop":
             return self._json(200, agent.stop_voice_output())
+        if self.role == "speech" and path == "/voice/tune":
+            return self._json(200, agent.microphone.tune(self._read_json()))
+        if self.role == "speech" and path == "/voice/diagnostics/reset":
+            return self._json(200, agent.microphone.reset_diagnostics())
         if self.role != "agent":
             return self._json(404, {"ok": False, "reason": f"Маршрута {path} нет"})
         body = self._read_json()
