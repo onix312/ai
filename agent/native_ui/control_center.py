@@ -497,7 +497,7 @@ class ControlCenter(QMainWindow):
     autonomy_reset = Signal()
     proactivity_save = Signal(object)
     proactivity_reset = Signal()
-    voice_tune = Signal(float, int, float)
+    voice_tune = Signal(int, float, int, float)
     voice_diag_reset = Signal()
 
     NAV = [
@@ -617,6 +617,11 @@ class ControlCenter(QMainWindow):
         sl.addWidget(self.voice_floor)
 
         diag_row = QHBoxLayout()
+        self.voice_vad = QSpinBox()
+        self.voice_vad.setRange(40, 12000)
+        self.voice_vad.setSingleStep(20)
+        self.voice_vad.setPrefix("VAD ")
+        diag_row.addWidget(self.voice_vad)
         self.voice_multiplier = QDoubleSpinBox()
         self.voice_multiplier.setRange(1.0, 4.0)
         self.voice_multiplier.setSingleStep(0.05)
@@ -640,6 +645,7 @@ class ControlCenter(QMainWindow):
         apply_voice = QPushButton("Применить калибровку")
         apply_voice.clicked.connect(
             lambda: self.voice_tune.emit(
+                int(self.voice_vad.value()),
                 float(self.voice_multiplier.value()),
                 int(self.voice_margin.value()),
                 float(self.voice_alpha.value()),
