@@ -70,6 +70,7 @@ class PackagingFilesTests(unittest.TestCase):
         self.assertIn('"LumaPackage"', text)
         self.assertIn('"app"', text)
         self.assertIn('"install.ps1"', text)
+        self.assertIn('"INSTALL-LUMA.bat"', text)
         self.assertIn("PyInstaller", text)
 
 
