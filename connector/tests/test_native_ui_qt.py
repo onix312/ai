@@ -14,7 +14,7 @@ from PySide6.QtWidgets import QApplication, QLabel, QProgressBar
 
 from agent.native_ui.app import NativeApp
 from agent.native_ui.components import LumaPortrait
-from agent.native_ui.control_center import ActivityPage, ChatPage, ControlCenter, HomePage, TasksPage, TextPage, VoicePage
+from agent.native_ui.control_center import ActivityPage, ChatPage, ControlCenter, HomePage, SkillsPage, TasksPage, TextPage, VoicePage
 from agent.native_ui.orb import LumaOrbCore, VoiceOrb
 from agent.native_ui.quick_panel import QuickPanel
 
@@ -134,6 +134,44 @@ class NativeQtSmokeTests(unittest.TestCase):
         self.assertNotIn("<think", trace.casefold())
         center.chat.clear_action_trace()
         self.assertTrue(center.chat.trace_card.isHidden())
+        center.deleteLater()
+        self.app.processEvents()
+
+    def test_skills_page_is_searchable_capability_map(self):
+        center = ControlCenter()
+        self.assertIsInstance(center.pages["skills"], SkillsPage)
+        center.set_page_payload("skills", {
+            "ok": True,
+            "skills": [
+                {
+                    "name": "app.open", "title": "Открыть программу",
+                    "description": "Открывает локальную программу.", "available": True,
+                    "reason": "", "risk": "soft", "confirm": False,
+                    "provider": "core", "params": {"target": "text"},
+                },
+                {
+                    "name": "screen.describe", "title": "Описать экран",
+                    "description": "Видит экран локально.", "available": False,
+                    "reason": "vision-модель не установлена", "risk": "read", "confirm": False,
+                    "provider": "desktop", "params": {"question": "text"},
+                },
+            ],
+            "ready": 1,
+        })
+        page = center.pages["skills"]
+        self.assertEqual("1", page.ready_metric.text())
+        self.assertEqual("2", page.total_metric.text())
+        self.assertEqual("1", page.off_metric.text())
+        visible = page.browser.toPlainText()
+        self.assertIn("Открыть программу", visible)
+        self.assertIn("Описать экран", visible)
+        self.assertIn("vision-модель не установлена", visible)
+
+        page.search.setText("экран")
+        self.app.processEvents()
+        filtered = page.browser.toPlainText()
+        self.assertIn("Описать экран", filtered)
+        self.assertNotIn("Открыть программу", filtered)
         center.deleteLater()
         self.app.processEvents()
 
