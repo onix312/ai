@@ -167,6 +167,34 @@ class BackendClientTests(unittest.TestCase):
             ("POST", "http://127.0.0.1:8799/memory", {"op": "forget", "id": 11}),
         ], calls)
 
+    def test_personal_api_preserves_today_action_payloads(self):
+        client = BackendClient()
+        calls = []
+
+        def fake(req, timeout=0):
+            body = json.loads(req.data.decode("utf-8")) if req.data else None
+            calls.append((req.get_method(), req.full_url, body))
+            return _Response({"ok": True})
+
+        with mock.patch("urllib.request.urlopen", fake):
+            client.personal()
+            client.personal_op("habit_check", 7)
+            client.personal_op("habit_uncheck", 7)
+            client.personal_op("goal_progress", 8, amount=1)
+            client.personal_op("list_remove", 9)
+            client.personal_op("reminder_snooze", 10, minutes=10)
+            client.personal_op("reminder_done", 10)
+
+        self.assertEqual([
+            ("GET", "http://127.0.0.1:8799/personal", None),
+            ("POST", "http://127.0.0.1:8799/personal", {"op": "habit_check", "id": 7}),
+            ("POST", "http://127.0.0.1:8799/personal", {"op": "habit_uncheck", "id": 7}),
+            ("POST", "http://127.0.0.1:8799/personal", {"op": "goal_progress", "id": 8, "amount": 1}),
+            ("POST", "http://127.0.0.1:8799/personal", {"op": "list_remove", "id": 9}),
+            ("POST", "http://127.0.0.1:8799/personal", {"op": "reminder_snooze", "id": 10, "minutes": 10}),
+            ("POST", "http://127.0.0.1:8799/personal", {"op": "reminder_done", "id": 10}),
+        ], calls)
+
     def test_learning_api_preserves_exact_operation_payloads(self):
         client = BackendClient()
         calls = []
