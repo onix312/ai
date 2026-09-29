@@ -847,7 +847,8 @@ class HomePage(QWidget):
         self.heard_value.setVisible(bool(heard_clean))
 
     def set_brain(self, *, model_ok: bool, ready: int = 0, total: int = 0,
-                  route: str = "ready", repaired: bool = False) -> None:
+                  route: str = "ready", repaired: bool = False,
+                  agent_iterations: int = 0) -> None:
         clean_route = str(route or "ready").casefold()
         labels = {
             "rules": "RULES",
@@ -865,7 +866,13 @@ class HomePage(QWidget):
         self.brain_value.setText(label)
         model_text = "model ready" if model_ok else "model offline"
         tools = f"{int(ready)}/{int(total)} функций" if total else "функции загружаются"
-        suffix = " · repair loop" if repaired else " · context + tool router"
+        if repaired:
+            suffix = " · repair loop"
+        elif clean_route == "agent-loop":
+            count = max(0, int(agent_iterations or 0))
+            suffix = f" · observe → decide → act · {count} итерац." if count else " · observe → decide → act"
+        else:
+            suffix = " · context + tool router"
         self.brain_meta.setText(f"{model_text} · {tools}{suffix}")
 
     @staticmethod
