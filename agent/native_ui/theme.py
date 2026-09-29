@@ -216,6 +216,77 @@ def stylesheet() -> str:
         font-weight: 650;
     }
 
+    QLabel#tracePill {
+        background: #132A2C;
+        color: #79E9C2;
+        border: 1px solid #285D58;
+        border-radius: 9px;
+        padding: 3px 8px;
+        font-size: 9px;
+        font-weight: 750;
+        letter-spacing: 1px;
+    }
+
+    QLabel#actionTrace {
+        background: transparent;
+        color: #C9C4E3;
+        font-size: 12px;
+        line-height: 1.35;
+        padding: 2px 1px;
+    }
+
+    QLabel#taskTitle {
+        background: transparent;
+        color: #FFFFFF;
+        font-size: 16px;
+        font-weight: 750;
+    }
+
+    QLabel#taskStatus {
+        background: #1B1737;
+        color: #C7B8FF;
+        border: 1px solid #4A3B81;
+        border-radius: 9px;
+        padding: 4px 8px;
+        font-size: 9px;
+        font-weight: 750;
+        letter-spacing: 1px;
+    }
+
+    QLabel#taskStep {
+        background: #0E1122;
+        color: #AAA6C3;
+        border-left: 2px solid #30345A;
+        border-radius: 8px;
+        padding: 7px 10px;
+    }
+
+    QLabel#taskStepCurrent {
+        background: #171634;
+        color: #F5F2FF;
+        border-left: 3px solid #43D7FF;
+        border-radius: 8px;
+        padding: 8px 10px;
+        font-weight: 650;
+    }
+
+    QLabel#taskNow {
+        background: #10272B;
+        color: #8BEACD;
+        border: 1px solid #255A54;
+        border-radius: 9px;
+        padding: 7px 10px;
+        font-weight: 650;
+    }
+
+    QLabel#taskError {
+        background: #2A131C;
+        color: #FFB7C3;
+        border: 1px solid #6A2838;
+        border-radius: 9px;
+        padding: 7px 10px;
+    }
+
     QLabel#voiceChain {
         background: #15162D;
         color: #B9AEF5;
@@ -377,6 +448,19 @@ def stylesheet() -> str:
     QProgressBar::chunk {
         background: #795AE2;
         border-radius: 6px;
+    }
+
+    QProgressBar#taskProgress {
+        min-height: 7px;
+        max-height: 7px;
+        border-radius: 4px;
+        background: #0D1020;
+        border: 0;
+    }
+
+    QProgressBar#taskProgress::chunk {
+        background: #6E56CF;
+        border-radius: 4px;
     }
 
     QLabel#footer {
