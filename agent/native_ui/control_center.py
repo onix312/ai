@@ -1443,22 +1443,26 @@ class ChatPage(QWidget):
 
         self.content = QStackedWidget()
 
-        welcome = GlassCard()
-        intro = QHBoxLayout(welcome)
-        intro.setContentsMargins(28, 22, 28, 22)
-        intro.setSpacing(26)
-
-        portrait_column = QVBoxLayout()
-        portrait_column.addStretch(1)
+        conversation = QHBoxLayout()
+        conversation.setSpacing(12)
+        portrait_card = GlassCard("violet")
+        portrait_box = QVBoxLayout(portrait_card)
+        portrait_box.setContentsMargins(8, 12, 8, 14)
+        portrait_box.addStretch(1)
         self.welcome_portrait = LumaPortrait()
-        self.welcome_portrait.setFixedSize(260, 280)
-        portrait_column.addWidget(self.welcome_portrait, 0, Qt.AlignCenter)
-        persona = QLabel("LUMA · LOCAL PERSONA")
+        self.welcome_portrait.setMinimumSize(190, 270)
+        portrait_box.addWidget(self.welcome_portrait, 0, Qt.AlignCenter)
+        persona = QLabel("LUMA · ВСЕГДА РЯДОМ")
         persona.setObjectName("heroKicker")
         persona.setAlignment(Qt.AlignCenter)
-        portrait_column.addWidget(persona)
-        portrait_column.addStretch(1)
-        intro.addLayout(portrait_column, 4)
+        portrait_box.addWidget(persona)
+        portrait_box.addStretch(1)
+        conversation.addWidget(portrait_card, 3)
+
+        welcome = GlassCard()
+        intro = QVBoxLayout(welcome)
+        intro.setContentsMargins(24, 20, 24, 20)
+        intro.setSpacing(14)
 
         copy = QVBoxLayout()
         copy.addStretch(1)
@@ -1485,7 +1489,7 @@ class ChatPage(QWidget):
             button.clicked.connect(lambda _=False, value=prompt: self._pick_prompt(value))
             copy.addWidget(button)
         copy.addStretch(1)
-        intro.addLayout(copy, 7)
+        intro.addLayout(copy, 1)
 
         self.content.addWidget(welcome)
 
@@ -1498,7 +1502,8 @@ class ChatPage(QWidget):
         feed_layout.addWidget(self.feed)
         self.content.addWidget(feed_card)
 
-        layout.addWidget(self.content, 1)
+        conversation.addWidget(self.content, 7)
+        layout.addLayout(conversation, 1)
 
         composer = GlassCard("cyan")
         composer_row = QHBoxLayout(composer)
@@ -1745,7 +1750,7 @@ class HomePage(QWidget):
         kicker.setObjectName("heroKicker")
         persona.addWidget(kicker)
 
-        title = QLabel("Люма")
+        title = QLabel("Привет!\nЯ Luma")
         title.setObjectName("heroTitle")
         persona.addWidget(title)
 
@@ -1852,6 +1857,10 @@ class HomePage(QWidget):
         action_title = QLabel("Быстрые действия")
         action_title.setObjectName("sectionTitle")
         action_box.addWidget(action_title)
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText("Спроси, найди файл или скажи, что сделать…")
+        self.search_input.returnPressed.connect(self._submit_search)
+        action_box.addWidget(self.search_input)
         actions = QHBoxLayout()
         for text in (
             "Что у меня сегодня?",
@@ -1865,6 +1874,12 @@ class HomePage(QWidget):
             actions.addWidget(button)
         action_box.addLayout(actions)
         root.addWidget(action_card)
+
+    def _submit_search(self) -> None:
+        query = self.search_input.text().strip()
+        if query:
+            self.submitted.emit(query)
+            self.search_input.clear()
 
     def set_runtime(self, *, connected: bool, state: str, audio_level: int = 0,
                     heard: str = "", reply: str = "", skill: str = "",

@@ -80,6 +80,12 @@ class NativeQtSmokeTests(unittest.TestCase):
         self.assertIsInstance(center.home.portrait, LumaPortrait)
         self.assertFalse(center.home.portrait._portrait.isNull())
         self.assertFalse(center.ambient._background.isNull())
+        submitted = []
+        center.home.submitted.connect(submitted.append)
+        center.home.search_input.setText("Открой загрузки")
+        center.home._submit_search()
+        self.assertEqual(["Открой загрузки"], submitted)
+        self.assertEqual("", center.home.search_input.text())
 
         center.set_home_runtime(
             connected=True,
