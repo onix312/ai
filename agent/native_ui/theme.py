@@ -202,6 +202,24 @@ def stylesheet() -> str:
         font-weight: 650;
     }
 
+    QLabel#skillMetric, QLabel#skillMetricReady {
+        background: transparent;
+        color: #F5F2FF;
+        font-size: 24px;
+        font-weight: 800;
+    }
+
+    QLabel#skillMetricReady {
+        color: #78EDC6;
+    }
+
+    QTextBrowser#skillsBrowser {
+        background: #0D0F20;
+        border: 1px solid #25294A;
+        border-radius: 14px;
+        padding: 4px;
+    }
+
     QLabel#sectionTitle {
         background: transparent;
         color: #F5F2FF;
