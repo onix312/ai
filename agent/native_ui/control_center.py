@@ -111,6 +111,229 @@ class TextPage(QWidget):
                 "</td></tr></table>")
 
 
+class MemoryPage(QWidget):
+    """Searchable long-term memory surface with provenance and confidence."""
+
+    refresh_requested = Signal()
+
+    ORIGIN_LABELS = {
+        "explicit": "Со слов владельца",
+        "observed": "Наблюдение",
+        "inferred": "Предположение",
+        "imported": "Импорт",
+    }
+
+    KIND_LABELS = {
+        "fact": "Факт",
+        "preference": "Предпочтение",
+        "profile": "Профиль",
+        "person": "Человек",
+        "rule": "Правило",
+    }
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._payload: dict[str, Any] = {}
+        self._show_raw = False
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(2, 2, 2, 2)
+        root.setSpacing(12)
+
+        head = QHBoxLayout()
+        title_box = QVBoxLayout()
+        title = QLabel("Память")
+        title.setObjectName("pageTitle")
+        subtitle = QLabel("Что Люма знает, откуда это взялось и насколько этому можно доверять.")
+        subtitle.setObjectName("muted")
+        title_box.addWidget(title)
+        title_box.addWidget(subtitle)
+        head.addLayout(title_box, 1)
+
+        self.raw_button = QPushButton("Показать данные")
+        self.raw_button.clicked.connect(self._toggle_raw)
+        head.addWidget(self.raw_button)
+        refresh = QPushButton("Обновить")
+        refresh.clicked.connect(self.refresh_requested)
+        head.addWidget(refresh)
+        root.addLayout(head)
+
+        metrics = QHBoxLayout()
+        metrics.setSpacing(10)
+        self.total_metric = QLabel("0")
+        self.total_metric.setObjectName("memoryMetric")
+        self.pinned_metric = QLabel("0")
+        self.pinned_metric.setObjectName("memoryMetricPinned")
+        self.explicit_metric = QLabel("0")
+        self.explicit_metric.setObjectName("memoryMetric")
+        self.inferred_metric = QLabel("0")
+        self.inferred_metric.setObjectName("memoryMetric")
+        for caption, widget, accent in (
+            ("ВСЕГО", self.total_metric, ""),
+            ("PINNED", self.pinned_metric, "violet"),
+            ("EXPLICIT", self.explicit_metric, "cyan"),
+            ("INFERRED", self.inferred_metric, "amber"),
+        ):
+            card = GlassCard(accent)
+            box = QVBoxLayout(card)
+            box.setContentsMargins(13, 10, 13, 10)
+            label = QLabel(caption)
+            label.setObjectName("metricLabel")
+            box.addWidget(label)
+            box.addWidget(widget)
+            metrics.addWidget(card, 1)
+        root.addLayout(metrics)
+
+        filters = QHBoxLayout()
+        self.search = QLineEdit()
+        self.search.setPlaceholderText("Найти в памяти: человек, программа, привычка, правило…")
+        self.search.textChanged.connect(self._render)
+        filters.addWidget(self.search, 1)
+
+        self.origin_filter = QComboBox()
+        self.origin_filter.addItem("Все источники", "")
+        for key in ("explicit", "observed", "inferred", "imported"):
+            self.origin_filter.addItem(self.ORIGIN_LABELS[key], key)
+        self.origin_filter.currentIndexChanged.connect(self._render)
+        filters.addWidget(self.origin_filter)
+
+        self.kind_filter = QComboBox()
+        self.kind_filter.addItem("Все типы", "")
+        self.kind_filter.currentIndexChanged.connect(self._render)
+        filters.addWidget(self.kind_filter)
+        root.addLayout(filters)
+
+        self.layers_note = QLabel("MEMORY V2 · working 0 · episodic 0 · semantic 0 · user model 0")
+        self.layers_note.setObjectName("voiceChain")
+        self.layers_note.setWordWrap(True)
+        root.addWidget(self.layers_note)
+
+        self.browser = QTextBrowser()
+        self.browser.setObjectName("memoryBrowser")
+        root.addWidget(self.browser, 1)
+
+    def set_payload(self, payload: dict[str, Any]) -> None:
+        self._payload = dict(payload or {})
+        rows = [row for row in list(self._payload.get("memories") or []) if isinstance(row, dict)]
+
+        self.total_metric.setText(str(int(self._payload.get("count") or len(rows))))
+        self.pinned_metric.setText(str(sum(1 for row in rows if row.get("pinned"))))
+        self.explicit_metric.setText(str(sum(1 for row in rows if str(row.get("origin") or "") == "explicit")))
+        self.inferred_metric.setText(str(sum(1 for row in rows if str(row.get("origin") or "") == "inferred")))
+
+        current_kind = str(self.kind_filter.currentData() or "")
+        kinds = sorted({
+            str(row.get("kind") or "").strip()
+            for row in rows if str(row.get("kind") or "").strip()
+        })
+        self.kind_filter.blockSignals(True)
+        self.kind_filter.clear()
+        self.kind_filter.addItem("Все типы", "")
+        for kind in kinds:
+            self.kind_filter.addItem(self.KIND_LABELS.get(kind, kind), kind)
+        index = self.kind_filter.findData(current_kind)
+        self.kind_filter.setCurrentIndex(index if index >= 0 else 0)
+        self.kind_filter.blockSignals(False)
+
+        layers = self._payload.get("layers") if isinstance(self._payload.get("layers"), dict) else {}
+        self.layers_note.setText(
+            "MEMORY V2"
+            f" · working {len(list(layers.get('working') or []))}"
+            f" · episodic {len(list(layers.get('episodic') or []))}"
+            f" · semantic {len(list(layers.get('semantic') or []))}"
+            f" · user model {len(list(layers.get('user_model') or []))}"
+        )
+        self._render()
+
+    def _toggle_raw(self) -> None:
+        self._show_raw = not self._show_raw
+        self.raw_button.setText("Красивый вид" if self._show_raw else "Показать данные")
+        self._render()
+
+    @staticmethod
+    def _e(value: Any) -> str:
+        return html.escape(" ".join(str(value or "").split()))
+
+    def _render(self, *_args: Any) -> None:
+        if self._show_raw:
+            self.browser.setPlainText(_pretty(self._payload))
+            return
+
+        rows = [row for row in list(self._payload.get("memories") or []) if isinstance(row, dict)]
+        needle = " ".join(self.search.text().casefold().split())
+        wanted_origin = str(self.origin_filter.currentData() or "")
+        wanted_kind = str(self.kind_filter.currentData() or "")
+
+        filtered = []
+        for row in rows:
+            origin = str(row.get("origin") or "")
+            kind = str(row.get("kind") or "")
+            if wanted_origin and origin != wanted_origin:
+                continue
+            if wanted_kind and kind != wanted_kind:
+                continue
+            hay = " ".join(str(row.get(key) or "") for key in (
+                "text", "subject", "kind", "origin", "source", "provenance",
+            )).casefold()
+            if needle and needle not in hay:
+                continue
+            filtered.append(row)
+
+        cards = []
+        for row in filtered:
+            text_value = self._e(row.get("text") or "Запись памяти")
+            origin = str(row.get("origin") or "explicit")
+            kind = str(row.get("kind") or "fact")
+            origin_label = self._e(self.ORIGIN_LABELS.get(origin, origin))
+            kind_label = self._e(self.KIND_LABELS.get(kind, kind))
+            confidence = max(0.0, min(1.0, float(row.get("confidence") or 0.0)))
+            confidence_text = f"{confidence * 100:.0f}%"
+            subject = self._e(row.get("subject") or "")
+            source = self._e(row.get("source") or "")
+            provenance = self._e(row.get("provenance") or "")
+            updated = self._e(row.get("updated_at") or row.get("created_at") or "")
+            uses = int(row.get("uses") or 0)
+            evidence = int(row.get("observed_count") or row.get("evidence_count") or 1)
+            score = row.get("score")
+            pinned = bool(row.get("pinned"))
+
+            origin_color = {
+                "explicit": "#58E6B1",
+                "observed": "#43D7FF",
+                "inferred": "#F5B84C",
+                "imported": "#A78BFA",
+            }.get(origin, "#A78BFA")
+            pin = (
+                "<span style='color:#C7B8FF;font-size:10px;font-weight:700'>PINNED</span>&nbsp;&nbsp;"
+                if pinned else ""
+            )
+            score_text = f" · relevance {float(score):.2f}" if score is not None else ""
+            meta = (
+                f"{kind_label} · confidence {confidence_text} · evidence {evidence}"
+                f" · uses {uses}{self._e(score_text)}"
+            )
+            secondary = " · ".join(part for part in (subject, source, provenance, updated) if part)
+
+            cards.append(
+                "<div style='margin:8px 0;padding:13px 15px;background:#111328;"
+                "border:1px solid #30345A;border-radius:13px'>"
+                f"{pin}<span style='color:{origin_color};font-size:10px;font-weight:700'>{origin_label}</span>"
+                f"<br><div style='margin-top:5px;color:#F5F2FF;font-size:14px;font-weight:650'>{text_value}</div>"
+                f"<div style='margin-top:6px;color:#8F8BAE;font-size:11px'>{meta}</div>"
+                + (f"<div style='margin-top:3px;color:#6F6B88;font-size:10px'>{secondary}</div>" if secondary else "")
+                + "</div>"
+            )
+
+        if cards:
+            body = "".join(cards)
+        else:
+            body = (
+                "<div style='margin:30px;color:#9996B7'>"
+                "По этому фильтру записей нет. Измените поиск или источник.</div>"
+            )
+        self.browser.setHtml("<div style='margin:8px 14px'>" + body + "</div>")
+
+
 class SkillsPage(QWidget):
     """Searchable capability map: what Luma can really use on this computer."""
 
@@ -2040,8 +2263,12 @@ class ControlCenter(QMainWindow):
         self.pages["activity"] = activity
         self.stack.addWidget(activity)
 
+        memory_page = MemoryPage()
+        memory_page.refresh_requested.connect(lambda: self.refresh_page.emit("memory"))
+        self.pages["memory"] = memory_page
+        self.stack.addWidget(memory_page)
+
         defs = {
-            "memory": ("Память", "Факты, предпочтения и то, что вы просили запомнить."),
             "learning": ("Обучение", "Чему Люма научилась и что пока не понимает."),
             "journal": ("Журнал", "Фактические действия ассистента на компьютере."),
         }
@@ -2575,6 +2802,8 @@ class ControlCenter(QMainWindow):
         elif isinstance(page, ActivityPage) and isinstance(payload, dict):
             page.set_payload(payload)
         elif isinstance(page, SkillsPage) and isinstance(payload, dict):
+            page.set_payload(payload)
+        elif isinstance(page, MemoryPage) and isinstance(payload, dict):
             page.set_payload(payload)
 
     def closeEvent(self, event) -> None:
