@@ -1496,6 +1496,91 @@ def _wav_player(path: str) -> tuple[list[str], dict[str, str]]:
     return [], env
 
 
+def _silero_speak(clean: str, rate: int, volume: int) -> tuple[dict[str, Any], str]:
+    model_path = _silero_model_path()
+    if not silero_tts.available(model_path):
+        return {}, "Локальный голос Silero Baya не установлен"
+
+    handle, wav_path = tempfile.mkstemp(prefix="luma-silero-", suffix=".wav")
+    os.close(handle)
+    global _TTS_SYNTH_ACTIVE, _TTS_CANCEL_SERIAL
+    with _TTS_LOCK:
+        serial = _TTS_CANCEL_SERIAL
+        _TTS_SYNTH_ACTIVE = True
+
+    synth_started = time.perf_counter()
+    try:
+        silero_tts.synthesize_to_wav(
+            clean,
+            wav_path,
+            model_path=model_path,
+            speaker=silero_tts.SPEAKER,
+            sample_rate=silero_tts.SAMPLE_RATE,
+        )
+    except Exception as exc:
+        _cleanup_tts_file(wav_path)
+        return {}, f"Silero Baya не синтезировал речь: {exc}"
+    finally:
+        with _TTS_LOCK:
+            _TTS_SYNTH_ACTIVE = False
+
+    synth_ms = max(0, int((time.perf_counter() - synth_started) * 1000))
+    with _TTS_LOCK:
+        if serial != _TTS_CANCEL_SERIAL:
+            _cleanup_tts_file(wav_path)
+            return {}, "Озвучка остановлена"
+
+    play_command, env = _wav_player(wav_path)
+    if not play_command:
+        _cleanup_tts_file(wav_path)
+        return {}, "Нет локального проигрывателя WAV"
+
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if IS_WINDOWS else 0
+    try:
+        playback = subprocess.Popen(
+            play_command,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            env=env,
+            creationflags=flags,
+        )
+    except (OSError, ValueError) as exc:
+        _cleanup_tts_file(wav_path)
+        return {}, f"Не удалось воспроизвести голос: {exc}"
+
+    global _TTS_PROCESS, _TTS_TEMP_FILE, _LAST_TTS_TEXT, _LAST_TTS_AT
+    with _TTS_LOCK:
+        if serial != _TTS_CANCEL_SERIAL:
+            try:
+                playback.terminate()
+            except (OSError, ValueError):
+                pass
+            _cleanup_tts_file(wav_path)
+            return {}, "Озвучка остановлена"
+        _TTS_PROCESS = playback
+        _TTS_TEMP_FILE = wav_path
+        _LAST_TTS_TEXT = clean
+        _LAST_TTS_AT = time.time()
+        _TTS_METRICS.update({
+            "last_engine": "silero",
+            "last_synth_ms": synth_ms,
+            "last_chars": len(clean),
+        })
+    return {
+        "engine": "silero",
+        "chars": len(clean),
+        "pid": playback.pid,
+        "model": pathlib.Path(model_path).name,
+        "model_id": silero_tts.MODEL_ID,
+        "speaker": silero_tts.SPEAKER,
+        "sample_rate": silero_tts.SAMPLE_RATE,
+        "rate": rate,
+        "volume": volume,
+        "synth_ms": synth_ms,
+    }, ""
+
+
 def _piper_speak(clean: str, rate: int, volume: int) -> tuple[dict[str, Any], str]:
     executable, model, speaker = _piper_settings()
     if not executable or not pathlib.Path(model).is_file():
@@ -1586,7 +1671,7 @@ def _piper_speak(clean: str, rate: int, volume: int) -> tuple[dict[str, Any], st
 
 
 def speak(text: str, rate: int = 0, volume: int = 100) -> tuple[dict[str, Any], str]:
-    """Сказать вслух: локальный Piper HQ, затем прозрачный системный fallback."""
+    """Сказать вслух: Silero Baya, затем Piper HQ, затем системный fallback."""
     clean = " ".join(str(text or "").split())[:1500]
     if not clean:
         return {}, "Пустой текст для озвучки"
@@ -1594,14 +1679,21 @@ def speak(text: str, rate: int = 0, volume: int = 100) -> tuple[dict[str, Any], 
     volume = max(0, min(100, int(volume)))
 
     engine = speech_engine()
+    prepared = tts_quality.prepare_tts_text(clean) or clean
+    if engine == "silero":
+        state, reason = _silero_speak(prepared, rate, volume)
+        if state or reason == "Озвучка остановлена":
+            return state, reason
+        engine = "piper" if _piper_available() else _system_speech_engine()
+
     if engine == "piper":
-        prepared = tts_quality.prepare_tts_text(clean)
-        state, reason = _piper_speak(prepared or clean, rate, volume)
+        state, reason = _piper_speak(prepared, rate, volume)
         if state or reason == "Озвучка остановлена":
             return state, reason
         engine = _system_speech_engine()
 
     if not engine:
-        return {}, "Нет движка озвучки: в Windows нужен PowerShell, в Linux — espeak-ng"
+        return {}, "Нет движка озвучки: установите Silero/Piper или системный TTS"
 
     return _system_speak(clean, rate, volume, engine=engine)
+
