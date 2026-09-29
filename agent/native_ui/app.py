@@ -221,6 +221,7 @@ class NativeApp:
             total=self._brain_total,
             route=self._brain_route,
             repaired=self._brain_repaired,
+            agent_iterations=self._brain_agent_iterations,
         )
         if not self.state.connected:
             if self.orb.isVisible():
