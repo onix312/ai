@@ -193,6 +193,21 @@ _VISION_HINTS = ("llava", "bakllava", "moondream", "minicpm-v", "vision", "qwen2
                  "qwen2-vl", "qwen2.5-vl", "gemma3", "granite3.2-vision", "mistral-small3.1")
 
 
+def pick_vision(models: list[str]) -> str:
+    """Pick an already-installed local model suitable for one-off image inspection."""
+    rows = [str(name or "").strip() for name in models if str(name or "").strip()]
+    preferred = (
+        "qwen2.5vl", "qwen2.5-vl", "qwen2-vl", "gemma3",
+        "mistral-small3.1", "granite3.2-vision", "minicpm-v", "llava",
+        "bakllava", "moondream",
+    )
+    for family in preferred:
+        for name in rows:
+            if family in name.casefold():
+                return name
+    return ""
+
+
 def pick_default(models: list[str]) -> str:
     """Модель по умолчанию из списка рантайма. Чистая функция.
 
