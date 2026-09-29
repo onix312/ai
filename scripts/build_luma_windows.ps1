@@ -47,6 +47,11 @@ try {
 New-Item -ItemType Directory -Force -Path $package | Out-Null
 Copy-Item -Recurse -Force (Join-Path $dist "Luma") (Join-Path $package "app")
 Copy-Item -Force (Join-Path $root "scripts\install_luma_windows.ps1") (Join-Path $package "install.ps1")
+@"
+@echo off
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0install.ps1"
+if errorlevel 1 pause
+"@ | Set-Content -Encoding ASCII (Join-Path $package "INSTALL-LUMA.bat")
 
 if ($WithVoice) {
     & (Join-Path $root "scripts\install_luma_voice.ps1") -Destination (Join-Path $package "models\tts")
@@ -55,7 +60,7 @@ if ($WithVoice) {
 @"
 Luma Windows package
 ====================
-1. Right-click install.ps1 -> Run with PowerShell
+1. Double-click INSTALL-LUMA.bat
 2. Or: powershell -ExecutionPolicy Bypass -File .\install.ps1
 3. Luma is installed per-user to %LOCALAPPDATA%\Luma
 "@ | Set-Content -Encoding UTF8 (Join-Path $package "README.txt")
