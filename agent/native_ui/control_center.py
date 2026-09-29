@@ -1,6 +1,7 @@
 """Full Control Center Люмы: разговор, дела, память, обучение и настройки."""
 from __future__ import annotations
 
+import html
 import json
 from typing import Any
 
@@ -121,6 +122,129 @@ class ChatPage(QWidget):
         elif heard:
             parts.append("услышала: «" + " ".join(str(heard).split())[:120] + "»")
         self.live.setText(" · ".join(parts))
+
+
+class ActivityPage(QWidget):
+    refresh_requested = Signal()
+
+    PHASES = {
+        "thinking": "🧠 думает",
+        "speaking": "🔊 отвечает",
+        "executing": "⚡ выполняет",
+        "task": "✓ ведёт задачу",
+        "waiting": "⏳ ждёт",
+        "done": "✓ готово",
+        "error": "⚠ ошибка",
+        "idle": "○ готова",
+    }
+
+    def __init__(self) -> None:
+        super().__init__()
+        layout = QVBoxLayout(self)
+        head = QHBoxLayout()
+        title = QLabel("Активность")
+        title.setObjectName("pageTitle")
+        head.addWidget(title)
+        head.addStretch(1)
+        refresh = QPushButton("Обновить")
+        refresh.clicked.connect(self.refresh_requested)
+        head.addWidget(refresh)
+        layout.addLayout(head)
+        sub = QLabel("Что Люма услышала, решила, выполнила и как проверила результат.")
+        sub.setObjectName("muted")
+        sub.setWordWrap(True)
+        layout.addWidget(sub)
+        self.browser = QTextBrowser()
+        layout.addWidget(self.browser, 1)
+
+    @staticmethod
+    def _e(value: Any) -> str:
+        return html.escape(" ".join(str(value or "").split()))
+
+    def _activity_card(self, row: dict[str, Any], title: str) -> str:
+        phase = str(row.get("phase") or "idle")
+        bits = [f"<b>{self._e(title)}</b> · {self._e(self.PHASES.get(phase, phase))}"]
+        if row.get("heard"):
+            bits.append(f"<div>🎧 Вы: {self._e(row.get('heard'))}</div>")
+        if row.get("reply"):
+            bits.append(f"<div>💬 Люма: {self._e(row.get('reply'))}</div>")
+        if row.get("skill"):
+            task = f" · задача #{int(row.get('task_id') or 0)}" if row.get("task_id") else ""
+            bits.append(f"<div>⚡ {self._e(row.get('skill'))}{self._e(task)}</div>")
+        if row.get("detail"):
+            bits.append(f"<div><small>{self._e(row.get('detail'))}</small></div>")
+        return "<div style='margin:8px 0;padding:10px;border:1px solid #334155;border-radius:8px'>" + "".join(bits) + "</div>"
+
+    def set_payload(self, payload: dict[str, Any]) -> None:
+        activity = payload.get("activity") if isinstance(payload.get("activity"), dict) else {}
+        current = activity.get("current") if isinstance(activity.get("current"), dict) else {}
+        recent = list(activity.get("recent") or [])
+        tasks = list(payload.get("tasks") or [])
+        journal = list(payload.get("journal") or [])
+
+        chunks = ["<h3>Сейчас</h3>"]
+        if current and (current.get("active") or current.get("phase") != "idle"):
+            chunks.append(self._activity_card(current, "Текущий маршрут"))
+        else:
+            chunks.append("<p>Люма свободна.</p>")
+
+        if recent:
+            chunks.append("<h3>Недавние маршруты</h3>")
+            for row in recent[:4]:
+                chunks.append(self._activity_card(row, "Завершено"))
+
+        chunks.append("<h3>Задачи</h3>")
+        shown = 0
+        for task in tasks[:12]:
+            steps = list(task.get("steps") or [])
+            if not steps:
+                continue
+            shown += 1
+            task_id = int(task.get("id") or 0)
+            title = self._e(task.get("title") or f"Задача {task_id}")
+            status = self._e(task.get("status") or "")
+            chunks.append(
+                f"<div style='margin:10px 0'><b>#{task_id} {title}</b> · {status}"
+                f" · {int(task.get('progress') or 0)}/{int(task.get('total_steps') or len(steps))}<br>"
+            )
+            for step in steps:
+                verification = step.get("verification") if isinstance(step.get("verification"), dict) else {}
+                verify = str(verification.get("status") or "")
+                reason = str(verification.get("reason") or "")
+                stamp = str(step.get("finished_at") or step.get("started_at") or "")
+                line = (
+                    f"{int(step.get('seq') or 0) + 1}. {self._e(step.get('skill'))}"
+                    f" · {self._e(step.get('status') or 'pending')}"
+                )
+                if verify:
+                    line += f" · проверка: {self._e(verify)}"
+                if reason:
+                    line += f" ({self._e(reason)})"
+                if stamp:
+                    line += f" · {self._e(stamp)}"
+                chunks.append(f"<div style='margin-left:14px'>{line}</div>")
+            chunks.append("</div>")
+        if not shown:
+            chunks.append("<p>Долгих задач пока нет.</p>")
+
+        chunks.append("<h3>Фактические действия</h3>")
+        if journal:
+            for row in journal[:40]:
+                outcome = self._e(row.get("outcome") or "")
+                detail = self._e(row.get("detail") or "")
+                target = self._e(row.get("target") or "")
+                stamp = self._e(row.get("at") or "")
+                suffix = f" · {target}" if target else ""
+                chunks.append(
+                    f"<div><small>{stamp}</small> · <b>{self._e(row.get('skill'))}</b>"
+                    f" · {outcome}{suffix}"
+                    + (f"<br><span style='margin-left:14px'>{detail}</span>" if detail else "")
+                    + "</div>"
+                )
+        else:
+            chunks.append("<p>Журнал действий пуст.</p>")
+
+        self.browser.setHtml("".join(chunks))
 
 
 class TasksPage(QWidget):
@@ -378,6 +502,7 @@ class ControlCenter(QMainWindow):
         ("chat", "💬  Разговор"),
         ("today", "☀  Сегодня"),
         ("tasks", "✓  Задачи"),
+        ("activity", "◉  Активность"),
         ("memory", "🧠  Память"),
         ("learning", "🎓  Обучение"),
         ("skills", "⚡  Навыки"),
@@ -429,6 +554,11 @@ class ControlCenter(QMainWindow):
         tasks.replan_command.connect(self.replan_command)
         self.pages["tasks"] = tasks
         self.stack.addWidget(tasks)
+
+        activity = ActivityPage()
+        activity.refresh_requested.connect(lambda: self.refresh_page.emit("activity"))
+        self.pages["activity"] = activity
+        self.stack.addWidget(activity)
 
         defs = {
             "memory": ("Память", "Факты, предпочтения и то, что вы просили запомнить."),
@@ -842,6 +972,8 @@ class ControlCenter(QMainWindow):
         if isinstance(page, TextPage):
             page.set_payload(payload)
         elif isinstance(page, TasksPage) and isinstance(payload, dict):
+            page.set_payload(payload)
+        elif isinstance(page, ActivityPage) and isinstance(payload, dict):
             page.set_payload(payload)
 
     def closeEvent(self, event) -> None:
