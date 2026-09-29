@@ -78,7 +78,8 @@ class PcHelpersTests(unittest.TestCase):
             self.assertIn("вне разрешённых", pc.launch_plan(outside, roots=(tmp,))[1])
         self.assertEqual(["calc.exe"], pc.launch_plan("калькулятор", platform="win32")[0]["command"])
         self.assertEqual("exe", pc.launch_plan("bambu", platform="win32")[0]["kind"])
-        self.assertEqual("exe", pc.launch_plan("steam", platform="win32")[0]["kind"])
+        self.assertEqual(["uri:steam://open/main"],
+                         pc.launch_plan("steam", platform="win32")[0]["command"])
         self.assertEqual(["uri:steam://rungameid/1172470"],
                          pc.launch_plan("апекс", platform="win32")[0]["command"])
         self.assertIn("нет в списке", pc.launch_plan("rm -rf /")[1])
