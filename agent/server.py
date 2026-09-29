@@ -853,7 +853,7 @@ class Agent:
             import tkinter
 
             root = tkinter.Tk()
-            root.title("Агент NOZZA — подтверждение")
+            root.title("Люма — подтверждение")
             root.attributes("-topmost", True)
             tkinter.Label(root, text=text, padx=18, pady=14,
                           justify="left").pack()
@@ -918,7 +918,7 @@ class AgentHandler(BaseHTTPRequestHandler):
 
     role = "agent"
     agent: Agent | None = None
-    server_version = "PrintFlowAgent/1"
+    server_version = "PrintFlowAgent/1"  # legacy wire identifier; keep for client compatibility
     protocol_version = "HTTP/1.1"
 
     def log_message(self, *_args: Any) -> None:
@@ -1283,7 +1283,7 @@ def run() -> int:
         print("Порты 8791 и 8799 должны быть свободны, адрес — только 127.0.0.1.")
         return 1
     agent = agent_server.RequestHandlerClass.agent
-    print("Агент NOZZA запущен")
+    print("Люма запущена")
     print(f"  Речь:      http://127.0.0.1:{config.SPEECH_PORT}/health")
     print(f"  Компьютер: http://127.0.0.1:{config.AGENT_PORT}/status")
     print(f"  Панель:    {config.PRINTFLOW_URL}")
