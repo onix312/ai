@@ -235,6 +235,7 @@ class NativeApp:
             self.state.activity_skill,
             self.state.activity_detail,
             self.state.activity_task_id,
+            self.state.audio_level,
         )
         if self.state.safety_stopped:
             self.orb.set_state("stopped")
