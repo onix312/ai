@@ -60,6 +60,10 @@ class ChatPage(QWidget):
         clear.clicked.connect(self.clear_requested)
         head.addWidget(clear)
         layout.addLayout(head)
+        self.live = QLabel("Люма готова")
+        self.live.setObjectName("muted")
+        self.live.setWordWrap(True)
+        layout.addWidget(self.live)
         self.feed = QTextBrowser()
         layout.addWidget(self.feed, 1)
         row = QHBoxLayout()
@@ -92,6 +96,31 @@ class ChatPage(QWidget):
 
     def append_local(self, who: str, text: str) -> None:
         self.feed.append(f"<p><b>{who}</b><br>{text}</p>")
+
+    def set_live_activity(self, phase: str = "idle", heard: str = "", reply: str = "",
+                          skill: str = "", detail: str = "", task_id: int = 0) -> None:
+        labels = {
+            "thinking": "🧠 Люма думает",
+            "speaking": "🔊 Люма отвечает",
+            "executing": "⚡ Люма выполняет",
+            "task": "✓ Люма ведёт задачу",
+            "waiting": "⏳ Люма ждёт",
+            "error": "⚠ Люме нужна помощь",
+            "done": "✓ Готово",
+            "idle": "Люма готова",
+        }
+        parts = [labels.get(str(phase or "idle"), "Люма работает")]
+        if skill:
+            parts.append(str(skill))
+        if task_id:
+            parts.append(f"задача #{int(task_id)}")
+        if detail:
+            parts.append(" ".join(str(detail).split())[:120])
+        if reply:
+            parts.append("«" + " ".join(str(reply).split())[:180] + "»")
+        elif heard:
+            parts.append("услышала: «" + " ".join(str(heard).split())[:120] + "»")
+        self.live.setText(" · ".join(parts))
 
 
 class TasksPage(QWidget):
