@@ -533,6 +533,29 @@ class BrainChatTests(unittest.TestCase):
         )
         self.assertIn("нет в реестре", problem)
 
+    def test_model_recovers_non_json_action_reply_into_checked_tool_call(self):
+        replies = [
+            {"ok": True, "text": "Сейчас проведу диагностику компьютера.", "reason": "", "model": "qwen2.5:3b"},
+            {"ok": True, "text": json.dumps({
+                "skill": "system.health", "params": {}, "steps": [],
+                "reply": "", "ask": "",
+            }, ensure_ascii=False), "reason": "", "model": "qwen2.5:3b"},
+        ]
+        with patch.object(model, "status", return_value={
+                "ok": True, "model": "qwen2.5:3b", "reason": "",
+                "url": "http://127.0.0.1:11434", "models": ["qwen2.5:3b"],
+             }), patch.object(model, "chat", side_effect=replies), \
+             patch.object(self.agent, "run_skill", return_value={
+                 "ok": True, "cpu_percent": 12, "memory": {"load": 40},
+             }) as run:
+            answer = self.brain.chat("проведи системную диагностику")
+
+        run.assert_called_once_with("system.health", {})
+        self.assertEqual("action", answer["kind"])
+        titles = [str(step.get("title") or "") for step in answer["steps"]]
+        self.assertIn("Формат planner", titles)
+        self.assertIn("JSON-contract восстановлен", titles)
+
     def test_model_tool_retrieval_uses_recent_user_context(self):
         self.store.add_turn("main", "user", "проверь состояние компьютера")
         self.store.add_turn("main", "assistant", "Хорошо.", {"source": "talk"})
