@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QEasingCurve, Property, QPropertyAnimation, Qt
-from PySide6.QtGui import QColor, QPainter, QRadialGradient
+from PySide6.QtGui import QBrush, QColor, QPainter, QRadialGradient
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 
@@ -40,12 +40,12 @@ class AmbientCanvas(QWidget):
         violet.setColorAt(0.0, QColor(100, 63, 210, int(52 * self._glow)))
         violet.setColorAt(0.46, QColor(58, 38, 142, int(28 * self._glow)))
         violet.setColorAt(1.0, QColor(7, 8, 22, 0))
-        painter.fillRect(self.rect(), violet)
+        painter.fillRect(self.rect(), QBrush(violet))
 
         cyan = QRadialGradient(w * 0.58, h * 0.86, max(w, h) * 0.45)
         cyan.setColorAt(0.0, QColor(46, 186, 229, int(25 * self._glow)))
         cyan.setColorAt(1.0, QColor(7, 8, 22, 0))
-        painter.fillRect(self.rect(), cyan)
+        painter.fillRect(self.rect(), QBrush(cyan))
 
 
 class GlassCard(QFrame):
