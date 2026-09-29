@@ -75,3 +75,38 @@ Generated WAV playback uses:
 - Piper/model readiness
 
 This is deliberately lightweight and does not load the voice model.
+
+
+## Recommended Luma voice
+
+The default recommended preset is `ru_RU-irina-medium`.
+
+Install it on Windows with:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\install_luma_voice.ps1
+```
+
+The installer downloads the official Piper voice files into:
+
+- `models/tts/luma.onnx`
+- `models/tts/luma.onnx.json`
+
+and verifies the ONNX SHA-256 before accepting the model.
+
+## Native UI settings
+
+Control Center → Settings now shows **Голос Люмы · HQ Local TTS**.
+
+You can configure:
+
+- Piper executable path
+- ONNX model path
+- optional speaker id
+
+Settings are validated before activation and stored in the assistant's local preferences database. They are restored after restart.
+
+Resetting TTS removes the stored overrides and returns to automatic discovery:
+
+1. `models/tts/luma.onnx` + Piper when available
+2. system TTS fallback otherwise
