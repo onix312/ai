@@ -1397,6 +1397,28 @@ _PROMPT_GROUP_HINTS: dict[str, tuple[str, ...]] = {
 }
 
 
+_SEMANTIC_QUERY_HINTS: tuple[tuple[tuple[str, ...], str], ...] = (
+    (("зайди ", "зайди в", "запусти мне", "открой мне"), "открой запусти приложение программа браузер окно"),
+    (("что запущено", "что у меня запущено", "что работает", "что открыто"), "окна программы список окно"),
+    (("глянь", "посмотри глазами", "что видно", "увидь", "визуально"), "экран скрин видишь посмотри картинка камера"),
+    (("где лежит", "куда сохранил", "отыщи", "разыщи"), "файл документ папка найди поиск"),
+    (("запиши чтобы не забыть", "не дай забыть", "напомни потом"), "запомни память напоминание reminder"),
+    (("сделай как раньше", "как в прошлый раз", "повтори это", "повтори прошлое"), "сценарий макрос контекст действие"),
+    (("проверь как там", "все нормально", "всё нормально"), "состояние здоровье статус проверить"),
+)
+
+
+def expand_tool_query(query: str) -> str:
+    """Add conversational semantic hints for retrieval without changing permissions."""
+    low = expand_tool_query(query)
+    additions = [
+        expansion
+        for phrases, expansion in _SEMANTIC_QUERY_HINTS
+        if any(phrase in low for phrase in phrases)
+    ]
+    return " ".join([low, *additions]).strip()
+
+
 def _prompt_line(row: dict[str, Any]) -> str:
     params = ", ".join(f"{k}:{v}" for k, v in row["params"].items())
     mark = " — подтверждение" if row["confirm"] else ""
