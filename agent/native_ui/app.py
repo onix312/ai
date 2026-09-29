@@ -142,6 +142,11 @@ class NativeApp:
             self.center.set_proactivity_payload,
             lambda _message: None,
         )
+        self.run_async(
+            self.backend.tts_settings,
+            self.center.set_tts_payload,
+            lambda _message: None,
+        )
 
     def _render_status(self) -> None:
         self.tray.apply_status(
