@@ -549,10 +549,23 @@ class Agent:
             # и её потом покажет навык `agent.why`.
             return runner.run(key, params)
         if skills.confirm_required(skill):
-            return self.queue_action(
+            queued = self.queue_action(
                 "skill", {"name": key, "params": clean}, ask=ask,
                 autonomy_mode=autonomy_mode)
-        return runner.run(key, clean)
+            if autonomy_mode == "direct":
+                self.set_activity("waiting", session="direct", skill=key,
+                                  detail=str(queued.get("text") or "Ждёт подтверждения"),
+                                  active=False)
+            return queued
+        if autonomy_mode == "direct":
+            self.set_activity("executing", session="direct", skill=key,
+                              detail=executor.describe(skill, clean), active=True)
+        result = runner.run(key, clean)
+        if autonomy_mode == "direct":
+            self.set_activity("done" if result.get("ok") else "error", session="direct",
+                              skill=key, detail=str(result.get("reason") or ""),
+                              active=False)
+        return result
 
     def discard_action(self, action_id: str) -> bool:
         """Тихо убрать pending action при отмене целой Task Engine задачи."""
