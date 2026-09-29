@@ -2456,10 +2456,43 @@ class Brain:
                                source="model", steps=steps, started=started)
         answer = model.parse_json(reply["text"])
         if not answer:
-            # Модель ответила прозой вопреки режиму — это тоже ответ человеку.
-            return self._reply(session, text, reply["text"][:1200], kind="answer", source="model",
-                               steps=steps, started=started,
-                               extra={"voice_streamed_chars": streamed_chars} if streamed_chars else None)
+            steps.append({"kind": "check", "title": "Формат planner", "detail": "модель вернула не JSON; исправляю"})
+            format_messages = list(messages)
+            format_messages.append({"role": "assistant", "content": str(reply.get("text") or "")[:2200]})
+            format_messages.append({
+                "role": "user",
+                "content": (
+                    "Предыдущий ответ нарушил JSON-contract. Преобразуй его в ОДИН JSON-объект "
+                    "skill/params/steps/reply/ask по тем же правилам. Не добавляй новых фактов и не утверждай "
+                    "выполнение действия. Верни только JSON."
+                ),
+            })
+            format_token = self._begin_model_turn(session)
+            try:
+                formatted = model.chat(
+                    format_messages, system=system, fmt="json", temperature=0.0,
+                    timeout=min(PLAN_TIMEOUT_SEC, config.MODEL_TIMEOUT_SEC), state=state,
+                    cancel=format_token,
+                )
+            finally:
+                self._end_model_turn(session, format_token)
+            if formatted.get("cancelled"):
+                return self._reply(
+                    session, text, "", kind="cancelled", source="model", steps=steps,
+                    started=started, save=False,
+                )
+            answer = model.parse_json(str(formatted.get("text") or "")) if formatted.get("ok") else {}
+            if answer:
+                steps.append({"kind": "model", "title": "JSON-contract восстановлен",
+                              "detail": "план снова можно проверить реестром"})
+            else:
+                # Если даже второй ответ не структурирован, сохраняем полезный
+                # текст человеку, но ничего не исполняем.
+                return self._reply(
+                    session, text, str(reply.get("text") or "")[:1200],
+                    kind="answer", source="model", steps=steps, started=started,
+                    extra={"voice_streamed_chars": streamed_chars} if streamed_chars else None,
+                )
 
         learned = self.runner.learned()
         problem = model_plan_problem(answer, self.runner.caps, learned)
