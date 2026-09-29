@@ -18,7 +18,19 @@ if ($Clean) {
 }
 
 if (-not (Test-Path $python)) {
-    py -3 -m venv $venv
+    $launcher = Get-Command py -ErrorAction SilentlyContinue
+    if ($launcher) {
+        & py -3.11 -m venv $venv
+    } else {
+        $version = & python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')"
+        if ($version.Trim() -ne "3.11") {
+            throw "Luma standalone build requires Python 3.11 (found $version)"
+        }
+        & python -m venv $venv
+    }
+    if (-not (Test-Path $python)) {
+        throw "Could not create Python 3.11 build environment"
+    }
 }
 
 & $python -m pip install --disable-pip-version-check -q --upgrade pip
