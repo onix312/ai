@@ -227,6 +227,30 @@ class TaskEngineTests(unittest.TestCase):
         self.assertFalse(result["ok"])
         self.assertIn("failed", result["reason"])
 
+    def test_applied_replan_history_is_returned_with_task(self):
+        task_id = self._create([
+            {"skill": "system.volume", "params": {"level": 30}},
+            {"skill": "system.media", "params": {"action": "play_pause"}},
+        ])
+        self.engine._set_task(task_id, status="paused", current_step=0)
+        result = self.engine.replace_remaining(
+            task_id,
+            0,
+            [{"skill": "system.volume", "params": {"level": 55}}],
+            "Проверка не прошла",
+        )
+        self.assertTrue(result["ok"], result)
+        task = self.engine.get(task_id)
+        self.assertEqual(1, len(task["replans"]))
+        replan = task["replans"][0]
+        self.assertEqual("Проверка не прошла", replan["reason"])
+        self.assertEqual(["system.volume", "system.media"],
+                         [row["skill"] for row in replan["old_tail"]])
+        self.assertEqual(["system.volume"],
+                         [row["skill"] for row in replan["new_tail"]])
+        reloaded = TaskEngine(self.agent).get(task_id)
+        self.assertEqual("Проверка не прошла", reloaded["replans"][0]["reason"])
+
     def test_cancel_is_terminal_and_discards_pending(self):
         task_id = self._create([
             {"skill": "clipboard.write", "params": {"text": "x"}},
