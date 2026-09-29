@@ -175,9 +175,12 @@ class BackendClient:
     def stop_voice(self) -> dict[str, Any]:
         return self.speech_post("/voice/stop", {})
 
-    def tune_voice(self, multiplier: float, margin: int, alpha: float) -> dict[str, Any]:
+    def tune_voice(self, vad_threshold: int, multiplier: float, margin: int, alpha: float) -> dict[str, Any]:
         return self.speech_post("/voice/tune", {
-            "multiplier": float(multiplier), "margin": int(margin), "alpha": float(alpha),
+            "vad_threshold": int(vad_threshold),
+            "multiplier": float(multiplier),
+            "margin": int(margin),
+            "alpha": float(alpha),
         })
 
     def reset_voice_diagnostics(self) -> dict[str, Any]:
