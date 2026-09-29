@@ -17,6 +17,7 @@ class UiState:
     voice_partial: str = ""
     audio_level: int = 0
     streaming_asr: bool = False
+    safety_stopped: bool = False
     pending: list[dict[str, Any]] = field(default_factory=list)
 
     def apply_status(self, payload: dict[str, Any]) -> None:
@@ -27,6 +28,8 @@ class UiState:
         self.voice_partial = str(voice.get("partial_phrase") or "")
         self.audio_level = max(0, int(voice.get("audio_level") or 0))
         self.streaming_asr = bool(voice.get("streaming_asr"))
+        safety = payload.get("safety") if isinstance(payload.get("safety"), dict) else {}
+        self.safety_stopped = bool(safety.get("stopped") or safety.get("latched"))
         voice_state = str(voice.get("state") or payload.get("voice_state") or "idle")
         if voice_state in ("idle", "listening", "thinking", "speaking", "error"):
             self.assistant_state = voice_state
