@@ -37,7 +37,7 @@ import uuid
 import webbrowser
 from typing import Any
 
-from . import tts_quality, winapi
+from . import silero_tts, tts_quality, winapi
 
 IS_WINDOWS = sys.platform.startswith("win")
 IS_MAC = sys.platform == "darwin"
@@ -1235,8 +1235,23 @@ def _piper_available() -> bool:
     return bool(executable_ready and pathlib.Path(model).is_file())
 
 
+def _silero_model_path() -> str:
+    configured = (
+        os.environ.get("LUMA_TTS_SILERO_MODEL")
+        or os.environ.get("NOZZA_TTS_SILERO_MODEL")
+        or ""
+    ).strip()
+    return str(pathlib.Path(configured).expanduser()) if configured else str(silero_tts.default_model_path())
+
+
+def _silero_available() -> bool:
+    return silero_tts.available(_silero_model_path())
+
+
 def speech_engine() -> str:
-    """Prefer Luma's local Piper voice, with the previous system TTS as fallback."""
+    """Prefer Silero Baya, then Piper HQ, then the system TTS fallback."""
+    if _silero_available():
+        return "silero"
     if _piper_available():
         return "piper"
     return _system_speech_engine()
@@ -1245,17 +1260,32 @@ def speech_engine() -> str:
 def tts_status() -> dict[str, Any]:
     """Small diagnostics payload for UI/status pages without loading a model."""
     engine = speech_engine()
-    executable, model, speaker = _piper_settings()
+    executable, piper_model, piper_speaker = _piper_settings()
+    silero_model = _silero_model_path()
+    silero_ready = _silero_available()
+    active_model = pathlib.Path(silero_model).name if engine == "silero" else (
+        pathlib.Path(piper_model).name if engine == "piper" else ""
+    )
     return {
         "engine": engine,
-        "hq_local": engine == "piper",
-        "model": pathlib.Path(model).name if engine == "piper" else "",
-        "model_path": model,
+        "hq_local": engine in {"silero", "piper"},
+        "model": active_model,
+        "model_path": silero_model if engine == "silero" else piper_model,
+        "speaker": silero_tts.SPEAKER if engine == "silero" else (
+            piper_speaker if engine == "piper" else ""
+        ),
+        "sample_rate": silero_tts.SAMPLE_RATE if engine == "silero" else 0,
+        "silero": silero_ready,
+        "silero_model_id": silero_tts.MODEL_ID,
+        "silero_model_path": silero_model,
+        "silero_speaker": silero_tts.SPEAKER,
+        "silero_torch": silero_tts.torch_available(),
         "piper_path": executable,
-        "speaker": speaker if engine == "piper" else "",
+        "piper_model_path": piper_model,
+        "piper_speaker": piper_speaker,
         "piper": bool(executable),
-        "model_ready": pathlib.Path(model).is_file(),
-        "recommended_voice": "ru_RU-irina-medium",
+        "model_ready": silero_ready if engine == "silero" else pathlib.Path(piper_model).is_file(),
+        "recommended_voice": "Silero v5_5_ru · baya · 48 kHz",
         "quality": tts_quality.quality_status(),
         "last_engine": str(_TTS_METRICS.get("last_engine") or ""),
         "last_synth_ms": int(_TTS_METRICS.get("last_synth_ms") or 0),
@@ -1277,6 +1307,8 @@ _TTS_PROCESS: subprocess.Popen | None = None
 _TTS_TEMP_FILE = ""
 _TTS_OVERRIDES: dict[str, str] = {"piper": "", "model": "", "speaker": ""}
 _TTS_METRICS: dict[str, Any] = {"last_engine": "", "last_synth_ms": 0, "last_chars": 0}
+_TTS_SYNTH_ACTIVE = False
+_TTS_CANCEL_SERIAL = 0
 _LAST_TTS_TEXT = ""
 _LAST_TTS_AT = 0.0
 
@@ -1330,14 +1362,16 @@ def is_speaking() -> bool:
 
 def stop_speaking() -> bool:
     """Немедленно остановить синтез/воспроизведение. Используется для barge-in."""
-    global _TTS_PROCESS, _TTS_TEMP_FILE
+    global _TTS_PROCESS, _TTS_TEMP_FILE, _TTS_CANCEL_SERIAL
     with _TTS_LOCK:
+        _TTS_CANCEL_SERIAL += 1
+        synth_active = bool(_TTS_SYNTH_ACTIVE)
         process = _TTS_PROCESS
         temp_file, _TTS_TEMP_FILE = _TTS_TEMP_FILE, ""
         _TTS_PROCESS = None
     if process is None or process.poll() is not None:
         _cleanup_tts_file(temp_file)
-        return False
+        return synth_active
     try:
         process.terminate()
         try:
