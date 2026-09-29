@@ -18,14 +18,24 @@ import pathlib
 import re
 from dataclasses import dataclass, field
 
+
+
+def _env(*names: str, default: str = "") -> str:
+    """First configured environment value, used for Luma -> legacy aliases."""
+    for name in names:
+        value = os.environ.get(name)
+        if value is not None:
+            return value
+    return default
+
 SPEECH_PORT = int(os.environ.get("PRINTFLOW_SPEECH_PORT", "8791") or 8791)
 AGENT_PORT = int(os.environ.get("PRINTFLOW_AGENT_PORT", "8799") or 8799)
 PRINTFLOW_URL = os.environ.get("PRINTFLOW_URL", "http://127.0.0.1:8765").rstrip("/")
-ASSISTANT_NAME = os.environ.get("NOZZA_ASSISTANT_NAME", "Люма").strip() or "Люма"
+ASSISTANT_NAME = _env("LUMA_ASSISTANT_NAME", "NOZZA_ASSISTANT_NAME", default="Люма").strip() or "Люма"
 WAKE_WORD = os.environ.get("PRINTFLOW_WAKE_WORD", "люма").strip().lower()
 LEGACY_WAKE_WORDS = tuple(
     word.strip().lower()
-    for word in os.environ.get("NOZZA_LEGACY_WAKE_WORDS", "ноза,нозза,nozza,noza").split(",")
+    for word in _env("LUMA_LEGACY_WAKE_WORDS", "NOZZA_LEGACY_WAKE_WORDS", default="ноза,нозза,nozza,noza").split(",")
     if word.strip()
 )
 LANGUAGE = os.environ.get("PRINTFLOW_SPEECH_LANG", "ru")
@@ -46,16 +56,16 @@ VOICE_MAX_PHRASE_SECONDS = float(os.environ.get("PRINTFLOW_VOICE_MAX_PHRASE_SECO
 # Voice Engine 3.0: немного звука до срабатывания VAD сохраняется только в RAM,
 # чтобы первая согласная wake-word не обрезалась. Partial ASR обновляет live
 # status, но не отправляется в Brain до финализации фразы.
-VOICE_PREROLL_CHUNKS = max(0, int(os.environ.get("NOZZA_VOICE_PREROLL_CHUNKS", "3") or 3))
-VOICE_PARTIAL_MIN_CHARS = max(1, int(os.environ.get("NOZZA_VOICE_PARTIAL_MIN_CHARS", "2") or 2))
+VOICE_PREROLL_CHUNKS = max(0, int(_env("LUMA_VOICE_PREROLL_CHUNKS", "NOZZA_VOICE_PREROLL_CHUNKS", default="3") or 3))
+VOICE_PARTIAL_MIN_CHARS = max(1, int(_env("LUMA_VOICE_PARTIAL_MIN_CHARS", "NOZZA_VOICE_PARTIAL_MIN_CHARS", default="2") or 2))
 VOICE_ECHO_GATE_MULTIPLIER = max(
-    1.0, float(os.environ.get("NOZZA_VOICE_ECHO_GATE_MULTIPLIER", "1.65") or 1.65)
+    1.0, float(_env("LUMA_VOICE_ECHO_GATE_MULTIPLIER", "NOZZA_VOICE_ECHO_GATE_MULTIPLIER", default="1.65") or 1.65)
 )
 VOICE_ECHO_GATE_MARGIN = max(
-    0, int(os.environ.get("NOZZA_VOICE_ECHO_GATE_MARGIN", "180") or 180)
+    0, int(_env("LUMA_VOICE_ECHO_GATE_MARGIN", "NOZZA_VOICE_ECHO_GATE_MARGIN", default="180") or 180)
 )
 VOICE_ECHO_FLOOR_ALPHA = min(
-    0.95, max(0.05, float(os.environ.get("NOZZA_VOICE_ECHO_FLOOR_ALPHA", "0.22") or 0.22))
+    0.95, max(0.05, float(_env("LUMA_VOICE_ECHO_FLOOR_ALPHA", "NOZZA_VOICE_ECHO_FLOOR_ALPHA", default="0.22") or 0.22))
 )
 
 # --- 18.14: личный ассистент компьютера ------------------------------------
@@ -66,11 +76,12 @@ MODEL_NAME = os.environ.get("PRINTFLOW_MODEL_NAME", "").strip()
 MODEL_TIMEOUT_SEC = float(os.environ.get("PRINTFLOW_MODEL_TIMEOUT_SEC", "90") or 90)
 
 # Browser Provider 1.0: только локальный Chromium DevTools endpoint.
-# NOZZA_* — новое имя продукта; PRINTFLOW_* оставлен для совместимости.
-BROWSER_CDP_URL = (
-    os.environ.get("NOZZA_BROWSER_CDP_URL")
-    or os.environ.get("PRINTFLOW_BROWSER_CDP_URL")
-    or "http://127.0.0.1:9222"
+# LUMA_* — canonical; NOZZA_* и PRINTFLOW_* сохранены как legacy aliases.
+BROWSER_CDP_URL = _env(
+    "LUMA_BROWSER_CDP_URL",
+    "NOZZA_BROWSER_CDP_URL",
+    "PRINTFLOW_BROWSER_CDP_URL",
+    default="http://127.0.0.1:9222",
 ).rstrip("/")
 
 # Своя база ассистента: память, индекс документов, журнал действий на ПК.
