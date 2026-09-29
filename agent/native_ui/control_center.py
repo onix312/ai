@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (
     QScrollArea, QSpinBox, QStackedWidget, QTextBrowser, QVBoxLayout, QWidget,
 )
 
-from .components import AmbientCanvas, BrandCard, GlassCard, StatusHeader
+from .components import AmbientCanvas, BrandCard, GlassCard, LumaPortrait, StatusHeader
 from .orb import LumaOrbCore
 from . import theme
 
@@ -274,25 +274,12 @@ class HomePage(QWidget):
         persona.addSpacing(8)
         persona.addWidget(self.persona_badge, 0, Qt.AlignLeft)
 
-        portrait = QFrame()
-        portrait.setObjectName("portraitFrame")
-        portrait.setFixedSize(124, 150)
-        portrait_layout = QVBoxLayout(portrait)
-        portrait_layout.setContentsMargins(10, 10, 10, 10)
-        portrait_layout.addStretch(1)
-        monogram = QLabel("L")
-        monogram.setObjectName("portraitMonogram")
-        monogram.setAlignment(Qt.AlignCenter)
-        portrait_layout.addWidget(monogram)
-        portrait_caption = QLabel("PERSONA")
-        portrait_caption.setObjectName("portraitCaption")
-        portrait_caption.setAlignment(Qt.AlignCenter)
-        portrait_layout.addWidget(portrait_caption)
-        portrait_layout.addStretch(1)
+        self.portrait = LumaPortrait()
+        self.portrait.setFixedSize(132, 156)
 
         persona_row = QHBoxLayout()
         persona_row.addLayout(persona, 1)
-        persona_row.addWidget(portrait, 0, Qt.AlignBottom)
+        persona_row.addWidget(self.portrait, 0, Qt.AlignBottom)
         hero_layout.addLayout(persona_row, 7)
 
         orb_column = QVBoxLayout()
@@ -392,6 +379,7 @@ class HomePage(QWidget):
 
         self.orb.set_state(orb_state)
         self.orb.set_activity(audio_level)
+        self.portrait.set_state(orb_state)
         self.state_title.setText(self.STATE_LABELS.get(clean_state, "Работаю"))
 
         heard_clean = " ".join(str(heard or "").split())[:130]
