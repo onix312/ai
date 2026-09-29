@@ -222,6 +222,10 @@ class Agent:
 
     def update_tts_settings(self, payload: dict[str, Any]) -> dict[str, Any]:
         op = str(payload.get("op") or "update").strip().casefold()
+        if op == "test":
+            phrase = str(payload.get("text") or "Привет. Я Люма. Проверяю локальный голос.").strip()
+            state, reason = pc.speak(phrase[:240])
+            return {"ok": bool(state), "reason": reason, "speech": state, **pc.tts_status()}
         if op == "reset":
             result = pc.reset_tts_config()
             for field in ("piper", "model", "speaker"):

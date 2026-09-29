@@ -66,6 +66,7 @@ class NativeApp:
         self.center.voice_diag_reset.connect(self.reset_voice_diagnostics)
         self.center.tts_save.connect(self.save_tts)
         self.center.tts_reset.connect(self.reset_tts)
+        self.center.tts_test.connect(self.test_tts)
         self.center.task_command.connect(self.task_command)
         self.center.plan_preview.connect(self.plan_preview)
         self.center.plan_command.connect(self.plan_command)
@@ -171,6 +172,8 @@ class NativeApp:
             "piper_path": self.state.tts_piper_path,
             "speaker": self.state.tts_speaker,
             "model_ready": self.state.tts_model_ready,
+            "last_synth_ms": self.state.tts_last_synth_ms,
+            "last_chars": self.state.tts_last_chars,
         })
         self.center.set_voice_diagnostics(
             audio_level=self.state.audio_level,
@@ -473,6 +476,19 @@ class NativeApp:
             lambda: self.backend.tts_update(str(piper or ""), str(model or ""), str(speaker or "")),
             done,
         )
+
+    def test_tts(self) -> None:
+        def done(payload: dict[str, Any]) -> None:
+            if payload.get("ok"):
+                synth_ms = int(payload.get("last_synth_ms") or 0)
+                engine = str(payload.get("engine") or "tts")
+                suffix = f" · synth {synth_ms} ms" if synth_ms else ""
+                self.center.set_tts_message(f"🔊 Тест голоса запущен: {engine}{suffix}")
+                self.refresh_status()
+            else:
+                self.center.set_tts_message(str(payload.get("reason") or "Не удалось воспроизвести тест голоса."))
+
+        self.run_async(self.backend.tts_test, done)
 
     def reset_tts(self) -> None:
         def done(payload: dict[str, Any]) -> None:

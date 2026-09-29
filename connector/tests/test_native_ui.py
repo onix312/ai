@@ -70,6 +70,7 @@ class BackendClientTests(unittest.TestCase):
             client.reset_voice_diagnostics()
             client.tts_settings()
             client.tts_update("piper.exe", "C:/voices/luma.onnx", "1")
+            client.tts_test()
             client.tts_reset()
             client.disable_voice()
         self.assertEqual([
@@ -79,6 +80,7 @@ class BackendClientTests(unittest.TestCase):
             ("POST", "http://127.0.0.1:8791/voice/tune"),
             ("POST", "http://127.0.0.1:8791/voice/diagnostics/reset"),
             ("GET", "http://127.0.0.1:8791/voice/tts"),
+            ("POST", "http://127.0.0.1:8791/voice/tts"),
             ("POST", "http://127.0.0.1:8791/voice/tts"),
             ("POST", "http://127.0.0.1:8791/voice/tts"),
             ("POST", "http://127.0.0.1:8791/voice/disable"),
@@ -315,6 +317,8 @@ class UiStateTests(unittest.TestCase):
                 "piper_path": "C:/tools/piper.exe",
                 "speaker": "2",
                 "model_ready": True,
+                "last_synth_ms": 184,
+                "last_chars": 42,
             },
         })
         self.assertEqual("piper", state.tts_engine)
@@ -324,6 +328,8 @@ class UiStateTests(unittest.TestCase):
         self.assertEqual("C:/tools/piper.exe", state.tts_piper_path)
         self.assertEqual("2", state.tts_speaker)
         self.assertTrue(state.tts_model_ready)
+        self.assertEqual(184, state.tts_last_synth_ms)
+        self.assertEqual(42, state.tts_last_chars)
 
     def test_voice_diagnostics_are_kept_for_settings_surface(self):
         state = UiState()

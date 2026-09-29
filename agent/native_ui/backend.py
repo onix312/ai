@@ -197,6 +197,9 @@ class BackendClient:
     def tts_reset(self) -> dict[str, Any]:
         return self.speech_post("/voice/tts", {"op": "reset"})
 
+    def tts_test(self) -> dict[str, Any]:
+        return self.speech_post("/voice/tts", {"op": "test"})
+
     def safety_stop(self) -> dict[str, Any]:
         return self.post("/safety/stop", {})
 
