@@ -111,6 +111,170 @@ class TextPage(QWidget):
                 "</td></tr></table>")
 
 
+class SkillsPage(QWidget):
+    """Searchable capability map: what Luma can really use on this computer."""
+
+    refresh_requested = Signal()
+
+    GROUP_LABELS = {
+        "system": "Компьютер", "window": "Окна", "desktop": "Рабочий стол",
+        "screen": "Зрение", "browser": "Браузер", "app": "Программы",
+        "files": "Файлы", "panel": "PrintFlow", "voice": "Голос",
+        "memory": "Память", "reminder": "Напоминания", "scheduler": "Таймеры",
+        "list": "Списки", "goal": "Цели", "habit": "Привычки",
+        "expense": "Расходы", "diary": "Дневник", "clipboard": "Буфер",
+        "assistant": "Сценарии", "agent": "Ядро", "day": "День",
+        "knowledge": "Знания", "learn": "Обучение", "tg": "Telegram",
+        "avito": "Авито", "printer": "Печать",
+    }
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._payload: dict[str, Any] = {}
+        root = QVBoxLayout(self)
+        root.setContentsMargins(2, 2, 2, 2)
+        root.setSpacing(12)
+
+        head = QHBoxLayout()
+        title_box = QVBoxLayout()
+        title = QLabel("Навыки")
+        title.setObjectName("pageTitle")
+        title_box.addWidget(title)
+        subtitle = QLabel("Карта реальных функций Люмы на этом компьютере.")
+        subtitle.setObjectName("muted")
+        title_box.addWidget(subtitle)
+        head.addLayout(title_box, 1)
+        refresh = QPushButton("Обновить")
+        refresh.clicked.connect(self.refresh_requested)
+        head.addWidget(refresh)
+        root.addLayout(head)
+
+        metrics = QHBoxLayout()
+        self.ready_metric = QLabel("0")
+        self.ready_metric.setObjectName("skillMetricReady")
+        self.total_metric = QLabel("0")
+        self.total_metric.setObjectName("skillMetric")
+        self.off_metric = QLabel("0")
+        self.off_metric.setObjectName("skillMetric")
+        for title_text, widget in (
+            ("ГОТОВО", self.ready_metric),
+            ("ВСЕГО", self.total_metric),
+            ("НЕДОСТУПНО", self.off_metric),
+        ):
+            card = GlassCard("cyan" if title_text == "ГОТОВО" else "")
+            box = QVBoxLayout(card)
+            box.setContentsMargins(12, 9, 12, 9)
+            kicker = QLabel(title_text)
+            kicker.setObjectName("metricLabel")
+            box.addWidget(kicker)
+            box.addWidget(widget)
+            metrics.addWidget(card)
+        root.addLayout(metrics)
+
+        filter_row = QHBoxLayout()
+        self.search = QLineEdit()
+        self.search.setPlaceholderText("Найти функцию: экран, Steam, файл, принтер, память…")
+        self.search.textChanged.connect(self._render)
+        filter_row.addWidget(self.search, 1)
+        self.state_filter = QComboBox()
+        self.state_filter.addItem("Все состояния", "all")
+        self.state_filter.addItem("Только доступные", "ready")
+        self.state_filter.addItem("Что не работает", "off")
+        self.state_filter.currentIndexChanged.connect(self._render)
+        filter_row.addWidget(self.state_filter)
+        root.addLayout(filter_row)
+
+        brain_note = QLabel(
+            "LUMA TOOL ROUTER · мозг получает релевантные функции под каждую фразу, "
+            "а перед выполнением реестр повторно проверяет доступность и параметры."
+        )
+        brain_note.setObjectName("voiceChain")
+        brain_note.setWordWrap(True)
+        root.addWidget(brain_note)
+
+        self.browser = QTextBrowser()
+        self.browser.setObjectName("skillsBrowser")
+        root.addWidget(self.browser, 1)
+
+    def set_payload(self, payload: dict[str, Any]) -> None:
+        self._payload = dict(payload or {})
+        rows = [row for row in list(self._payload.get("skills") or []) if isinstance(row, dict)]
+        ready = sum(1 for row in rows if row.get("available"))
+        self.ready_metric.setText(str(ready))
+        self.total_metric.setText(str(len(rows)))
+        self.off_metric.setText(str(len(rows) - ready))
+        self._render()
+
+    def _render(self) -> None:
+        rows = [row for row in list(self._payload.get("skills") or []) if isinstance(row, dict)]
+        needle = " ".join(self.search.text().casefold().split())
+        mode = str(self.state_filter.currentData() or "all")
+        filtered = []
+        for row in rows:
+            available = bool(row.get("available"))
+            if mode == "ready" and not available:
+                continue
+            if mode == "off" and available:
+                continue
+            hay = " ".join(
+                str(row.get(key) or "") for key in ("name", "title", "description", "reason", "provider")
+            ).casefold()
+            if needle and needle not in hay:
+                continue
+            filtered.append(row)
+
+        groups: dict[str, list[dict[str, Any]]] = {}
+        for row in filtered:
+            group = str(row.get("name") or "other").split(".", 1)[0]
+            groups.setdefault(group, []).append(row)
+
+        sections = []
+        for group in sorted(groups, key=lambda value: self.GROUP_LABELS.get(value, value).casefold()):
+            items = []
+            for row in sorted(groups[group], key=lambda value: str(value.get("title") or value.get("name") or "")):
+                available = bool(row.get("available"))
+                state = "READY" if available else "OFF"
+                state_color = "#58E6B1" if available else "#F5B84C"
+                border = "#315F59" if available else "#664A2A"
+                name = html.escape(str(row.get("name") or ""))
+                title = html.escape(str(row.get("title") or name))
+                desc = html.escape(str(row.get("description") or ""))
+                risk = html.escape(str(row.get("risk") or "read"))
+                provider = html.escape(str(row.get("provider") or "local"))
+                params = dict(row.get("params") or {})
+                params_text = ", ".join(f"{key}: {value}" for key, value in params.items()) or "без параметров"
+                reason = html.escape(str(row.get("reason") or ""))
+                confirm = " · подтверждение" if row.get("confirm") else ""
+                learned = " · обучено" if row.get("learned") else ""
+                meta = html.escape(f"{risk}{confirm}{learned} · {provider} · {params_text}")
+                unavailable = (
+                    f"<br><span style='color:#F5B84C;'>Причина: {reason}</span>" if reason and not available else ""
+                )
+                items.append(
+                    "<table width='100%' cellspacing='0' cellpadding='0' "
+                    f"style='margin:7px 0;border:1px solid {border};background:#101225;'>"
+                    "<tr><td style='padding:11px 13px;'>"
+                    f"<span style='color:{state_color};font-size:10px;font-weight:700;'>{state}</span>"
+                    f"&nbsp;&nbsp;<b style='color:#F7F5FF;'>{title}</b>"
+                    f"<span style='color:#777493;'> · {name}</span><br>"
+                    f"<span style='color:#B4B0C9;'>{desc}</span><br>"
+                    f"<span style='color:#777493;font-size:11px;'>{meta}</span>{unavailable}"
+                    "</td></tr></table>"
+                )
+            group_title = html.escape(self.GROUP_LABELS.get(group, group.capitalize()))
+            sections.append(
+                f"<div style='margin:16px 0 6px;color:#A78BFA;font-size:16px;font-weight:700;'>"
+                f"{group_title} · {len(items)}</div>" + "".join(items)
+            )
+        body = "".join(sections)
+        if not body:
+            body = (
+                "<div style='margin:28px;color:#9996B7;'>"
+                "По этому фильтру функций нет. Попробуйте другое слово.</div>"
+            )
+        self.browser.setHtml("<div style='margin:8px 14px;'>" + body + "</div>")
+
+
 class ChatPage(QWidget):
     submitted = Signal(str)
     clear_requested = Signal()
@@ -1613,7 +1777,6 @@ class ControlCenter(QMainWindow):
         defs = {
             "memory": ("Память", "Факты, предпочтения и то, что вы просили запомнить."),
             "learning": ("Обучение", "Чему Люма научилась и что пока не понимает."),
-            "skills": ("Навыки", "Доступные способности и их состояние."),
             "journal": ("Журнал", "Фактические действия ассистента на компьютере."),
         }
         for key, (title, subtitle) in defs.items():
@@ -1621,6 +1784,11 @@ class ControlCenter(QMainWindow):
             page.refresh_requested.connect(lambda k=key: self.refresh_page.emit(k))
             self.pages[key] = page
             self.stack.addWidget(page)
+
+        skills_page = SkillsPage()
+        skills_page.refresh_requested.connect(lambda: self.refresh_page.emit("skills"))
+        self.pages["skills"] = skills_page
+        self.stack.addWidget(skills_page)
 
         settings = QWidget()
         sl = QVBoxLayout(settings)
@@ -2139,6 +2307,8 @@ class ControlCenter(QMainWindow):
         elif isinstance(page, TasksPage) and isinstance(payload, dict):
             page.set_payload(payload)
         elif isinstance(page, ActivityPage) and isinstance(payload, dict):
+            page.set_payload(payload)
+        elif isinstance(page, SkillsPage) and isinstance(payload, dict):
             page.set_payload(payload)
 
     def closeEvent(self, event) -> None:
