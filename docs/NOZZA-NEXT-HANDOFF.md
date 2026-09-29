@@ -1,5 +1,22 @@
 # NOZZA — handoff и roadmap после Verification Engine 1.0
 
+> **Актуализация 29.09.2026, Native UI 2.0 Phase 4:** Phase 3 уже в `main`.
+> Текущая ветка добавляет Voice 3 Diagnostics в Control Center: live mic level,
+> ASR engine, vocabulary size, VAD/echo telemetry и RAM-only runtime tuning
+> для VAD threshold, echo multiplier, margin и adaptation alpha. Reset очищает
+> только acoustic learning/counters и возвращает configured defaults. Следом:
+> richer task drill-down/filters или optional HQ local TTS.
+
+
+> **Актуализация 29.09.2026, Native UI 2.0 Phase 4:** Phase 3 уже в `main`.
+> Текущая ветка выводит Voice Engine 3 telemetry в настройки Люмы: mic level,
+> VAD, echo floor/threshold, suppressed echo, ASR engine и vocabulary count.
+> Echo gate можно калибровать в runtime без перезапуска; параметры bounded
+> server-side и живут только в RAM. Reset сбрасывает только acoustic learning.
+> Следом: richer timeline filters/task drill-down, optional HQ local TTS и
+> first-run voice calibration wizard при необходимости.
+
+
 > **Актуализация 29.09.2026, Native UI 2.0 Phase 3:** Phase 2 уже в `main`.
 > Текущая ветка добавляет отдельную страницу **Активность**, которая связывает
 > RAM-only live activity, Task Engine steps с verification и durable executor
