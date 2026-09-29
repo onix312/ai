@@ -1410,7 +1410,7 @@ _SEMANTIC_QUERY_HINTS: tuple[tuple[tuple[str, ...], str], ...] = (
 
 def expand_tool_query(query: str) -> str:
     """Add conversational semantic hints for retrieval without changing permissions."""
-    low = expand_tool_query(query)
+    low = " ".join(str(query or "").casefold().replace("ё", "е").split())
     additions = [
         expansion
         for phrases, expansion in _SEMANTIC_QUERY_HINTS
@@ -1447,7 +1447,7 @@ def relevant_prompt(query: str, caps: dict[str, Any],
     ]
     if not rows:
         return ""
-    low = " ".join(str(query or "").casefold().replace("ё", "е").split())
+    low = expand_tool_query(query)
     tokens = {
         token for token in re.findall(r"[0-9a-zа-я_-]{2,}", low)
         if token not in {"мне", "тебе", "это", "как", "что", "для", "или", "еще", "ещё", "там", "тут"}
