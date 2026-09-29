@@ -124,8 +124,43 @@ the previous streamed reply or skill.
 
 Completed activity remains briefly readable and then collapses back to idle.
 
+## Phase 3 — Activity / Task Timeline
+
+Phase 3 adds a dedicated **Активность** page to Control Center.
+
+It composes three existing sources without inventing a new execution log:
+
+1. RAM-only live activity from `/status`;
+2. durable Task Engine state, including step timestamps and verification;
+3. durable executor journal entries.
+
+The page shows one readable chain:
+
+```text
+heard / current activity
+ -> skill or task step
+ -> verification
+ -> executor journal outcome
+```
+
+Task cards expose:
+
+- task id/title/status/progress;
+- every step and its status;
+- verification state and reason;
+- started/finished timestamp when available.
+
+The factual journal remains authoritative for actions that actually reached the
+Runner/Provider layer.
+
+Live model drafts remain ephemeral and are never copied into the durable
+journal. This keeps the timeline useful without turning partial model output
+into historical fact.
+
+The existing raw **Журнал** page is intentionally kept as a low-level fallback.
+
 ## Next
 
-- Native UI 2.0 Phase 3: richer task timeline / activity journal;
-- dedicated Voice 3 diagnostics panel;
+- Native UI 2.0 Phase 4: Voice 3 diagnostics / microphone tuning surface;
+- richer timeline filters and task drill-down when the activity volume warrants it;
 - optional HQ local TTS provider.

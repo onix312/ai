@@ -1,5 +1,13 @@
 # NOZZA — handoff и roadmap после Verification Engine 1.0
 
+> **Актуализация 29.09.2026, Native UI 2.0 Phase 3:** Phase 2 уже в `main`.
+> Текущая ветка добавляет отдельную страницу **Активность**, которая связывает
+> RAM-only live activity, Task Engine steps с verification и durable executor
+> journal в один читаемый timeline. Partial/model drafts не становятся
+> историческими фактами. Следом: Voice 3 diagnostics/mic tuning surface,
+> затем optional HQ local TTS и дальнейший UI polish.
+
+
 > **Актуализация 29.09.2026, Native UI 2.0 Phase 2:** Phase 1 уже в `main`.
 > Текущая ветка добавляет RAM-only live activity surface: услышанная фраза,
 > safe streaming preview свободного ответа, текущий skill и активный Task Engine
