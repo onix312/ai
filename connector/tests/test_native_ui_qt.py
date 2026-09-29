@@ -14,7 +14,7 @@ from PySide6.QtWidgets import QApplication, QLabel, QProgressBar
 
 from agent.native_ui.app import NativeApp
 from agent.native_ui.components import LumaPortrait
-from agent.native_ui.control_center import ActivityPage, ChatPage, ControlCenter, HomePage, SkillsPage, TasksPage, TextPage, VoicePage
+from agent.native_ui.control_center import ActivityPage, ChatPage, ControlCenter, HomePage, MemoryPage, SkillsPage, TasksPage, TextPage, VoicePage
 from agent.native_ui.orb import LumaOrbCore, VoiceOrb
 from agent.native_ui.quick_panel import QuickPanel
 
@@ -157,6 +157,68 @@ class NativeQtSmokeTests(unittest.TestCase):
         self.assertNotIn("<think", trace.casefold())
         center.chat.clear_action_trace()
         self.assertTrue(center.chat.trace_card.isHidden())
+        center.deleteLater()
+        self.app.processEvents()
+
+    def test_memory_page_surfaces_provenance_confidence_and_filters(self):
+        center = ControlCenter()
+        self.assertIsInstance(center.pages["memory"], MemoryPage)
+        center.set_page_payload("memory", {
+            "ok": True,
+            "count": 3,
+            "memories": [
+                {
+                    "id": 1, "text": "Пользователь предпочитает тёмную тему",
+                    "kind": "preference", "subject": "интерфейс", "source": "chat",
+                    "origin": "explicit", "confidence": 1.0, "pinned": 1,
+                    "observed_count": 1, "uses": 4, "updated_at": "2026-09-29T20:00:00",
+                    "layer": "user_model",
+                },
+                {
+                    "id": 2, "text": "Часто открывает Steam вечером",
+                    "kind": "fact", "subject": "Steam", "source": "observed",
+                    "origin": "observed", "confidence": 0.8, "pinned": 0,
+                    "observed_count": 3, "uses": 2, "updated_at": "2026-09-29T21:00:00",
+                    "layer": "semantic",
+                },
+                {
+                    "id": 3, "text": "Возможно предпочитает краткие ответы",
+                    "kind": "profile", "subject": "стиль", "source": "self",
+                    "origin": "inferred", "confidence": 0.55, "pinned": 0,
+                    "observed_count": 2, "uses": 0, "updated_at": "2026-09-29T22:00:00",
+                    "layer": "user_model",
+                },
+            ],
+            "layers": {
+                "working": [{"id": 9}], "episodic": [{"id": 8}],
+                "semantic": [{"id": 2}], "user_model": [{"id": 1}, {"id": 3}],
+            },
+        })
+        page = center.pages["memory"]
+        self.assertEqual("3", page.total_metric.text())
+        self.assertEqual("1", page.pinned_metric.text())
+        self.assertEqual("1", page.explicit_metric.text())
+        self.assertEqual("1", page.inferred_metric.text())
+        self.assertIn("user model 2", page.layers_note.text())
+        visible = page.browser.toPlainText()
+        self.assertIn("PINNED", visible)
+        self.assertIn("Со слов владельца", visible)
+        self.assertIn("confidence 100%", visible)
+        self.assertIn("Предположение", visible)
+
+        page.search.setText("Steam")
+        self.app.processEvents()
+        filtered = page.browser.toPlainText()
+        self.assertIn("Steam", filtered)
+        self.assertNotIn("тёмную тему", filtered)
+
+        page.search.clear()
+        index = page.origin_filter.findData("inferred")
+        page.origin_filter.setCurrentIndex(index)
+        self.app.processEvents()
+        inferred = page.browser.toPlainText()
+        self.assertIn("Возможно предпочитает", inferred)
+        self.assertNotIn("Steam", inferred)
         center.deleteLater()
         self.app.processEvents()
 
