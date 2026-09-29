@@ -918,7 +918,7 @@ class AgentHandler(BaseHTTPRequestHandler):
 
     role = "agent"
     agent: Agent | None = None
-    server_version = "LumaAgent/1"
+    server_version = "PrintFlowAgent/1"  # legacy wire identifier; keep for client compatibility
     protocol_version = "HTTP/1.1"
 
     def log_message(self, *_args: Any) -> None:
