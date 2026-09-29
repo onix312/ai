@@ -132,6 +132,83 @@ def stylesheet() -> str:
         font-weight: 750;
     }
 
+    QLabel#heroKicker {
+        color: #7E74A8;
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 2px;
+    }
+
+    QLabel#heroTitle {
+        color: #FFFFFF;
+        font-size: 38px;
+        font-weight: 850;
+        letter-spacing: 1px;
+    }
+
+    QLabel#heroDescription {
+        color: #AAA6C3;
+        font-size: 14px;
+        line-height: 1.35;
+    }
+
+    QFrame#portraitFrame {
+        background: #15152F;
+        border: 1px solid #4B4380;
+        border-radius: 24px;
+    }
+
+    QLabel#portraitMonogram {
+        background: transparent;
+        color: #BFA9FF;
+        font-size: 56px;
+        font-weight: 800;
+    }
+
+    QLabel#portraitCaption {
+        background: transparent;
+        color: #726D95;
+        font-size: 9px;
+        font-weight: 700;
+        letter-spacing: 2px;
+    }
+
+    QLabel#orbStateTitle {
+        background: transparent;
+        color: #FFFFFF;
+        font-size: 18px;
+        font-weight: 750;
+    }
+
+    QLabel#metricLabel {
+        background: transparent;
+        color: #777493;
+        font-size: 9px;
+        font-weight: 700;
+        letter-spacing: 1px;
+    }
+
+    QLabel#metricValue {
+        background: transparent;
+        color: #FFFFFF;
+        font-size: 21px;
+        font-weight: 750;
+    }
+
+    QLabel#metricValueSmall {
+        background: transparent;
+        color: #ECE9F8;
+        font-size: 14px;
+        font-weight: 650;
+    }
+
+    QLabel#sectionTitle {
+        background: transparent;
+        color: #F5F2FF;
+        font-size: 15px;
+        font-weight: 700;
+    }
+
     QLabel#welcomeTitle {
         color: #FFFFFF;
         font-size: 34px;
