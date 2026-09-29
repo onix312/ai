@@ -2952,6 +2952,7 @@ class ControlCenter(QMainWindow):
     memory_pin = Signal(int, bool)
     memory_forget = Signal(int)
     learning_action = Signal(str, dict)
+    personal_action = Signal(str, dict)
     refresh_page = Signal(str)
     clear_chat = Signal()
     mic_toggle = Signal()
