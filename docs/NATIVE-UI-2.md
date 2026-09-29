@@ -175,6 +175,7 @@ Live metrics:
 
 Runtime controls:
 
+- VAD threshold;
 - echo-gate multiplier;
 - absolute echo margin;
 - echo-floor adaptation alpha;
@@ -186,6 +187,7 @@ defaults.
 
 Values are bounded server-side:
 
+- VAD threshold: 40..12000;
 - multiplier: 1.0..4.0;
 - margin: 0..4000;
 - alpha: 0.05..0.95.
