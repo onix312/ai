@@ -111,6 +111,251 @@ class TextPage(QWidget):
                 "</td></tr></table>")
 
 
+class MemoryPage(QWidget):
+    """Long-term memory map with explicit pin/forget controls."""
+
+    refresh_requested = Signal()
+    pin_requested = Signal(int, bool)
+    forget_requested = Signal(int)
+
+    KIND_LABELS = {
+        "fact": "Факт",
+        "profile": "Профиль",
+        "preference": "Предпочтение",
+        "rule": "Правило",
+        "note": "Заметка",
+    }
+    ORIGIN_LABELS = {
+        "explicit": "со слов владельца",
+        "observed": "наблюдение",
+        "inferred": "предположение",
+        "imported": "импорт",
+    }
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._payload: dict[str, Any] = {}
+        root = QVBoxLayout(self)
+        root.setContentsMargins(2, 2, 2, 2)
+        root.setSpacing(12)
+
+        head = QHBoxLayout()
+        copy = QVBoxLayout()
+        title = QLabel("Память")
+        title.setObjectName("pageTitle")
+        copy.addWidget(title)
+        subtitle = QLabel("Что Люма знает, откуда это взялось и насколько этому можно доверять.")
+        subtitle.setObjectName("muted")
+        subtitle.setWordWrap(True)
+        copy.addWidget(subtitle)
+        head.addLayout(copy, 1)
+        refresh = QPushButton("Обновить")
+        refresh.clicked.connect(self.refresh_requested)
+        head.addWidget(refresh)
+        root.addLayout(head)
+
+        metrics = QHBoxLayout()
+        metrics.setSpacing(10)
+        self.total_metric = QLabel("0")
+        self.total_metric.setObjectName("opsMetric")
+        self.pinned_metric = QLabel("0")
+        self.pinned_metric.setObjectName("opsMetricReady")
+        self.model_metric = QLabel("0")
+        self.model_metric.setObjectName("opsMetric")
+        self.semantic_metric = QLabel("0")
+        self.semantic_metric.setObjectName("opsMetric")
+        for caption, value, accent in (
+            ("ВСЕГО", self.total_metric, "violet"),
+            ("PINNED", self.pinned_metric, "cyan"),
+            ("USER MODEL", self.model_metric, ""),
+            ("SEMANTIC", self.semantic_metric, ""),
+        ):
+            card = GlassCard(accent)
+            box = QVBoxLayout(card)
+            box.setContentsMargins(13, 10, 13, 10)
+            label = QLabel(caption)
+            label.setObjectName("metricLabel")
+            box.addWidget(label)
+            box.addWidget(value)
+            metrics.addWidget(card, 1)
+        root.addLayout(metrics)
+
+        filters = QHBoxLayout()
+        self.search = QLineEdit()
+        self.search.setPlaceholderText("Найти в памяти: человек, проект, предпочтение, факт…")
+        self.search.textChanged.connect(self._render)
+        filters.addWidget(self.search, 1)
+        self.kind_filter = QComboBox()
+        self.kind_filter.addItem("Все типы", "")
+        self.kind_filter.currentIndexChanged.connect(self._render)
+        filters.addWidget(self.kind_filter)
+        self.origin_filter = QComboBox()
+        self.origin_filter.addItem("Все источники", "")
+        for key, label in self.ORIGIN_LABELS.items():
+            self.origin_filter.addItem(label, key)
+        self.origin_filter.currentIndexChanged.connect(self._render)
+        filters.addWidget(self.origin_filter)
+        root.addLayout(filters)
+
+        note = QLabel(
+            "MEMORY LAYERS · working context → episodic events → semantic facts → user model. "
+            "Закреплённые записи получают приоритет при recall."
+        )
+        note.setObjectName("voiceChain")
+        note.setWordWrap(True)
+        root.addWidget(note)
+
+        self.scroll = QScrollArea()
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setFrameShape(QFrame.NoFrame)
+        self.host_widget = QWidget()
+        self.host = QVBoxLayout(self.host_widget)
+        self.host.setAlignment(Qt.AlignTop)
+        self.host.setSpacing(9)
+        self.scroll.setWidget(self.host_widget)
+        root.addWidget(self.scroll, 1)
+
+    def _clear(self) -> None:
+        while self.host.count():
+            item = self.host.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+
+    def set_payload(self, payload: dict[str, Any]) -> None:
+        self._payload = dict(payload or {})
+        rows = [row for row in list(self._payload.get("memories") or []) if isinstance(row, dict)]
+        kinds = sorted({str(row.get("kind") or "fact") for row in rows})
+        current = str(self.kind_filter.currentData() or "")
+        self.kind_filter.blockSignals(True)
+        self.kind_filter.clear()
+        self.kind_filter.addItem("Все типы", "")
+        for kind in kinds:
+            self.kind_filter.addItem(self.KIND_LABELS.get(kind, kind), kind)
+        index = self.kind_filter.findData(current)
+        self.kind_filter.setCurrentIndex(index if index >= 0 else 0)
+        self.kind_filter.blockSignals(False)
+
+        self.total_metric.setText(str(len(rows)))
+        self.pinned_metric.setText(str(sum(1 for row in rows if row.get("pinned"))))
+        self.model_metric.setText(str(sum(
+            1 for row in rows if str(row.get("layer") or "") == "user_model"
+        )))
+        self.semantic_metric.setText(str(sum(
+            1 for row in rows if str(row.get("layer") or "") == "semantic"
+        )))
+        self._render()
+
+    def _matches(self, row: dict[str, Any]) -> bool:
+        needle = " ".join(self.search.text().casefold().split())
+        wanted_kind = str(self.kind_filter.currentData() or "")
+        wanted_origin = str(self.origin_filter.currentData() or "")
+        if wanted_kind and str(row.get("kind") or "") != wanted_kind:
+            return False
+        if wanted_origin and str(row.get("origin") or "") != wanted_origin:
+            return False
+        if needle:
+            hay = " ".join(str(row.get(key) or "") for key in (
+                "text", "subject", "kind", "source", "origin", "provenance",
+            )).casefold()
+            if needle not in hay:
+                return False
+        return True
+
+    def _render(self, *_args: Any) -> None:
+        self._clear()
+        rows = [
+            row for row in list(self._payload.get("memories") or [])
+            if isinstance(row, dict) and self._matches(row)
+        ]
+        rows.sort(key=lambda row: (
+            not bool(row.get("pinned")),
+            -float(row.get("confidence") or 0.0),
+            -int(row.get("id") or 0),
+        ))
+        if not rows:
+            empty = GlassCard()
+            box = QVBoxLayout(empty)
+            title = QLabel("По этому фильтру ничего нет")
+            title.setObjectName("metricValueSmall")
+            box.addWidget(title)
+            hint = QLabel("Измени поиск или источник. Новая память появляется из диалога и явных команд «запомни».")
+            hint.setObjectName("muted")
+            hint.setWordWrap(True)
+            box.addWidget(hint)
+            self.host.addWidget(empty)
+            return
+
+        for row in rows:
+            pinned = bool(row.get("pinned"))
+            origin = str(row.get("origin") or "explicit")
+            confidence = max(0.0, min(1.0, float(row.get("confidence") or 0.0)))
+            card = GlassCard("cyan" if pinned else "")
+            box = QVBoxLayout(card)
+            box.setContentsMargins(14, 11, 14, 11)
+            box.setSpacing(6)
+
+            top = QHBoxLayout()
+            badges = []
+            if pinned:
+                badges.append("PINNED")
+            badges.append(self.KIND_LABELS.get(str(row.get("kind") or "fact"), str(row.get("kind") or "fact")))
+            badges.append(self.ORIGIN_LABELS.get(origin, origin))
+            badge = QLabel(" · ".join(badges).upper())
+            badge.setObjectName("heroKicker")
+            top.addWidget(badge)
+            top.addStretch(1)
+            score = QLabel(f"{confidence:.0%}")
+            score.setObjectName("memoryConfidence")
+            top.addWidget(score)
+            box.addLayout(top)
+
+            text = QLabel(str(row.get("text") or "Запись памяти"))
+            text.setObjectName("memoryText")
+            text.setWordWrap(True)
+            box.addWidget(text)
+
+            subject = str(row.get("subject") or "").strip()
+            source = str(row.get("source") or "").strip()
+            observed = int(row.get("observed_count") or row.get("evidence_count") or 1)
+            uses = int(row.get("uses") or 0)
+            meta_bits = []
+            if subject:
+                meta_bits.append(f"subject: {subject}")
+            if source:
+                meta_bits.append(f"source: {source}")
+            meta_bits.append(f"evidence: {observed}")
+            if uses:
+                meta_bits.append(f"recall: {uses}")
+            meta = QLabel(" · ".join(meta_bits))
+            meta.setObjectName("muted")
+            meta.setWordWrap(True)
+            box.addWidget(meta)
+
+            provenance = str(row.get("provenance") or "").strip()
+            if provenance and provenance != source:
+                provenance_label = QLabel(f"provenance: {provenance}")
+                provenance_label.setObjectName("memoryMeta")
+                provenance_label.setWordWrap(True)
+                box.addWidget(provenance_label)
+
+            actions = QHBoxLayout()
+            actions.addStretch(1)
+            memory_id = int(row.get("id") or 0)
+            pin = QPushButton("Открепить" if pinned else "Закрепить")
+            pin.setObjectName("memoryPin")
+            pin.clicked.connect(
+                lambda _=False, i=memory_id, value=not pinned: self.pin_requested.emit(i, value)
+            )
+            actions.addWidget(pin)
+            forget = QPushButton("Забыть")
+            forget.setObjectName("danger")
+            forget.clicked.connect(lambda _=False, i=memory_id: self.forget_requested.emit(i))
+            actions.addWidget(forget)
+            box.addLayout(actions)
+            self.host.addWidget(card)
+
+
 class SkillsPage(QWidget):
     """Searchable capability map: what Luma can really use on this computer."""
 
