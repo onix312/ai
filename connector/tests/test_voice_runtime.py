@@ -1,8 +1,10 @@
 """Voice Engine 2.0: state machine without a real microphone."""
 from __future__ import annotations
 
+import os
 import queue
 import struct
+import tempfile
 import threading
 import time
 import unittest
@@ -409,6 +411,107 @@ class StreamingTtsQueueTests(unittest.TestCase):
             gate.set()
             stream._thread.join(1)
         self.assertLessEqual(len(calls), 1)
+
+
+class LocalHqTtsTests(unittest.TestCase):
+    def tearDown(self):
+        pc.stop_speaking()
+
+    def test_piper_is_preferred_only_when_binary_and_model_exist(self):
+        with tempfile.TemporaryDirectory() as folder:
+            executable = os.path.join(folder, "piper.exe")
+            model = os.path.join(folder, "luma.onnx")
+            open(executable, "wb").close()
+            open(model, "wb").close()
+            with patch.dict(os.environ, {
+                "LUMA_TTS_PIPER": executable,
+                "LUMA_TTS_MODEL_PATH": model,
+                "LUMA_TTS_SPEAKER": "2",
+            }, clear=False):
+                self.assertEqual("piper", pc.speech_engine())
+                status = pc.tts_status()
+        self.assertTrue(status["hq_local"])
+        self.assertEqual("luma.onnx", status["model"])
+        self.assertEqual("2", status["speaker"])
+
+    def test_missing_model_keeps_system_fallback(self):
+        with tempfile.TemporaryDirectory() as folder:
+            executable = os.path.join(folder, "piper.exe")
+            open(executable, "wb").close()
+            with patch.dict(os.environ, {
+                "LUMA_TTS_PIPER": executable,
+                "LUMA_TTS_MODEL_PATH": os.path.join(folder, "missing.onnx"),
+            }, clear=False), patch.object(pc, "_system_speech_engine", return_value="sapi"):
+                self.assertEqual("sapi", pc.speech_engine())
+
+    def test_piper_failure_falls_back_to_system_tts(self):
+        process = _FakeProcess()
+        with patch.object(pc, "speech_engine", return_value="piper"), \
+             patch.object(pc, "_piper_speak", return_value=({}, "model failed")) as piper, \
+             patch.object(pc, "_system_speech_engine", return_value="sapi"), \
+             patch.object(pc.subprocess, "Popen", return_value=process):
+            result, reason = pc.speak("привет")
+        self.assertEqual("", reason)
+        self.assertEqual("sapi", result["engine"])
+        piper.assert_called_once()
+
+    def test_stop_interrupts_piper_synthesis_before_playback(self):
+        started = threading.Event()
+        released = threading.Event()
+
+        class SynthProcess:
+            pid = 321
+            returncode = None
+            stdin = None
+
+            def __init__(self):
+                self.alive = True
+
+            def poll(self):
+                return None if self.alive else -15
+
+            def communicate(self, _input=None):
+                started.set()
+                released.wait(1)
+                self.returncode = -15 if not self.alive else 0
+                return b"", b""
+
+            def terminate(self):
+                self.alive = False
+                self.returncode = -15
+                released.set()
+
+            def wait(self, timeout=None):
+                self.alive = False
+                return self.returncode or 0
+
+            def kill(self):
+                self.terminate()
+
+        synth = SynthProcess()
+        result = {}
+
+        with tempfile.TemporaryDirectory() as folder:
+            executable = os.path.join(folder, "piper.exe")
+            model = os.path.join(folder, "luma.onnx")
+            open(executable, "wb").close()
+            open(model, "wb").close()
+
+            def run():
+                with patch.dict(os.environ, {
+                    "LUMA_TTS_PIPER": executable,
+                    "LUMA_TTS_MODEL_PATH": model,
+                }, clear=False), patch.object(pc.subprocess, "Popen", return_value=synth):
+                    result["value"] = pc._piper_speak("длинная фраза", 0, 100)
+
+            thread = threading.Thread(target=run)
+            thread.start()
+            self.assertTrue(started.wait(1))
+            self.assertTrue(pc.stop_speaking())
+            thread.join(1)
+
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(({}, "Озвучка остановлена"), result.get("value"))
 
 
 class TtsInterruptionTests(unittest.TestCase):
