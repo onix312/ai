@@ -10,7 +10,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QBuffer, QByteArray, QIODevice
 from PySide6.QtGui import QColor, QImage
-from PySide6.QtWidgets import QApplication, QLabel
+from PySide6.QtWidgets import QApplication, QLabel, QProgressBar
 
 from agent.native_ui.app import NativeApp
 from agent.native_ui.components import LumaPortrait
@@ -116,6 +116,24 @@ class NativeQtSmokeTests(unittest.TestCase):
         self.assertFalse(center.chat.camera_card.isHidden())
         self.assertIn("P1S", center.chat.camera_title.text())
         self.assertIsNotNone(center.chat.camera_frame.pixmap())
+        center.deleteLater()
+        self.app.processEvents()
+
+    def test_chat_shows_explicit_execution_trace(self):
+        center = ControlCenter()
+        center.chat.show_action_trace([
+            {"kind": "rule", "title": "Понял без модели", "detail": "открыть программу"},
+            {"kind": "check", "title": "Проверка реестром", "detail": "навык и параметры в порядке"},
+            {"kind": "task", "title": "Task Engine", "detail": "задача 7: 2 шагов"},
+        ])
+        self.assertFalse(center.chat.trace_card.isHidden())
+        trace = center.chat.trace_text.text()
+        self.assertIn("Понял без модели", trace)
+        self.assertIn("Проверка реестром", trace)
+        self.assertIn("Task Engine", trace)
+        self.assertNotIn("<think", trace.casefold())
+        center.chat.clear_action_trace()
+        self.assertTrue(center.chat.trace_card.isHidden())
         center.deleteLater()
         self.app.processEvents()
 
@@ -369,6 +387,16 @@ class NativeQtSmokeTests(unittest.TestCase):
         self.assertTrue(any("verified 1" in text and "assumed 1" in text for text in labels))
         self.assertTrue(any("Новый маршрут" in text for text in labels))
         self.assertTrue(any("Здоровье ПК" in text for text in labels))
+        progress_bars = [w for w in task_page.findChildren(QProgressBar)
+                         if w.objectName() == "taskProgress"]
+        self.assertTrue(progress_bars)
+        self.assertEqual((1, 3), (progress_bars[0].value(), progress_bars[0].maximum()))
+        current_steps = [w.text() for w in task_page.findChildren(QLabel)
+                         if w.objectName() == "taskStepCurrent"]
+        self.assertTrue(any("system.media" in text for text in current_steps))
+        self.assertTrue(any("Сейчас выполняю" in w.text()
+                            for w in task_page.findChildren(QLabel)
+                            if w.objectName() == "taskNow"))
 
         center.deleteLater()
         quick.deleteLater()
