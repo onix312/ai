@@ -121,9 +121,9 @@ class NativeQtSmokeTests(unittest.TestCase):
             "notifications": [],
         })
 
-        self.assertEqual(orb.label.text(), "Думаю")
+        self.assertEqual(orb.label.text(), "Люма · Думаю")
         self.assertIn("готово", quick.answer.text())
-        self.assertIn("агент", center.footer.text())
+        self.assertIn("Люма", center.footer.text())
         self.assertIn("Браузер", center.providers_view.toPlainText())
         self.assertIn("browser.page", center.providers_view.toPlainText())
         self.assertIn("нужен Windows", center.providers_view.toPlainText())

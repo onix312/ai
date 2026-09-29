@@ -1,4 +1,4 @@
-"""Full Control Center NOZZA: разговор, дела, память, обучение и настройки."""
+"""Full Control Center Люмы: разговор, дела, память, обучение и настройки."""
 from __future__ import annotations
 
 import json
@@ -64,7 +64,7 @@ class ChatPage(QWidget):
         layout.addWidget(self.feed, 1)
         row = QHBoxLayout()
         self.input = QLineEdit()
-        self.input.setPlaceholderText("Спроси NOZZA или скажи, что сделать…")
+        self.input.setPlaceholderText("Спроси Люму или скажи, что сделать…")
         self.input.returnPressed.connect(self._submit)
         row.addWidget(self.input, 1)
         send = QPushButton("Отправить")
@@ -83,7 +83,7 @@ class ChatPage(QWidget):
         chunks = []
         for turn in turns:
             role = str(turn.get("role") or "")
-            who = "Вы" if role == "user" else "NOZZA"
+            who = "Вы" if role == "user" else "Люма"
             text = str(turn.get("text") or "")
             chunks.append(f"<p><b>{who}</b><br>{text}</p>")
         self.feed.setHtml("".join(chunks))
@@ -331,6 +331,7 @@ class ControlCenter(QMainWindow):
     refresh_page = Signal(str)
     clear_chat = Signal()
     mic_toggle = Signal()
+    safety_toggle = Signal()
     task_decision = Signal(str, bool)
     task_command = Signal(int, str)
     plan_preview = Signal(str)
@@ -357,7 +358,7 @@ class ControlCenter(QMainWindow):
 
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("NOZZA Assistant")
+        self.setWindowTitle("Люма")
         self.setMinimumSize(980, 680)
         self.resize(1180, 780)
         root = QWidget()
@@ -402,7 +403,7 @@ class ControlCenter(QMainWindow):
 
         defs = {
             "memory": ("Память", "Факты, предпочтения и то, что вы просили запомнить."),
-            "learning": ("Обучение", "Чему NOZZA научилась и что пока не понимает."),
+            "learning": ("Обучение", "Чему Люма научилась и что пока не понимает."),
             "skills": ("Навыки", "Доступные способности и их состояние."),
             "journal": ("Журнал", "Фактические действия ассистента на компьютере."),
         }
@@ -420,12 +421,20 @@ class ControlCenter(QMainWindow):
         self.settings_status = QLabel("Backend: …")
         self.settings_status.setWordWrap(True)
         sl.addWidget(self.settings_status)
-        self.settings_hotkey = QLabel("Быстрая команда: Ctrl + Shift + Space")
+        self.settings_hotkey = QLabel(
+            "Быстрая команда: Ctrl + Shift + Space · STOP ALL: Ctrl + Alt + Shift + Space"
+        )
         sl.addWidget(self.settings_hotkey)
+        controls = QHBoxLayout()
         self.mic_button = QPushButton("🎤 Включить wake word")
         self.mic_button.clicked.connect(self.mic_toggle)
-        sl.addWidget(self.mic_button)
-        persona_title = QLabel("Persona NOZZA")
+        controls.addWidget(self.mic_button)
+        self.stop_all_button = QPushButton("⛔ STOP ALL")
+        self.stop_all_button.setObjectName("danger")
+        self.stop_all_button.clicked.connect(self.safety_toggle)
+        controls.addWidget(self.stop_all_button)
+        sl.addLayout(controls)
+        persona_title = QLabel("Persona Люмы")
         persona_title.setStyleSheet("font-size:16px; font-weight:700; margin-top:12px;")
         sl.addWidget(persona_title)
         self.persona_boxes: dict[str, QComboBox] = {}
@@ -626,6 +635,8 @@ class ControlCenter(QMainWindow):
         QPushButton:hover { background:#334155; }
         QPushButton#primary { background:#2563eb; }
         QPushButton#primary:hover { background:#1d4ed8; }
+        QPushButton#danger { background:#991b1b; color:white; font-weight:700; }
+        QPushButton#danger:hover { background:#b91c1c; }
         """)
 
     def _change(self, row: int) -> None:
@@ -637,17 +648,19 @@ class ControlCenter(QMainWindow):
             self.refresh_page.emit(str(key))
 
     def update_status(self, connected: bool, armed: bool, model_ok: bool,
-                      panel_ok: bool, error: str = "") -> None:
+                      panel_ok: bool, error: str = "", safety_stopped: bool = False) -> None:
         if connected:
-            bits = ["агент ✓", "модель ✓" if model_ok else "модель –",
+            bits = ["Люма ✓", "модель ✓" if model_ok else "модель –",
                     "PrintFlow ✓" if panel_ok else "PrintFlow –",
-                    "wake ✓" if armed else "wake –"]
+                    "wake ✓" if armed else "wake –",
+                    "STOP ALL" if safety_stopped else "готова"]
             self.footer.setText("   ".join(bits))
             self.settings_status.setText("Backend: подключён · 127.0.0.1:8799")
         else:
             self.footer.setText("Агент недоступен" + (f": {error}" if error else ""))
             self.settings_status.setText("Backend: недоступен" + (f" · {error}" if error else ""))
         self.mic_button.setText("🎤 Выключить wake word" if armed else "🎤 Включить wake word")
+        self.stop_all_button.setText("▶ Снять STOP ALL" if safety_stopped else "⛔ STOP ALL")
 
     def _emit_persona_save(self) -> None:
         profile = {

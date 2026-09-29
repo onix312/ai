@@ -1086,6 +1086,12 @@ class Brain:
             token = self._cancels.get(key)
         return bool(token and token.cancel())
 
+    def cancel_all_sessions(self) -> int:
+        """Cancel every active model turn without touching persisted dialog."""
+        with self._cancel_lock:
+            tokens = list(self._cancels.values())
+        return sum(1 for token in tokens if token.cancel())
+
     def _begin_model_turn(self, session: str) -> model.CancellationToken:
         key = session_key(session)
         token = model.CancellationToken()

@@ -13,6 +13,7 @@ class VoiceOrb(QWidget):
         "thinking": "Думаю",
         "speaking": "Говорю",
         "error": "Ошибка",
+        "stopped": "STOP ALL",
     }
 
     def __init__(self) -> None:
@@ -20,25 +21,29 @@ class VoiceOrb(QWidget):
         self._state = "idle"
         self._partial = ""
         self._audio_level = 0
+        self._pulse = 0
         self.setWindowFlags(
             Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint |
             Qt.WindowDoesNotAcceptFocus
         )
         self.setAttribute(Qt.WA_TranslucentBackground, True)
-        self.setFixedSize(170, 68)
+        self.setFixedSize(210, 76)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 8, 16, 8)
-        self.label = QLabel("Готов")
+        self.label = QLabel("Люма · Готова")
         self.label.setAlignment(Qt.AlignCenter)
         self.label.setStyleSheet("color: white; font-size: 14px; font-weight: 700;")
         layout.addWidget(self.label)
+        self._pulse_timer = QTimer(self)
+        self._pulse_timer.timeout.connect(self._tick)
+        self._pulse_timer.start(90)
         self._hide_timer = QTimer(self)
         self._hide_timer.setSingleShot(True)
         self._hide_timer.timeout.connect(self.hide)
 
     def set_state(self, state: str, auto_hide_ms: int = 0) -> None:
         self._state = state if state in self.LABELS else "idle"
-        self.label.setText(self.LABELS[self._state])
+        self.label.setText(f"Люма · {self.LABELS[self._state]}")
         self.update()
         self.show_near_bottom()
         if auto_hide_ms:
@@ -51,8 +56,13 @@ class VoiceOrb(QWidget):
         if self._state == "listening" and self._partial:
             self.label.setText(self._partial)
         else:
-            self.label.setText(self.LABELS[self._state])
+            self.label.setText(f"Люма · {self.LABELS[self._state]}")
         self.update()
+
+    def _tick(self) -> None:
+        if self._state in ("listening", "thinking", "speaking"):
+            self._pulse = (self._pulse + 1) % 20
+            self.update()
 
     def show_near_bottom(self) -> None:
         screen = self.screen()
@@ -71,11 +81,19 @@ class VoiceOrb(QWidget):
             "thinking": QColor("#7c3aed"),
             "speaking": QColor("#16a34a"),
             "error": QColor("#dc2626"),
+            "stopped": QColor("#991b1b"),
         }
         c = tones[self._state]
+        if self._state in ("listening", "thinking", "speaking"):
+            pulse = abs(10 - self._pulse) / 10.0
+            halo = QColor(c)
+            halo.setAlpha(int(28 + 42 * pulse))
+            painter.setPen(QPen(halo, 3))
+            painter.setBrush(Qt.NoBrush)
+            painter.drawRoundedRect(self.rect().adjusted(3, 3, -3, -3), 20, 20)
         painter.setPen(QPen(QColor(255, 255, 255, 36), 1))
         painter.setBrush(c)
-        painter.drawRoundedRect(self.rect().adjusted(1, 1, -1, -1), 18, 18)
+        painter.drawRoundedRect(self.rect().adjusted(6, 6, -6, -6), 18, 18)
 
         if self._state == "listening" and self._audio_level:
             # Нормализованный индикатор громкости. Он декоративный и не влияет

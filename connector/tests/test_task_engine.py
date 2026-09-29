@@ -25,6 +25,7 @@ class _Agent:
         self.calls = []
         self.pending = {}
         self.discarded = []
+        self.stopped = False
 
     def run_skill(self, name, params=None, ask=True):
         self.calls.append((name, dict(params or {})))
@@ -38,6 +39,9 @@ class _Agent:
     def discard_action(self, action_id):
         self.discarded.append(action_id)
         return self.pending.pop(action_id, None) is not None
+
+    def execution_stopped(self):
+        return self.stopped
 
 
 class TaskEngineTests(unittest.TestCase):
@@ -64,6 +68,17 @@ class TaskEngineTests(unittest.TestCase):
         result = self.engine.create("Плохая", [{"skill": "no.such.skill", "params": {}}])
         self.assertFalse(result["ok"])
         self.assertEqual([], self.engine.list())
+
+    def test_stop_all_blocks_start_without_failing_task(self):
+        task_id = self._create([
+            {"skill": "system.volume", "params": {"level": 30}},
+        ])
+        self.agent.stopped = True
+        result = self.engine.start(task_id)
+        self.assertFalse(result["ok"])
+        self.assertTrue(result["stopped"])
+        self.assertEqual("planned", self.engine.get(task_id)["status"])
+        self.assertEqual([], self.agent.calls)
 
     def test_two_safe_steps_finish_and_persist(self):
         task_id = self._create([

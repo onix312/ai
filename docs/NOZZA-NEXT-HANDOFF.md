@@ -1,5 +1,24 @@
 # NOZZA — handoff и roadmap после Verification Engine 1.0
 
+> **Актуализация 29.09.2026, Native UI 2.0 Phase 1:** Voice Engine 3 Phase 6 уже в `main`.
+> Текущая ветка переводит нативный интерфейс на identity Люмы, делает Voice Orb
+> живым индикатором listening/thinking/speaking и добавляет backend-level
+> **STOP ALL** с tray/control-center кнопкой и глобальным hotkey. STOP ALL
+> отменяет model turns, TTS и pending confirmations, выключает listening,
+> ставит Task Engine на паузу после текущего atomic step и блокирует новые
+> skills до явного Resume. Следом: Native UI 2.0 Phase 2 — richer live
+> transcript/status surface, task activity и более цельный Control Center.
+
+
+> **Актуализация 29.09.2026, Native UI 2 Phase 1:** Voice 3 Phase 6 уже в `main`.
+> Текущая ветка переводит PySide6 интерфейс на identity **Люмы**, оживляет Orb
+> и добавляет единый latched **STOP ALL**: TTS/model/voice/pending/tasks
+> останавливаются через backend primitive, новые actions блокируются до Resume.
+> Поверх него работают tray, Control Center и global hotkey
+> `Ctrl+Alt+Shift+Space`. Следом: richer Quick Panel + streaming conversation
+> surface + voice diagnostics.
+
+
 > **Актуализация 29.09.2026, Voice 3 Phase 6:** Люма и Phase 5 уже в `main`.
 > Текущая ветка добавляет adaptive acoustic echo gate: во время собственного
 > TTS Люма обучает только фон утечки динамика, поднимает VAD-порог над ним и не

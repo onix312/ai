@@ -29,7 +29,7 @@ class QuickPanel(QWidget):
         box = QVBoxLayout(card)
         row = QHBoxLayout()
         self.input = QLineEdit()
-        self.input.setPlaceholderText("Спроси NOZZA или скажи, что сделать…")
+        self.input.setPlaceholderText("Спроси Люму или скажи, что сделать…")
         self.input.returnPressed.connect(self._submit)
         row.addWidget(self.input, 1)
         box.addLayout(row)
