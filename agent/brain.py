@@ -1271,7 +1271,10 @@ class Brain:
         # (среди них и `panel.ask`), не тратя время на второй мозг.
         last = history[-1] if history and history[-1].get("role") == "assistant" else {}
         workshop = any(word in f"{clean.casefold()} " for word in _PANEL_WORDS)
-        panel_context = (last.get("meta") or {}).get("source") == "panel"
+        last_source = str((last.get("meta") or {}).get("source") or "")
+        panel_context = last_source.startswith("panel")
+        if self._printer_visual_requested(clean, panel_context):
+            return self._printer_visual(session, clean, steps, started)
         if re.search(r"\bпродаж\w*\s+за\s+(?:последние\s+)?7\s+дн", clean.casefold()):
             report = self._sales_last7(session, clean, steps, started)
             if report:
@@ -1383,6 +1386,93 @@ class Brain:
         steps.append({"kind": "panel", "title": "Продажи за 7 дней", "detail": source})
         return self._reply(session, text, reply, kind="answer",
                            source=source, steps=steps, started=started)
+
+    @staticmethod
+    def _printer_visual_requested(text: str, panel_context: bool = False) -> bool:
+        """True when the user asks to actually look at the printer camera."""
+        low = " ".join(str(text or "").casefold().split())
+        visual = bool(re.search(
+            r"(визуальн|камер|картин|фото|кадр|что\s+видно|что\s+там\s+видно|"
+            r"посмотри\s+(?:сам|сама|на\s+него|на\s+печать)|покажи\s+(?:мне\s+)?(?:что\s+там|картин|фото|кадр))",
+            low,
+        ))
+        printer = bool(re.search(r"(принтер|печата|печать|станок|bambu|p1s|аппарат)", low))
+        return visual and (printer or panel_context)
+
+    def _printer_visual(self, session: str, text: str, steps: list[dict[str, Any]],
+                        started: float) -> dict[str, Any]:
+        """Fetch PrintFlow's live camera frame and, when possible, inspect it locally."""
+        client = getattr(self.runner, "panel", None)
+        if client is None or not callable(getattr(client, "camera_frame", None)):
+            steps.append({"kind": "panel", "title": "Камера принтера", "detail": "клиент камеры недоступен"})
+            return self._reply(
+                session, text,
+                "Не могу получить кадр с камеры PrintFlow: подключение к камере не настроено.",
+                kind="answer", source="panel-camera", steps=steps, started=started,
+            )
+        try:
+            shot = client.camera_frame()
+        except Exception as exc:  # noqa: BLE001
+            shot = {"ok": False, "reason": exc.__class__.__name__}
+        shot = shot if isinstance(shot, dict) else {}
+        if not shot.get("ok") or not shot.get("image"):
+            reason = str(shot.get("reason") or "свежий кадр не получен")
+            steps.append({"kind": "panel", "title": "Камера принтера", "detail": reason[:180]})
+            return self._reply(
+                session, text, f"Посмотрела камеру PrintFlow, но кадр сейчас недоступен: {reason}.",
+                kind="answer", source="panel-camera", steps=steps, started=started,
+            )
+
+        frame = bytes(shot.get("image") or b"")
+        pid = str(shot.get("printer_id") or "")
+        pname = str(shot.get("printer_name") or pid or "принтер")
+        image_url = str(shot.get("url") or "")
+        steps.append({"kind": "panel", "title": "Свежий кадр камеры",
+                      "detail": f"{pname} · {len(frame) // 1024} КБ"})
+
+        can_see, vision_reason = model.vision_ok()
+        reply = ""
+        if can_see:
+            state = model.status()
+            prompt = (
+                "Перед тобой свежий кадр камеры 3D-принтера во время печати. "
+                "Опиши только то, что действительно видно на кадре, кратко и по-русски. "
+                "Отдельно отметь, видишь ли ты явные проблемы: отрыв детали от стола, "
+                "спагетти, смещение слоёв, комки пластика, столкновение сопла или посторонний предмет. "
+                "Если качество кадра не позволяет судить, прямо скажи это. "
+                "Не придумывай слой, процент прогресса, температуру или параметры, которых на фото не видно."
+            )
+            seen = model.chat(
+                [{"role": "user", "content": prompt}],
+                images=[frame], temperature=0.1, max_chars=1200, state=state,
+            )
+            if seen.get("ok") and seen.get("text"):
+                reply = f"Посмотрела свежий кадр с {pname}. {str(seen['text']).strip()}"
+                steps.append({"kind": "model", "title": "Визуальный анализ",
+                              "detail": str(seen.get("model") or "локальная vision-модель")})
+            else:
+                vision_reason = str(seen.get("reason") or "vision-модель не ответила")
+
+        if not reply:
+            reply = (
+                f"Свежий кадр с {pname} получила и показываю. "
+                f"Текущая локальная модель не может надёжно проанализировать изображение"
+                + (f": {vision_reason}" if vision_reason else "")
+                + ". Поэтому визуальное состояние выдумывать не буду."
+            )
+            steps.append({"kind": "model", "title": "Визуальный анализ",
+                          "detail": vision_reason or "vision недоступен"})
+
+        return self._reply(
+            session, text, reply, kind="answer", source="panel-camera",
+            steps=steps, started=started,
+            extra={"image": {
+                "url": image_url,
+                "mime": str(shot.get("mime") or "image/jpeg"),
+                "printer_id": pid,
+                "printer_name": pname,
+            }},
+        )
 
     def _ask_panel(self, session: str, text: str, steps: list[dict[str, Any]],
                    started: float) -> dict[str, Any] | None:
