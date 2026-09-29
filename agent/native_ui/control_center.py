@@ -646,6 +646,7 @@ class ControlCenter(QMainWindow):
     voice_diag_reset = Signal()
     tts_save = Signal(str, str, str)
     tts_reset = Signal()
+    tts_test = Signal()
 
     NAV = [
         ("chat", "💬  Разговор"),
@@ -771,6 +772,9 @@ class ControlCenter(QMainWindow):
             )
         )
         tts_buttons.addWidget(apply_tts)
+        preview_tts = QPushButton("🔊 Прослушать голос")
+        preview_tts.clicked.connect(self.tts_test)
+        tts_buttons.addWidget(preview_tts)
         reset_tts = QPushButton("Сбросить TTS")
         reset_tts.clicked.connect(self.tts_reset)
         tts_buttons.addWidget(reset_tts)
@@ -1070,9 +1074,12 @@ class ControlCenter(QMainWindow):
         hq = bool(payload.get("hq_local"))
         model = str(payload.get("model") or "")
         ready = bool(payload.get("model_ready"))
+        synth_ms = int(payload.get("last_synth_ms") or 0)
+        last_chars = int(payload.get("last_chars") or 0)
+        latency = f" · synth {synth_ms} ms/{last_chars} chars" if synth_ms and last_chars else ""
         self.tts_meta.setText(
             f"TTS: {engine} · HQ {'✓' if hq else '–'} · "
-            f"model {'✓' if ready else '–'}" + (f" · {model}" if model else "")
+            f"model {'✓' if ready else '–'}" + (f" · {model}" if model else "") + latency
         )
         editing = any(widget.hasFocus() for widget in (self.tts_piper, self.tts_model, self.tts_speaker))
         if not editing:
