@@ -33,6 +33,18 @@ class NativeQtSmokeTests(unittest.TestCase):
         )
         quick.show_answer("готово")
         center.update_status(True, False, True, True)
+        center.set_voice_diagnostics(
+            audio_level=900,
+            echo_floor=220,
+            echo_threshold=610,
+            echo_suppressed=12,
+            multiplier=1.8,
+            margin=220,
+            alpha=0.3,
+            vad_threshold=320,
+            asr_engine="vosk",
+            vocabulary_count=42,
+        )
         center.chat.set_live_activity(
             "executing", "открой телеграм", "", "app.open", "Открыть Telegram", 7
         )
@@ -164,6 +176,14 @@ class NativeQtSmokeTests(unittest.TestCase):
         self.assertIn("задача #7", center.chat.live.text())
         self.assertIn("готово", quick.answer.text())
         self.assertIn("Люма", center.footer.text())
+        self.assertEqual(900, center.voice_level.value())
+        self.assertEqual(220, center.voice_floor.value())
+        self.assertEqual(610, center.voice_threshold.value())
+        self.assertAlmostEqual(1.8, center.voice_multiplier.value())
+        self.assertEqual(220, center.voice_margin.value())
+        self.assertAlmostEqual(0.3, center.voice_alpha.value())
+        self.assertIn("vosk", center.voice_diag_meta.text())
+        self.assertIn("42", center.voice_diag_meta.text())
         self.assertIn("Браузер", center.providers_view.toPlainText())
         self.assertIn("browser.page", center.providers_view.toPlainText())
         self.assertIn("нужен Windows", center.providers_view.toPlainText())
