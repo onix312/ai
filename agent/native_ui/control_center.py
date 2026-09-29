@@ -968,6 +968,7 @@ class MemoryPage(QWidget):
         self.host.setSpacing(9)
         self.scroll.setWidget(self.host_widget)
         root.addWidget(self.scroll, 1)
+        self.set_payload({})
 
     def _forget_click(self, button: QPushButton, memory_id: int) -> None:
         armed = bool(button.property("confirmArmed"))
@@ -1224,6 +1225,7 @@ class SkillsPage(QWidget):
         self.browser = QTextBrowser()
         self.browser.setObjectName("skillsBrowser")
         root.addWidget(self.browser, 1)
+        self.set_payload({})
 
     def set_payload(self, payload: dict[str, Any]) -> None:
         self._payload = dict(payload or {})
@@ -1966,7 +1968,8 @@ class VoicePage(QWidget):
         hero_box.setContentsMargins(20, 16, 20, 16)
         hero_box.setSpacing(18)
 
-        self.portrait = LumaPortrait(compact=True)
+        self.portrait = LumaPortrait()
+        self.portrait.setFixedSize(170, 184)
         self.portrait.set_state("speaking")
         hero_box.addWidget(self.portrait, 0, Qt.AlignVCenter)
 
@@ -2637,6 +2640,7 @@ class TasksPage(QWidget):
         self.host.setAlignment(Qt.AlignTop)
         scroll.setWidget(self.host_widget)
         self.layout.addWidget(scroll, 1)
+        self.set_payload({})
 
     def _preview_plan(self) -> None:
         goal = self.goal_input.text().strip()
@@ -2693,7 +2697,25 @@ class TasksPage(QWidget):
         self.tasks_pending_metric.setText(str(len(pending)))
 
         if not plans and not replans and not tasks and not pending and not notifications:
-            self.host.addWidget(QLabel("Ничего не ждёт."))
+            empty = GlassCard("violet")
+            empty.setMaximumHeight(230)
+            row = QHBoxLayout(empty)
+            row.setContentsMargins(22, 18, 22, 18)
+            orb = LumaOrbCore()
+            orb.setFixedSize(160, 160)
+            row.addWidget(orb)
+            copy = QVBoxLayout()
+            heading = QLabel("Здесь появятся твои задачи")
+            heading.setObjectName("sectionTitle")
+            heading.setWordWrap(True)
+            copy.addWidget(heading)
+            hint = QLabel("Напиши цель выше — Люма составит план и покажет шаги здесь.")
+            hint.setObjectName("muted")
+            hint.setWordWrap(True)
+            copy.addWidget(hint)
+            copy.addStretch(1)
+            row.addLayout(copy, 1)
+            self.host.addWidget(empty)
             return
         if plans:
             self._section("Планы", "PLANNER PREVIEW")

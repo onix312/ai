@@ -12,6 +12,8 @@ from PySide6.QtCore import QPointF, QRectF, QSize, Qt, QTimer
 from PySide6.QtGui import QBrush, QColor, QPainter, QPen, QRadialGradient
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
+from .components import LumaPortrait
+
 
 _STATE_COLORS = {
     "idle": QColor("#8B5CF6"),
@@ -198,7 +200,7 @@ class LumaOrbCore(QWidget):
 
 
 class VoiceOrb(QWidget):
-    """Compact always-on-top runtime indicator."""
+    """Always-on-top indicator with a larger persona view during conversation."""
 
     LABELS = _STATE_LABELS
 
@@ -215,7 +217,10 @@ class VoiceOrb(QWidget):
         self.setFixedWidth(390)
         self.setFixedHeight(72)
 
-        row = QHBoxLayout(self)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+        row = QHBoxLayout()
         row.setContentsMargins(8, 5, 14, 5)
         row.setSpacing(10)
         self.core = LumaOrbCore(self, compact=True)
@@ -237,6 +242,12 @@ class VoiceOrb(QWidget):
         text.addWidget(self.context_label)
         text.addWidget(self.reply_label)
         row.addLayout(text, 1)
+        root.addLayout(row)
+
+        self.portrait = LumaPortrait(self)
+        self.portrait.setFixedSize(265, 205)
+        root.addWidget(self.portrait, 0, Qt.AlignCenter)
+        self.portrait.hide()
 
         self._hide_timer = QTimer(self)
         self._hide_timer.setSingleShot(True)
@@ -246,6 +257,9 @@ class VoiceOrb(QWidget):
         clean = str(state or "idle").casefold()
         self._state = clean if clean in self.LABELS else "idle"
         self.core.set_state(self._state)
+        self.portrait.set_state(self._state)
+        self.portrait.setVisible(self._state in ("listening", "thinking", "speaking"))
+        self._resize_for_state()
         self.label.setText(f"Люма · {self.LABELS[self._state]}")
         self.show_near_bottom()
         if auto_hide_ms:
@@ -290,12 +304,19 @@ class VoiceOrb(QWidget):
 
         self.context_label.setVisible(bool(self.context_label.text()))
         self.reply_label.setVisible(bool(self.reply_label.text()))
-        target_height = 112 if self.context_label.text() or self.reply_label.text() else 72
+        self._resize_for_state()
+        self.update()
+
+    def _resize_for_state(self) -> None:
+        target_height = (
+            280 if self._state in ("listening", "thinking", "speaking")
+            else 112 if self.context_label.text() or self.reply_label.text()
+            else 72
+        )
         if self.height() != target_height:
             self.setFixedHeight(target_height)
             if self.isVisible():
                 self.show_near_bottom()
-        self.update()
 
     def show_near_bottom(self) -> None:
         screen = self.screen()

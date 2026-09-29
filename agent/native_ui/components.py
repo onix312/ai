@@ -49,6 +49,13 @@ class AmbientCanvas(QWidget):
         cyan.setColorAt(1.0, QColor(7, 8, 22, 0))
         painter.fillRect(self.rect(), QBrush(cyan))
 
+        painter.setPen(Qt.NoPen)
+        for index in range(24):
+            x = int(((index * 179 + 43) % 997) / 997 * w)
+            y = int(((index * 311 + 71) % 991) / 991 * h)
+            painter.setBrush(QColor(160, 132, 255, int((35 + index % 5 * 13) * self._glow)))
+            painter.drawEllipse(QPointF(x, y), 1.1, 1.1)
+
 
 class LumaPortrait(QWidget):
     """Luma's portrait with a state-colored, softly animated halo."""

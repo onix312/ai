@@ -33,8 +33,8 @@ def stylesheet() -> str:
     }
 
     QWidget#sidebar {
-        background: rgba(12, 13, 30, 235);
-        border-right: 1px solid #292D52;
+        background: #090E24;
+        border-right: 1px solid #59439A;
     }
 
     QFrame#brandCard {
@@ -87,9 +87,9 @@ def stylesheet() -> str:
     }
 
     QListWidget#nav::item:selected {
-        background: #242044;
+        background: qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #6846C8,stop:1 #252D68);
         color: #FFFFFF;
-        border: 1px solid #6654B8;
+        border: 1px solid #9A79FF;
     }
 
     QFrame#topBar {
@@ -481,17 +481,17 @@ def stylesheet() -> str:
     }
 
     QFrame#glassCard {
-        background: #111328;
-        border: 1px solid #30345A;
+        background: qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #151B3B,stop:0.55 #10162F,stop:1 #0B1025);
+        border: 1px solid #4B4380;
         border-radius: 16px;
     }
 
     QFrame#glassCard[accent="violet"] {
-        border: 1px solid #5E4AA3;
+        border: 1px solid #9A70FF;
     }
 
     QFrame#glassCard[accent="cyan"] {
-        border: 1px solid #28758B;
+        border: 1px solid #4FAEF9;
     }
 
     QFrame#glassCard[accent="amber"] {
@@ -553,9 +553,9 @@ def stylesheet() -> str:
     }
 
     QPushButton#primary {
-        background: #6847D8;
+        background: qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #6C49DE,stop:1 #3D68DD);
         color: #FFFFFF;
-        border: 1px solid #8B6EF0;
+        border: 1px solid #AB88FF;
     }
 
     QPushButton#primary:hover {
@@ -564,8 +564,8 @@ def stylesheet() -> str:
     }
 
     QPushButton#suggestion {
-        background: #12162B;
-        border: 1px solid #343861;
+        background: qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #24235A,stop:1 #111A3A);
+        border: 1px solid #6C5AB0;
         border-radius: 14px;
         padding: 15px 18px;
         text-align: left;
