@@ -71,6 +71,9 @@ class BackendClientTests(unittest.TestCase):
             client.tts_settings()
             client.tts_update("piper.exe", "C:/voices/luma.onnx", "1")
             client.tts_test()
+            client.pronunciation_items()
+            client.pronunciation_set("Bambu", "бэмбу")
+            client.pronunciation_delete("Bambu")
             client.tts_reset()
             client.disable_voice()
         self.assertEqual([
@@ -80,6 +83,10 @@ class BackendClientTests(unittest.TestCase):
             ("POST", "http://127.0.0.1:8791/voice/tune"),
             ("POST", "http://127.0.0.1:8791/voice/diagnostics/reset"),
             ("GET", "http://127.0.0.1:8791/voice/tts"),
+            ("POST", "http://127.0.0.1:8791/voice/tts"),
+            ("POST", "http://127.0.0.1:8791/voice/tts"),
+            ("POST", "http://127.0.0.1:8791/voice/tts"),
+            ("POST", "http://127.0.0.1:8791/voice/tts"),
             ("POST", "http://127.0.0.1:8791/voice/tts"),
             ("POST", "http://127.0.0.1:8791/voice/tts"),
             ("POST", "http://127.0.0.1:8791/voice/tts"),
