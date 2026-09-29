@@ -300,7 +300,11 @@ class NativeApp:
             reply = str(payload.get("reply") or payload.get("reason") or "Готово.")
             self.quick.set_busy(False)
             self.quick.show_answer(reply)
-            self.center.chat.append_local("Люма", reply)
+            self.center.chat.append_local(
+                "Люма", reply,
+                source=str(payload.get("source") or ""),
+                skill=str(payload.get("skill") or ""),
+            )
             trace_steps = list(payload.get("steps") or []) if isinstance(payload.get("steps"), list) else []
             self.center.chat.show_action_trace(trace_steps)
             self._brain_route = str(payload.get("source") or payload.get("kind") or "ready")
