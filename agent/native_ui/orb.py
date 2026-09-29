@@ -12,6 +12,8 @@ class VoiceOrb(QWidget):
         "listening": "Слушаю",
         "thinking": "Думаю",
         "speaking": "Говорю",
+        "working": "Выполняю",
+        "waiting": "Жду",
         "error": "Ошибка",
         "stopped": "STOP ALL",
     }
@@ -98,7 +100,7 @@ class VoiceOrb(QWidget):
         self.update()
 
     def _tick(self) -> None:
-        if self._state in ("listening", "thinking", "speaking"):
+        if self._state in ("listening", "thinking", "speaking", "working", "waiting"):
             self._pulse = (self._pulse + 1) % 20
             self.update()
 
@@ -118,11 +120,13 @@ class VoiceOrb(QWidget):
             "listening": QColor("#0891b2"),
             "thinking": QColor("#7c3aed"),
             "speaking": QColor("#16a34a"),
+            "working": QColor("#d97706"),
+            "waiting": QColor("#475569"),
             "error": QColor("#dc2626"),
             "stopped": QColor("#991b1b"),
         }
         c = tones[self._state]
-        if self._state in ("listening", "thinking", "speaking"):
+        if self._state in ("listening", "thinking", "speaking", "working", "waiting"):
             pulse = abs(10 - self._pulse) / 10.0
             halo = QColor(c)
             halo.setAlpha(int(28 + 42 * pulse))
