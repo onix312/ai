@@ -2663,7 +2663,7 @@ class ControlCenter(QMainWindow):
     chat_submitted = Signal(str)
     memory_pin = Signal(int, bool)
     memory_forget = Signal(int)
-    learning_action = Signal(str, object)
+    learning_action = Signal(str, dict)
     refresh_page = Signal(str)
     clear_chat = Signal()
     mic_toggle = Signal()
