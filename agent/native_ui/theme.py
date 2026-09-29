@@ -202,6 +202,21 @@ def stylesheet() -> str:
         font-weight: 650;
     }
 
+    QLabel#opsMetric, QLabel#opsMetricReady, QLabel#opsMetricDanger {
+        background: transparent;
+        color: #F5F2FF;
+        font-size: 22px;
+        font-weight: 800;
+    }
+
+    QLabel#opsMetricReady {
+        color: #78EDC6;
+    }
+
+    QLabel#opsMetricDanger {
+        color: #F5B84C;
+    }
+
     QLabel#skillMetric, QLabel#skillMetricReady {
         background: transparent;
         color: #F5F2FF;
@@ -218,6 +233,14 @@ def stylesheet() -> str:
         border: 1px solid #25294A;
         border-radius: 14px;
         padding: 4px;
+    }
+
+    QTextBrowser#activityTimeline {
+        background: #0B0D1B;
+        border: 1px solid #25294A;
+        border-radius: 15px;
+        padding: 8px;
+        selection-background-color: #5E4AA3;
     }
 
     QLabel#sectionTitle {
@@ -286,6 +309,43 @@ def stylesheet() -> str:
         border-radius: 8px;
         padding: 8px 10px;
         font-weight: 650;
+    }
+
+    QLabel#taskStepDone {
+        background: #0F1E22;
+        color: #9BE8CF;
+        border-left: 3px solid #58E6B1;
+        border-radius: 8px;
+        padding: 7px 10px;
+    }
+
+    QLabel#taskStepWaiting {
+        background: #211C12;
+        color: #EACF94;
+        border-left: 3px solid #F5B84C;
+        border-radius: 8px;
+        padding: 7px 10px;
+    }
+
+    QLabel#taskStepFailed {
+        background: #2A131C;
+        color: #FFB7C3;
+        border-left: 3px solid #F05266;
+        border-radius: 8px;
+        padding: 7px 10px;
+    }
+
+    QLabel#taskStepCancelled {
+        background: #141526;
+        color: #777493;
+        border-left: 2px solid #343861;
+        border-radius: 8px;
+        padding: 7px 10px;
+    }
+
+    QFrame#taskSection {
+        background: transparent;
+        border: 0;
     }
 
     QLabel#taskNow {
