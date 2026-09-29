@@ -503,6 +503,48 @@ class BrainChatTests(unittest.TestCase):
         self.assertGreater(answer.get("voice_streamed_chars", 0), 0)
         self.assertEqual(["Первая фраза.", "Вторая фраза."], spoken)
 
+    def test_model_plan_validator_reports_missing_function_before_execution(self):
+        problem = brain.model_plan_problem(
+            {"skill": "imaginary.launch", "params": {}, "steps": [], "reply": "", "ask": ""},
+            self.agent.runner.caps,
+            self.agent.runner.learned(),
+        )
+        self.assertIn("нет в реестре", problem)
+
+    def test_model_repairs_bad_tool_choice_before_execution(self):
+        first = json.dumps({
+            "skill": "computer.deep_check",
+            "params": {},
+            "steps": [],
+            "reply": "",
+            "ask": "",
+        }, ensure_ascii=False)
+        repaired = json.dumps({
+            "skill": "system.health",
+            "params": {},
+            "steps": [],
+            "reply": "",
+            "ask": "",
+        }, ensure_ascii=False)
+        calls = []
+
+        def fake_chat(*_args, system="", **_kwargs):
+            calls.append(system)
+            raw = first if len(calls) == 1 else repaired
+            return {"ok": True, "text": raw, "reason": "", "model": "qwen2.5:3b"}
+
+        with patch.object(model, "status", return_value={
+                "ok": True, "model": "qwen2.5:3b", "reason": "",
+                "url": "http://127.0.0.1:11434", "models": ["qwen2.5:3b"],
+             }), patch.object(model, "chat", side_effect=fake_chat):
+            answer = self.brain.chat("проверь состояние компьютера подробно")
+
+        self.assertEqual(2, len(calls))
+        self.assertEqual("system.health", self.agent.calls[-1][0])
+        self.assertTrue(any(step.get("title") == "Самокоррекция плана" for step in answer["steps"]))
+        self.assertIn("Расширенный каталог доступных функций", calls[1])
+        self.assertNotIn("computer.deep_check", [name for name, _params in self.agent.calls])
+
     def test_model_plan_is_checked_by_registry(self):
         with patch.object(model, "status", return_value={"ok": True, "model": "qwen2.5:3b", "reason": ""}), \
                 patch.object(model, "chat", return_value={"ok": True, "text": json.dumps(
