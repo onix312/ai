@@ -1078,6 +1078,25 @@ def memory_statement(row: dict[str, Any]) -> str:
     return f"со слов владельца: {text}"
 
 
+def compact_result_context(result: dict[str, Any] | None) -> dict[str, Any]:
+    """Small factual residue from a tool result for the next conversational turn."""
+    if not isinstance(result, dict):
+        return {}
+    out: dict[str, Any] = {}
+    for key in ("ok", "title", "reason", "target", "state", "status", "level",
+                "muted", "count", "progress", "window", "model", "engine"):
+        value = result.get(key)
+        if value not in (None, "", [], {}):
+            out[key] = value
+    files = result.get("files")
+    if isinstance(files, list) and files:
+        out["files"] = [
+            str(row.get("path") if isinstance(row, dict) else row)[:240]
+            for row in files[:3]
+        ]
+    return out
+
+
 def model_plan_problem(answer: dict[str, Any], caps: dict[str, Any],
                        learned: dict[str, dict[str, Any]] | None = None) -> str:
     """Return validator feedback for a model draft before anything is executed.
@@ -2365,7 +2384,10 @@ class Brain:
                 visible_target = {key: value for key, value in target.items() if value not in ("", None, [], {})}
                 if visible_target:
                     detail += " → " + str(visible_target)[:180]
-            recent_actions.append(detail[:320])
+            result_context = meta.get("result_context") if isinstance(meta.get("result_context"), dict) else {}
+            if result_context:
+                detail += " ⇒ result " + str(result_context)[:220]
+            recent_actions.append(detail[:420])
         if recent_actions:
             context.append("Недавние действия в этом диалоге: " + " | ".join(recent_actions[-4:]))
         persona_text = self._persona_prompt()
@@ -2595,6 +2617,9 @@ class Brain:
             self.store.add_turn(session, "user", text, {})
             meta = {"skill": skill, "params": params or {}, "target": target or {}, "kind": kind, "source": source,
                     "ok": bool(result.get("ok")) if isinstance(result, dict) and result else kind not in ("error",)}
+            result_context = compact_result_context(result)
+            if result_context:
+                meta["result_context"] = result_context
             if extra and isinstance(extra.get("link"), dict):
                 meta["link"] = extra["link"]  # «ссылка ниже» должна остаться и после перезагрузки окна
             if extra and extra.get("learned_id"):
