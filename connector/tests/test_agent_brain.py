@@ -503,6 +503,22 @@ class BrainChatTests(unittest.TestCase):
         self.assertGreater(answer.get("voice_streamed_chars", 0), 0)
         self.assertEqual(["Первая фраза.", "Вторая фраза."], spoken)
 
+    def test_compact_tool_result_is_saved_for_follow_up_reasoning(self):
+        with patch.object(self.agent, "run_skill", return_value={
+            "ok": True,
+            "cpu_percent": 42,
+            "memory": {"load": 61, "used_gb": 9.8, "total_gb": 16},
+            "uptime_hours": 12.5,
+            "secret_debug_blob": "must-not-enter-conversation-context",
+        }):
+            answer = self.brain.chat("как там компьютер")
+        self.assertEqual("action", answer["kind"])
+        last = self.store.dialog("main", 2)[-1]
+        result_context = last["meta"].get("result_context") or {}
+        self.assertEqual(42, result_context.get("cpu_percent"))
+        self.assertEqual(61, result_context.get("memory", {}).get("load"))
+        self.assertNotIn("secret_debug_blob", result_context)
+
     def test_model_plan_validator_reports_missing_function_before_execution(self):
         problem = brain.model_plan_problem(
             {"skill": "imaginary.launch", "params": {}, "steps": [], "reply": "", "ask": ""},
