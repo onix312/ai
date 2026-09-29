@@ -3068,8 +3068,9 @@ class ControlCenter(QMainWindow):
         ):
             setattr(self, name, getattr(self.voice_page, name))
 
-        today = TextPage("Сегодня", "Личные дела и краткий контекст дня.")
+        today = TodayPage()
         today.refresh_requested.connect(lambda: self.refresh_page.emit("today"))
+        today.action_requested.connect(self.personal_action)
         self.pages["today"] = today
         self.stack.addWidget(today)
 
@@ -3642,6 +3643,8 @@ class ControlCenter(QMainWindow):
     def set_page_payload(self, key: str, payload: Any) -> None:
         page = self.pages.get(key)
         if isinstance(page, TextPage):
+            page.set_payload(payload)
+        elif isinstance(page, TodayPage) and isinstance(payload, dict):
             page.set_payload(payload)
         elif isinstance(page, TasksPage) and isinstance(payload, dict):
             page.set_payload(payload)
