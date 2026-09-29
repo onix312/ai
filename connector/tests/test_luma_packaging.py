@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import pathlib
+import sys
 import tempfile
+import types
 import unittest
 from unittest.mock import patch
 
@@ -33,12 +35,15 @@ class DesktopHostTests(unittest.TestCase):
                 self.assertEqual(str(piper), os.environ.get("LUMA_TTS_PIPER"))
 
     def test_desktop_host_reuses_live_backend(self):
+        fake_app = types.ModuleType("agent.native_ui.app")
+        calls = []
+        fake_app.run = lambda: calls.append("ui") or 0
         with patch.object(desktop, "_apply_packaged_defaults"), \
              patch.object(desktop, "_agent_alive", return_value=True), \
-             patch("agent.native_ui.app.run", return_value=0) as ui, \
+             patch.dict(sys.modules, {"agent.native_ui.app": fake_app}), \
              patch.object(desktop._OwnedBackend, "start") as start:
             self.assertEqual(0, desktop.main())
-        ui.assert_called_once()
+        self.assertEqual(["ui"], calls)
         start.assert_not_called()
 
 
