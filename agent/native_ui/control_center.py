@@ -116,55 +116,122 @@ class ChatPage(QWidget):
 
     def __init__(self) -> None:
         super().__init__()
+        self._turns: list[dict[str, str]] = []
+        self._has_history = False
+
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(2, 2, 2, 2)
+        layout.setSpacing(12)
+
         head = QHBoxLayout()
+        title_box = QVBoxLayout()
         title = QLabel("Разговор")
         title.setObjectName("pageTitle")
-        head.addWidget(title)
-        head.addStretch(1)
+        subtitle = QLabel("Живой диалог с Люма · текст, голос и действия в одном потоке.")
+        subtitle.setObjectName("muted")
+        title_box.addWidget(title)
+        title_box.addWidget(subtitle)
+        head.addLayout(title_box, 1)
         clear = QPushButton("Очистить диалог")
         clear.clicked.connect(self.clear_requested)
         head.addWidget(clear)
         layout.addLayout(head)
+
+        live_card = GlassCard("violet")
+        live_row = QHBoxLayout(live_card)
+        live_row.setContentsMargins(12, 9, 14, 9)
+        live_row.setSpacing(10)
+        self.live_portrait = LumaPortrait(compact=True)
+        self.live_portrait.setFixedSize(42, 50)
+        live_row.addWidget(self.live_portrait, 0, Qt.AlignVCenter)
+        live_text = QVBoxLayout()
+        live_text.setSpacing(1)
+        live_label = QLabel("LUMA // LIVE")
+        live_label.setObjectName("heroKicker")
+        live_text.addWidget(live_label)
         self.live = QLabel("Люма готова")
-        self.live.setObjectName("muted")
+        self.live.setObjectName("chatLive")
         self.live.setWordWrap(True)
-        layout.addWidget(self.live)
+        live_text.addWidget(self.live)
+        live_row.addLayout(live_text, 1)
+        self.live_orb = LumaOrbCore(compact=True)
+        self.live_orb.setFixedSize(46, 46)
+        live_row.addWidget(self.live_orb, 0, Qt.AlignVCenter)
+        layout.addWidget(live_card)
 
         self.content = QStackedWidget()
-        welcome = QWidget()
-        intro = QVBoxLayout(welcome)
-        intro.setContentsMargins(56, 20, 56, 20)
-        intro.addStretch(2)
-        greeting = QLabel("Привет, я Люма")
+
+        welcome = GlassCard()
+        intro = QHBoxLayout(welcome)
+        intro.setContentsMargins(28, 22, 28, 22)
+        intro.setSpacing(26)
+
+        portrait_column = QVBoxLayout()
+        portrait_column.addStretch(1)
+        self.welcome_portrait = LumaPortrait()
+        self.welcome_portrait.setFixedSize(170, 205)
+        portrait_column.addWidget(self.welcome_portrait, 0, Qt.AlignCenter)
+        persona = QLabel("LUMA · LOCAL PERSONA")
+        persona.setObjectName("heroKicker")
+        persona.setAlignment(Qt.AlignCenter)
+        portrait_column.addWidget(persona)
+        portrait_column.addStretch(1)
+        intro.addLayout(portrait_column, 4)
+
+        copy = QVBoxLayout()
+        copy.addStretch(1)
+        greeting = QLabel("Привет. Я Люма.")
         greeting.setObjectName("welcomeTitle")
-        intro.addWidget(greeting)
-        description = QLabel("Могу помочь с делами, ответить на вопрос и выполнить действие на компьютере.")
+        copy.addWidget(greeting)
+        description = QLabel(
+            "Можешь писать обычным языком: спросить, попросить выполнить действие "
+            "или продолжить задачу. Голос и текст используют один контекст."
+        )
         description.setObjectName("welcomeText")
         description.setWordWrap(True)
-        intro.addWidget(description)
-        intro.addSpacing(24)
-        for prompt in ("Что у меня сегодня?", "Продажи за 7 дней", "Что ты умеешь?"):
+        copy.addWidget(description)
+        copy.addSpacing(16)
+
+        suggestions = (
+            "Что у меня сегодня?",
+            "Покажи активные задачи",
+            "Открой загрузки",
+        )
+        for prompt in suggestions:
             button = QPushButton(prompt)
             button.setObjectName("suggestion")
             button.clicked.connect(lambda _=False, value=prompt: self._pick_prompt(value))
-            intro.addWidget(button)
-        intro.addStretch(3)
+            copy.addWidget(button)
+        copy.addStretch(1)
+        intro.addLayout(copy, 7)
+
         self.content.addWidget(welcome)
+
+        feed_card = GlassCard()
+        feed_layout = QVBoxLayout(feed_card)
+        feed_layout.setContentsMargins(4, 4, 4, 4)
         self.feed = QTextBrowser()
-        self.content.addWidget(self.feed)
-        self._has_history = False
+        self.feed.setObjectName("chatFeed")
+        self.feed.setOpenExternalLinks(True)
+        feed_layout.addWidget(self.feed)
+        self.content.addWidget(feed_card)
+
         layout.addWidget(self.content, 1)
-        row = QHBoxLayout()
+
+        composer = GlassCard("cyan")
+        composer_row = QHBoxLayout(composer)
+        composer_row.setContentsMargins(10, 9, 10, 9)
+        composer_row.setSpacing(8)
         self.input = QLineEdit()
+        self.input.setObjectName("chatInput")
         self.input.setPlaceholderText("Спроси Люму или скажи, что сделать…")
         self.input.returnPressed.connect(self._submit)
-        row.addWidget(self.input, 1)
+        composer_row.addWidget(self.input, 1)
         send = QPushButton("Отправить")
         send.setObjectName("primary")
         send.clicked.connect(self._submit)
-        row.addWidget(send)
-        layout.addLayout(row)
+        composer_row.addWidget(send)
+        layout.addWidget(composer)
 
     def _pick_prompt(self, text: str) -> None:
         self.input.setText(text)
@@ -176,39 +243,79 @@ class ChatPage(QWidget):
             self.input.clear()
             self.submitted.emit(text)
 
-    def set_history(self, turns: list[dict[str, Any]]) -> None:
-        chunks = []
-        for turn in turns:
-            role = str(turn.get("role") or "")
-            who = "Вы" if role == "user" else "Люма"
-            text = str(turn.get("text") or "")
-            chunks.append(f"<p><b>{who}</b><br>{html.escape(text)}</p>")
-        self.feed.setHtml("".join(chunks))
-        self._has_history = bool(chunks)
-        self.content.setCurrentIndex(1 if chunks else 0)
+    @staticmethod
+    def _bubble(role: str, text: str) -> str:
+        safe = html.escape(str(text or "")).replace("\n", "<br>")
+        if role == "user":
+            return (
+                "<table width='100%' cellspacing='0' cellpadding='0' style='margin:8px 0;'>"
+                "<tr><td width='19%'></td><td align='right'>"
+                "<div style='background:#242044;border:1px solid #5E4AA3;"
+                "border-radius:14px;padding:11px 14px;color:#F5F2FF;'>"
+                "<span style='color:#BCAEFF;font-size:11px;font-weight:700;'>ВЫ</span><br>"
+                f"{safe}</div></td></tr></table>"
+            )
+        return (
+            "<table width='100%' cellspacing='0' cellpadding='0' style='margin:8px 0;'>"
+            "<tr><td>"
+            "<div style='background:#111328;border:1px solid #30345A;"
+            "border-radius:14px;padding:11px 14px;color:#ECE9F8;'>"
+            "<span style='color:#58E6B1;font-size:11px;font-weight:700;'>LUMA</span><br>"
+            f"{safe}</div></td><td width='19%'></td></tr></table>"
+        )
+
+    def _render_turns(self) -> None:
+        html_rows = [self._bubble(row.get("role", "assistant"), row.get("text", ""))
+                     for row in self._turns]
+        self.feed.setHtml(
+            "<div style='margin:12px 16px;background:#0D0F20;'>"
+            + "".join(html_rows)
+            + "</div>"
+        )
+        self._has_history = bool(self._turns)
+        self.content.setCurrentIndex(1 if self._has_history else 0)
         bar = self.feed.verticalScrollBar()
         bar.setValue(bar.maximum())
 
+    def set_history(self, turns: list[dict[str, Any]]) -> None:
+        self._turns = []
+        for turn in turns:
+            role = "user" if str(turn.get("role") or "") == "user" else "assistant"
+            self._turns.append({"role": role, "text": str(turn.get("text") or "")})
+        self._render_turns()
+
     def append_local(self, who: str, text: str) -> None:
-        if not self._has_history:
-            self.feed.clear()
-            self._has_history = True
-            self.content.setCurrentIndex(1)
-        self.feed.append(f"<p><b>{html.escape(who)}</b><br>{html.escape(text)}</p>")
+        role = "user" if str(who or "").casefold() in {"вы", "user"} else "assistant"
+        self._turns.append({"role": role, "text": str(text or "")})
+        self._render_turns()
 
     def set_live_activity(self, phase: str = "idle", heard: str = "", reply: str = "",
                           skill: str = "", detail: str = "", task_id: int = 0) -> None:
+        clean_phase = str(phase or "idle").casefold()
+        orb_state = {
+            "executing": "working",
+            "task": "working",
+            "done": "idle",
+        }.get(clean_phase, clean_phase)
+        if orb_state not in {"idle", "listening", "thinking", "speaking", "working",
+                             "waiting", "error", "stopped"}:
+            orb_state = "idle"
+        self.live_orb.set_state(orb_state)
+        self.live_portrait.set_state(orb_state)
+        self.welcome_portrait.set_state(orb_state)
+
         labels = {
-            "thinking": "🧠 Люма думает",
-            "speaking": "🔊 Люма отвечает",
-            "executing": "⚡ Люма выполняет",
-            "task": "✓ Люма ведёт задачу",
-            "waiting": "⏳ Люма ждёт",
-            "error": "⚠ Люме нужна помощь",
-            "done": "✓ Готово",
+            "thinking": "Люма думает",
+            "speaking": "Люма отвечает",
+            "executing": "Люма выполняет",
+            "task": "Люма ведёт задачу",
+            "waiting": "Люма ждёт",
+            "error": "Люме нужна помощь",
+            "done": "Готово",
             "idle": "Люма готова",
+            "listening": "Люма слушает",
         }
-        parts = [labels.get(str(phase or "idle"), "Люма работает")]
+        parts = [labels.get(clean_phase, "Люма работает")]
         if skill:
             parts.append(str(skill))
         if task_id:
