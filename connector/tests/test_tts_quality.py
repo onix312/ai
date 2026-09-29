@@ -54,6 +54,33 @@ class SpeechQualityTests(unittest.TestCase):
         self.assertEqual("апи и APITest", text)
 
 
+class PronunciationDictionaryTests(unittest.TestCase):
+    def test_add_and_delete_custom_pronunciation(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = pathlib.Path(folder) / "pronunciations.json"
+            with patch.dict(os.environ, {"LUMA_TTS_PRONUNCIATIONS": str(path)}, clear=False):
+                saved = tts_quality.set_pronunciation("Bambu", "бэмбу")
+                self.assertTrue(saved["ok"])
+                self.assertEqual("бэмбу", saved["items"]["Bambu"])
+                self.assertTrue(path.is_file())
+
+                payload = tts_quality.pronunciation_payload()
+                self.assertEqual(1, payload["custom_terms"])
+                self.assertEqual("бэмбу", payload["items"]["Bambu"])
+
+                deleted = tts_quality.delete_pronunciation("bambu")
+                self.assertTrue(deleted["ok"])
+                self.assertEqual({}, deleted["items"])
+
+    def test_invalid_rule_is_refused_without_creating_file(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = pathlib.Path(folder) / "pronunciations.json"
+            with patch.dict(os.environ, {"LUMA_TTS_PRONUNCIATIONS": str(path)}, clear=False):
+                result = tts_quality.set_pronunciation("", "что-то")
+            self.assertFalse(result["ok"])
+            self.assertFalse(path.exists())
+
+
 class PiperQualityIntegrationTests(unittest.TestCase):
     def test_piper_receives_prepared_text(self):
         with patch.object(pc, "speech_engine", return_value="piper"), \
