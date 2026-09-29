@@ -25,7 +25,7 @@ To also place the recommended `ru_RU-irina-medium` model in the package:
 
 `powershell -ExecutionPolicy Bypass -File .\scripts\build_luma_windows.ps1 -Clean -WithVoice`
 
-The build environment is isolated in `.luma-build-venv`.
+The standalone build toolchain is pinned to Python 3.11 because the current OCR dependency has compatible Windows wheels there. The build environment is isolated in `.luma-build-venv`.
 
 ## Install
 
