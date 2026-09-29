@@ -14,7 +14,7 @@ from agent.task_engine import TaskEngine
 class _Runner:
     def __init__(self, store):
         self.store = store
-        self.caps = {}
+        self.caps = {"system": True}
 
     def learned(self):
         return {}
