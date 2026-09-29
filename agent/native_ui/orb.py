@@ -12,6 +12,8 @@ class VoiceOrb(QWidget):
         "listening": "Слушаю",
         "thinking": "Думаю",
         "speaking": "Говорю",
+        "working": "Выполняю",
+        "waiting": "Жду",
         "error": "Ошибка",
         "stopped": "STOP ALL",
     }
@@ -27,13 +29,23 @@ class VoiceOrb(QWidget):
             Qt.WindowDoesNotAcceptFocus
         )
         self.setAttribute(Qt.WA_TranslucentBackground, True)
-        self.setFixedSize(210, 76)
+        self.setFixedSize(390, 150)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 8, 16, 8)
         self.label = QLabel("Люма · Готова")
         self.label.setAlignment(Qt.AlignCenter)
         self.label.setStyleSheet("color: white; font-size: 14px; font-weight: 700;")
         layout.addWidget(self.label)
+        self.context_label = QLabel("")
+        self.context_label.setAlignment(Qt.AlignCenter)
+        self.context_label.setWordWrap(True)
+        self.context_label.setStyleSheet("color: rgba(255,255,255,210); font-size: 12px;")
+        layout.addWidget(self.context_label)
+        self.reply_label = QLabel("")
+        self.reply_label.setAlignment(Qt.AlignCenter)
+        self.reply_label.setWordWrap(True)
+        self.reply_label.setStyleSheet("color: rgba(255,255,255,170); font-size: 11px;")
+        layout.addWidget(self.reply_label)
         self._pulse_timer = QTimer(self)
         self._pulse_timer.timeout.connect(self._tick)
         self._pulse_timer.start(90)
@@ -59,8 +71,36 @@ class VoiceOrb(QWidget):
             self.label.setText(f"Люма · {self.LABELS[self._state]}")
         self.update()
 
+    def set_live(self, *, heard: str = "", reply: str = "", skill: str = "",
+                 detail: str = "", task_id: int = 0,
+                 recent: list[dict] | None = None) -> None:
+        heard = " ".join(str(heard or "").split())[:96]
+        reply = " ".join(str(reply or "").split())[:150]
+        skill = str(skill or "").strip()
+        detail = " ".join(str(detail or "").split())[:100]
+        if heard:
+            self.context_label.setText(f"Вы: {heard}")
+        elif skill:
+            suffix = f" · задача #{int(task_id)}" if task_id else ""
+            self.context_label.setText(f"⚡ {skill}{suffix}")
+        else:
+            self.context_label.setText(detail)
+        if reply:
+            self.reply_label.setText(f"Люма: {reply}")
+        elif detail and (heard or skill):
+            self.reply_label.setText(detail)
+        else:
+            rows = list(recent or [])[:2]
+            snippets = []
+            for row in rows:
+                text = " ".join(str(row.get("reply") or row.get("heard") or "").split())[:54]
+                if text:
+                    snippets.append(text)
+            self.reply_label.setText(" · ".join(snippets))
+        self.update()
+
     def _tick(self) -> None:
-        if self._state in ("listening", "thinking", "speaking"):
+        if self._state in ("listening", "thinking", "speaking", "working", "waiting"):
             self._pulse = (self._pulse + 1) % 20
             self.update()
 
@@ -68,7 +108,7 @@ class VoiceOrb(QWidget):
         screen = self.screen()
         if screen:
             geo = screen.availableGeometry()
-            self.move(geo.center().x() - self.width() // 2, geo.bottom() - self.height() - 48)
+            self.move(geo.center().x() - self.width() // 2, geo.bottom() - self.height() - 42)
         self.show()
         self.raise_()
 
@@ -80,11 +120,13 @@ class VoiceOrb(QWidget):
             "listening": QColor("#0891b2"),
             "thinking": QColor("#7c3aed"),
             "speaking": QColor("#16a34a"),
+            "working": QColor("#d97706"),
+            "waiting": QColor("#475569"),
             "error": QColor("#dc2626"),
             "stopped": QColor("#991b1b"),
         }
         c = tones[self._state]
-        if self._state in ("listening", "thinking", "speaking"):
+        if self._state in ("listening", "thinking", "speaking", "working", "waiting"):
             pulse = abs(10 - self._pulse) / 10.0
             halo = QColor(c)
             halo.setAlpha(int(28 + 42 * pulse))

@@ -1,5 +1,14 @@
 # NOZZA — handoff и roadmap после Verification Engine 1.0
 
+> **Актуализация 29.09.2026, Native UI 2.0 Phase 2:** Phase 1 уже в `main`.
+> Текущая ветка добавляет RAM-only live activity surface: услышанная фраза,
+> safe streaming preview свободного ответа, текущий skill и активный Task Engine
+> step видны в Orb и Control Center через обычный `/status`. Draft stream не
+> попадает в память/историю, а action reply по-прежнему не показывается до
+> фактического executor result. Следом: richer task timeline/activity journal,
+> Voice 3 diagnostics и optional HQ local TTS.
+
+
 > **Актуализация 29.09.2026, Native UI 2.0 Phase 1:** Voice Engine 3 Phase 6 уже в `main`.
 > Текущая ветка переводит нативный интерфейс на identity Люмы, делает Voice Orb
 > живым индикатором listening/thinking/speaking и добавляет backend-level

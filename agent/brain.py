@@ -2017,6 +2017,13 @@ class Brain:
                                skill=name, params=params, source=origin, steps=steps, started=started,
                                extra=extra, save=save)
         steps.append({"kind": "skill", "title": skill["title"], "detail": executor_describe(skill, params)})
+        try:
+            set_activity = getattr(self.agent, "set_activity", None)
+            if callable(set_activity):
+                set_activity("executing", session=session, skill=name,
+                             detail=executor_describe(skill, params), active=True)
+        except Exception:
+            pass
         result = self._run(name, params, popup=session != WINDOW_SESSION)
         if result.get("ok") and not result.get("queued"):
             try:  # привычки владельца: что и в какой час он просит (подсказки, не автозапуск)
@@ -2130,27 +2137,45 @@ class Brain:
         steps.append({"kind": "model", "title": "Думаю моделью", "detail": state.get("model") or ""})
         token = self._begin_model_turn(session)
         voice_tts = None
-        voice_stream = None
+        reply_stream = None
+        activity_sink = getattr(self.agent, "append_activity_reply", None)
+        try:
+            set_activity = getattr(self.agent, "set_activity", None)
+            if callable(set_activity):
+                set_activity("thinking", session=session, detail=f"Модель: {state.get('model') or ''}",
+                             active=True)
+        except Exception:
+            pass
         if session == "voice":
             try:
                 voice_tts = pc.SpeechQueue()
-                voice_stream = _VoiceReplyStream(voice_tts.write)
                 token.add_closer(voice_tts.stop)
             except Exception:
                 voice_tts = None
-                voice_stream = None
+        if callable(activity_sink) or voice_tts is not None:
+            def stream_sink(phrase: str) -> bool:
+                shown = False
+                if callable(activity_sink):
+                    try:
+                        shown = bool(activity_sink(phrase, session))
+                    except Exception:
+                        shown = False
+                if voice_tts is not None:
+                    return bool(voice_tts.write(phrase))
+                return shown
+            reply_stream = _VoiceReplyStream(stream_sink)
         try:
             reply = model.chat(
                 messages, system=system, fmt="json", temperature=0.1,
                 timeout=min(PLAN_TIMEOUT_SEC, config.MODEL_TIMEOUT_SEC), state=state,
                 cancel=token,
-                on_stream=voice_stream.feed if voice_stream is not None else None,
+                on_stream=reply_stream.feed if reply_stream is not None else None,
             )
         finally:
             self._end_model_turn(session, token)
             if voice_tts is not None and not token.cancelled:
                 voice_tts.close()
-        streamed_chars = int(voice_stream.count if voice_stream is not None else 0)
+        streamed_chars = int(reply_stream.count if reply_stream is not None and session == "voice" else 0)
         if reply.get("cancelled"):
             steps.append({"kind": "model", "title": "Модель", "detail": "генерация остановлена человеком"})
             return self._reply(

@@ -24,8 +24,18 @@ class NativeQtSmokeTests(unittest.TestCase):
         center = ControlCenter()
 
         orb.set_state("thinking")
+        orb.set_live(
+            heard="открой телеграм",
+            reply="Открываю.",
+            skill="app.open",
+            detail="Открыть Telegram",
+            task_id=7,
+        )
         quick.show_answer("готово")
         center.update_status(True, False, True, True)
+        center.chat.set_live_activity(
+            "executing", "открой телеграм", "", "app.open", "Открыть Telegram", 7
+        )
         center.set_providers_payload({"ok": True, "providers": [
             {"name": "browser", "title": "Браузер", "available": True, "reason": "",
              "skills": [{"name": "browser.page"}]},
@@ -122,6 +132,10 @@ class NativeQtSmokeTests(unittest.TestCase):
         })
 
         self.assertEqual(orb.label.text(), "Люма · Думаю")
+        self.assertIn("открой телеграм", orb.context_label.text())
+        self.assertIn("Открываю", orb.reply_label.text())
+        self.assertIn("app.open", center.chat.live.text())
+        self.assertIn("задача #7", center.chat.live.text())
         self.assertIn("готово", quick.answer.text())
         self.assertIn("Люма", center.footer.text())
         self.assertIn("Браузер", center.providers_view.toPlainText())
