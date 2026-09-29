@@ -11,7 +11,8 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtWidgets import QApplication, QLabel
 
 from agent.native_ui.app import NativeApp
-from agent.native_ui.control_center import ActivityPage, ChatPage, ControlCenter, HomePage, TasksPage, TextPage
+from agent.native_ui.components import LumaPortrait
+from agent.native_ui.control_center import ActivityPage, ChatPage, ControlCenter, HomePage, TasksPage, TextPage, VoicePage
 from agent.native_ui.orb import LumaOrbCore, VoiceOrb
 from agent.native_ui.quick_panel import QuickPanel
 
@@ -27,6 +28,10 @@ class NativeQtSmokeTests(unittest.TestCase):
         chat.set_history([{"role": "user", "text": "<b>привет</b>"}])
         self.assertEqual(chat.content.currentIndex(), 1)
         self.assertIn("<b>привет</b>", chat.feed.toPlainText())
+        self.assertIn("ВЫ", chat.feed.toPlainText())
+        chat.append_local("Люма", "Готово")
+        self.assertIn("LUMA", chat.feed.toPlainText())
+        self.assertIn("Готово", chat.feed.toPlainText())
         chat.set_history([])
         self.assertEqual(chat.content.currentIndex(), 0)
 
@@ -57,7 +62,9 @@ class NativeQtSmokeTests(unittest.TestCase):
     def test_home_hero_and_orb_accept_live_runtime(self):
         center = ControlCenter()
         self.assertIsInstance(center.pages["home"], HomePage)
+        self.assertIsInstance(center.pages["voice"], VoicePage)
         self.assertIsInstance(center.home.orb, LumaOrbCore)
+        self.assertIsInstance(center.home.portrait, LumaPortrait)
 
         center.set_home_runtime(
             connected=True,
@@ -88,6 +95,8 @@ class NativeQtSmokeTests(unittest.TestCase):
         self.assertIn("app.open", center.home.activity_value.text())
         self.assertIn("baya", center.home.voice_value.text().casefold())
         self.assertIn("48 kHz", center.home.voice_meta.text())
+        self.assertIn("baya", center.voice_page.voice_name.text().casefold())
+        self.assertIn("48 kHz", center.voice_page.voice_profile.text())
         center.deleteLater()
         self.app.processEvents()
 
