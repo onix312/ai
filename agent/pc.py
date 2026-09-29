@@ -1197,7 +1197,8 @@ def _piper_settings() -> tuple[str, str, str]:
 
 def _piper_available() -> bool:
     executable, model, _speaker = _piper_settings()
-    return bool(executable and pathlib.Path(model).is_file())
+    executable_ready = bool(executable and (shutil.which(executable) or pathlib.Path(executable).is_file()))
+    return bool(executable_ready and pathlib.Path(model).is_file())
 
 
 def speech_engine() -> str:
