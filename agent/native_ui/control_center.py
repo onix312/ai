@@ -2663,6 +2663,7 @@ class ControlCenter(QMainWindow):
     chat_submitted = Signal(str)
     memory_pin = Signal(int, bool)
     memory_forget = Signal(int)
+    learning_action = Signal(str, object)
     refresh_page = Signal(str)
     clear_chat = Signal()
     mic_toggle = Signal()
@@ -2807,15 +2808,16 @@ class ControlCenter(QMainWindow):
         self.pages["memory"] = memory_page
         self.stack.addWidget(memory_page)
 
-        defs = {
-            "learning": ("Обучение", "Чему Люма научилась и что пока не понимает."),
-            "journal": ("Журнал", "Фактические действия ассистента на компьютере."),
-        }
-        for key, (title, subtitle) in defs.items():
-            page = TextPage(title, subtitle)
-            page.refresh_requested.connect(lambda k=key: self.refresh_page.emit(k))
-            self.pages[key] = page
-            self.stack.addWidget(page)
+        learning_page = LearningPage()
+        learning_page.refresh_requested.connect(lambda: self.refresh_page.emit("learning"))
+        learning_page.action_requested.connect(self.learning_action)
+        self.pages["learning"] = learning_page
+        self.stack.addWidget(learning_page)
+
+        journal_page = JournalPage()
+        journal_page.refresh_requested.connect(lambda: self.refresh_page.emit("journal"))
+        self.pages["journal"] = journal_page
+        self.stack.addWidget(journal_page)
 
         skills_page = SkillsPage()
         skills_page.refresh_requested.connect(lambda: self.refresh_page.emit("skills"))
@@ -3358,6 +3360,10 @@ class ControlCenter(QMainWindow):
         elif isinstance(page, ActivityPage) and isinstance(payload, dict):
             page.set_payload(payload)
         elif isinstance(page, MemoryPage) and isinstance(payload, dict):
+            page.set_payload(payload)
+        elif isinstance(page, LearningPage) and isinstance(payload, dict):
+            page.set_payload(payload)
+        elif isinstance(page, JournalPage) and isinstance(payload, dict):
             page.set_payload(payload)
         elif isinstance(page, SkillsPage) and isinstance(payload, dict):
             page.set_payload(payload)
