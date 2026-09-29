@@ -43,6 +43,7 @@ from __future__ import annotations
 import ast
 import datetime
 import inspect
+import json
 import re
 import threading
 import time
@@ -54,6 +55,7 @@ from .personal_skills import describe_steps, is_live
 SESSION_RE = re.compile(r"[^0-9A-Za-z_.:-]+")
 MAX_TEXT = 1000
 PLAN_TIMEOUT_SEC = 45.0
+MAX_ADAPTIVE_STEPS = 4
 
 _RU_DAYS = ("понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье")
 _RU_MONTHS = ("января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа",
@@ -1048,13 +1050,15 @@ _PLANNER_RULES = (
     "Отвечай по-русски, естественно и по делу: без канцелярита, пустых приветствий и повторения вопроса. "
     "Имя используй редко. Учитывай контекст диалога и уже выполненные действия, но не выдумывай факты.\n"
     "Верни ОДИН JSON-объект: {\"skill\": \"один навык или пустая строка\", \"params\": {}, "
-    "\"steps\": [{\"skill\": \"навык\", \"params\": {}}], "
+    "\"steps\": [{\"skill\": \"навык\", \"params\": {}}], \"adaptive\": false, "
     "\"reply\": \"ответ человеку\", \"ask\": \"уточняющий вопрос или пустая строка\"}.\n"
     "Правила:\n"
     "1. Используй только навыки из списка. Если подходящий навык есть, не отвечай «я не могу» и не отправляй "
     "человека делать это вручную: выбери функцию.\n"
-    "2. Для одного действия заполни skill+params, а steps оставь пустым. Для 2–8 действий, которые человек "
-    "явно попросил выполнить одной фразой, оставь skill пустым и верни steps в нужном порядке.\n"
+    "2. Для одного действия заполни skill+params, а steps оставь пустым. Для 2–8 независимых действий, которые "
+    "можно запланировать заранее, оставь skill пустым и верни steps в нужном порядке. Если следующий шаг зависит "
+    "от ФАКТИЧЕСКОГО результата наблюдения (например «если Steam не запущен — открой»), поставь adaptive=true, "
+    "а skill и steps оставь пустыми: bounded agent loop сам будет выбирать следующий шаг после каждого результата.\n"
     "3. Параметры — только объявленные у навыка и только из слов человека, контекста или однозначного результата "
     "предыдущей реплики. Не придумывай пути, имена окон, устройства, суммы и идентификаторы.\n"
     "4. Если без критичной детали нельзя безопасно выбрать действие, задай ОДИН короткий конкретный вопрос в ask "
@@ -1125,6 +1129,10 @@ def compact_result_context(result: dict[str, Any] | None) -> dict[str, Any]:
             str(row.get("path") if isinstance(row, dict) else row)[:240]
             for row in files[:3]
         ]
+    for key in ("windows", "processes", "tabs", "matches"):
+        rows = result.get(key)
+        if isinstance(rows, list) and rows:
+            out[key] = [_compact_context_value(row, 1) for row in rows[:8]]
     return out
 
 
@@ -1142,6 +1150,11 @@ def model_plan_problem(answer: dict[str, Any], caps: dict[str, Any],
         return ""
 
     raw_steps = answer.get("steps")
+    adaptive = answer.get("adaptive", False)
+    if adaptive not in (True, False, None):
+        return "adaptive должен быть true или false"
+    if adaptive is True and (str(answer.get("skill") or "").strip() or raw_steps):
+        return "adaptive=true требует пустые skill и steps"
     if raw_steps not in (None, []) and not isinstance(raw_steps, list):
         return "steps должен быть списком"
     if isinstance(raw_steps, list) and raw_steps:
