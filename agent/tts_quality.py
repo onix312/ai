@@ -189,6 +189,64 @@ def _normalize_pause_punctuation(text: str) -> str:
     return text
 
 
+def custom_pronunciations() -> dict[str, str]:
+    path = _default_dictionary_path()
+    try:
+        stamp = path.stat().st_mtime_ns
+    except OSError:
+        return {}
+    return dict(_load_dictionary(str(path), stamp))
+
+
+def _write_custom_dictionary(values: Mapping[str, str]) -> None:
+    path = _default_dictionary_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    clean: dict[str, str] = {}
+    for key, value in values.items():
+        source = str(key or "").strip()
+        target = str(value or "").strip()
+        if source and target and len(source) <= 80 and len(target) <= 160:
+            clean[source] = target
+    temp = path.with_suffix(path.suffix + ".tmp")
+    temp.write_text(json.dumps(clean, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    os.replace(temp, path)
+    _load_dictionary.cache_clear()
+
+
+def set_pronunciation(source: str, target: str) -> dict[str, object]:
+    clean_source = str(source or "").strip()
+    clean_target = str(target or "").strip()
+    if not clean_source or not clean_target:
+        return {"ok": False, "reason": "Нужно заполнить написание и произношение"}
+    if len(clean_source) > 80 or len(clean_target) > 160:
+        return {"ok": False, "reason": "Правило произношения слишком длинное"}
+    values = custom_pronunciations()
+    values[clean_source] = clean_target
+    try:
+        _write_custom_dictionary(values)
+    except OSError as exc:
+        return {"ok": False, "reason": f"Не удалось сохранить словарь: {exc}"}
+    return {"ok": True, "reason": "", "items": custom_pronunciations(), **quality_status()}
+
+
+def delete_pronunciation(source: str) -> dict[str, object]:
+    clean_source = str(source or "").strip()
+    values = custom_pronunciations()
+    key = next((key for key in values if key.casefold() == clean_source.casefold()), "")
+    if not key:
+        return {"ok": False, "reason": "Правило не найдено", "items": values, **quality_status()}
+    values.pop(key, None)
+    try:
+        _write_custom_dictionary(values)
+    except OSError as exc:
+        return {"ok": False, "reason": f"Не удалось сохранить словарь: {exc}"}
+    return {"ok": True, "reason": "", "items": custom_pronunciations(), **quality_status()}
+
+
+def pronunciation_payload() -> dict[str, object]:
+    return {"ok": True, "items": custom_pronunciations(), **quality_status()}
+
+
 def quality_status() -> dict[str, object]:
     path = _default_dictionary_path()
     custom = {}

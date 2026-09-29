@@ -647,6 +647,8 @@ class ControlCenter(QMainWindow):
     tts_save = Signal(str, str, str)
     tts_reset = Signal()
     tts_test = Signal()
+    pronunciation_add = Signal(str, str)
+    pronunciation_delete = Signal(str)
 
     NAV = [
         ("chat", "💬  Разговор"),
@@ -788,6 +790,54 @@ class ControlCenter(QMainWindow):
         self.tts_status.setObjectName("muted")
         self.tts_status.setWordWrap(True)
         sl.addWidget(self.tts_status)
+
+        pronunciation_title = QLabel("Произношение")
+        pronunciation_title.setStyleSheet("font-size:16px; font-weight:700; margin-top:12px;")
+        sl.addWidget(pronunciation_title)
+        pronunciation_hint = QLabel(
+            "Свои правила применяются сразу к следующей фразе Piper. "
+            "Пример: Bambu → бэмбу."
+        )
+        pronunciation_hint.setObjectName("muted")
+        pronunciation_hint.setWordWrap(True)
+        sl.addWidget(pronunciation_hint)
+
+        pronunciation_row = QHBoxLayout()
+        self.pronunciation_source = QLineEdit()
+        self.pronunciation_source.setPlaceholderText("Как написано")
+        pronunciation_row.addWidget(self.pronunciation_source, 1)
+        self.pronunciation_target = QLineEdit()
+        self.pronunciation_target.setPlaceholderText("Как произносить")
+        pronunciation_row.addWidget(self.pronunciation_target, 1)
+        add_pronunciation = QPushButton("Добавить")
+        add_pronunciation.clicked.connect(
+            lambda: self.pronunciation_add.emit(
+                self.pronunciation_source.text().strip(),
+                self.pronunciation_target.text().strip(),
+            )
+        )
+        pronunciation_row.addWidget(add_pronunciation)
+        sl.addLayout(pronunciation_row)
+
+        self.pronunciation_list = QListWidget()
+        self.pronunciation_list.setMaximumHeight(150)
+        sl.addWidget(self.pronunciation_list)
+        pronunciation_buttons = QHBoxLayout()
+        delete_pronunciation = QPushButton("Удалить выбранное")
+        delete_pronunciation.clicked.connect(
+            lambda: self.pronunciation_delete.emit(
+                str((self.pronunciation_list.currentItem().data(Qt.UserRole)
+                     if self.pronunciation_list.currentItem() else "") or "")
+            )
+        )
+        pronunciation_buttons.addWidget(delete_pronunciation)
+        pronunciation_buttons.addStretch(1)
+        sl.addLayout(pronunciation_buttons)
+
+        self.pronunciation_status = QLabel("Пользовательских правил: 0")
+        self.pronunciation_status.setObjectName("muted")
+        self.pronunciation_status.setWordWrap(True)
+        sl.addWidget(self.pronunciation_status)
 
         voice_title = QLabel("Voice Diagnostics")
         voice_title.setStyleSheet("font-size:16px; font-weight:700; margin-top:12px;")
@@ -1068,6 +1118,25 @@ class ControlCenter(QMainWindow):
         key = self.nav.item(row).data(Qt.UserRole)
         if key != "chat":
             self.refresh_page.emit(str(key))
+
+    def set_pronunciation_payload(self, payload: dict[str, Any]) -> None:
+        items = payload.get("items") if isinstance(payload.get("items"), dict) else {}
+        self.pronunciation_list.clear()
+        for source, target in sorted(items.items(), key=lambda pair: str(pair[0]).casefold()):
+            item = QListWidgetItem(f"{source}  →  {target}")
+            item.setData(Qt.UserRole, str(source))
+            self.pronunciation_list.addItem(item)
+        custom = int(payload.get("custom_terms") or len(items))
+        builtin = int(payload.get("builtin_terms") or 0)
+        path = str(payload.get("dictionary_path") or "")
+        suffix = f" · встроенных {builtin}" if builtin else ""
+        if path:
+            suffix += f" · {path}"
+        self.pronunciation_status.setText(f"Пользовательских правил: {custom}{suffix}")
+
+    def clear_pronunciation_inputs(self) -> None:
+        self.pronunciation_source.clear()
+        self.pronunciation_target.clear()
 
     def set_tts_payload(self, payload: dict[str, Any]) -> None:
         engine = str(payload.get("engine") or "не найден")

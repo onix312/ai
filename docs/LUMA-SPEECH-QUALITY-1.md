@@ -84,3 +84,11 @@ The quality layer is pure text processing. It does not:
 - change interruption behavior
 
 If the quality layer produces an empty string for any reason, `pc.speak()` falls back to the original sentence.
+
+
+## Control Center editor
+
+Control Center → Settings → **Произношение** provides a small live editor for the
+personal dictionary. Add a pair such as `Bambu → бэмбу`, or select a custom
+rule and delete it. The next Piper sentence uses the updated dictionary; no
+restart or rebuild is required.
