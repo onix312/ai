@@ -111,6 +111,294 @@ class TextPage(QWidget):
                 "</td></tr></table>")
 
 
+class TodayPage(QWidget):
+    """Personal daily dashboard backed by Personal.overview()."""
+
+    refresh_requested = Signal()
+    action_requested = Signal(str, dict)
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._payload: dict[str, Any] = {}
+        root = QVBoxLayout(self)
+        root.setContentsMargins(2, 2, 2, 2)
+        root.setSpacing(12)
+
+        head = QHBoxLayout()
+        copy = QVBoxLayout()
+        title = QLabel("Сегодня")
+        title.setObjectName("pageTitle")
+        copy.addWidget(title)
+        subtitle = QLabel("Напоминания, привычки, цели, списки и личный контекст на одном экране.")
+        subtitle.setObjectName("muted")
+        subtitle.setWordWrap(True)
+        copy.addWidget(subtitle)
+        head.addLayout(copy, 1)
+        refresh = QPushButton("Обновить")
+        refresh.clicked.connect(self.refresh_requested)
+        head.addWidget(refresh)
+        root.addLayout(head)
+
+        metrics = QHBoxLayout()
+        metrics.setSpacing(10)
+        self.reminder_metric = QLabel("0")
+        self.reminder_metric.setObjectName("opsMetric")
+        self.habit_metric = QLabel("0/0")
+        self.habit_metric.setObjectName("opsMetricReady")
+        self.goal_metric = QLabel("0")
+        self.goal_metric.setObjectName("opsMetric")
+        self.mood_metric = QLabel("—")
+        self.mood_metric.setObjectName("opsMetric")
+        for caption, value, accent in (
+            ("НАПОМИНАНИЯ", self.reminder_metric, "violet"),
+            ("ПРИВЫЧКИ", self.habit_metric, "cyan"),
+            ("ЦЕЛИ В РИСКЕ", self.goal_metric, "amber"),
+            ("НАСТРОЕНИЕ 7Д", self.mood_metric, ""),
+        ):
+            card = GlassCard(accent)
+            box = QVBoxLayout(card)
+            box.setContentsMargins(13, 10, 13, 10)
+            label = QLabel(caption)
+            label.setObjectName("metricLabel")
+            box.addWidget(label)
+            box.addWidget(value)
+            metrics.addWidget(card, 1)
+        root.addLayout(metrics)
+
+        self.finance_card = GlassCard()
+        finance = QHBoxLayout(self.finance_card)
+        finance.setContentsMargins(14, 10, 14, 10)
+        label = QLabel("РАСХОДЫ")
+        label.setObjectName("heroKicker")
+        finance.addWidget(label)
+        self.expense_month = QLabel("месяц · 0 ₽")
+        self.expense_month.setObjectName("metricValueSmall")
+        finance.addWidget(self.expense_month)
+        finance.addStretch(1)
+        self.expense_today = QLabel("сегодня · 0 ₽")
+        self.expense_today.setObjectName("muted")
+        finance.addWidget(self.expense_today)
+        root.addWidget(self.finance_card)
+
+        self.scroll = QScrollArea()
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setFrameShape(QFrame.NoFrame)
+        self.host_widget = QWidget()
+        self.host = QVBoxLayout(self.host_widget)
+        self.host.setAlignment(Qt.AlignTop)
+        self.host.setSpacing(9)
+        self.scroll.setWidget(self.host_widget)
+        root.addWidget(self.scroll, 1)
+
+    def _clear(self) -> None:
+        while self.host.count():
+            item = self.host.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+
+    def _section(self, title: str, caption: str = "") -> None:
+        row = QFrame()
+        row.setObjectName("taskSection")
+        box = QVBoxLayout(row)
+        box.setContentsMargins(2, 10, 2, 2)
+        box.setSpacing(1)
+        heading = QLabel(title)
+        heading.setObjectName("sectionTitle")
+        box.addWidget(heading)
+        if caption:
+            hint = QLabel(caption.upper())
+            hint.setObjectName("heroKicker")
+            box.addWidget(hint)
+        self.host.addWidget(row)
+
+    def set_payload(self, payload: dict[str, Any]) -> None:
+        self._payload = dict(payload or {})
+        reminders = [row for row in list(self._payload.get("reminders") or []) if isinstance(row, dict)]
+        fired = [row for row in list(self._payload.get("fired") or []) if isinstance(row, dict)]
+        habits = [row for row in list(self._payload.get("habits") or []) if isinstance(row, dict)]
+        goals = [row for row in list(self._payload.get("goals") or []) if isinstance(row, dict)]
+        expenses = self._payload.get("expenses") if isinstance(self._payload.get("expenses"), dict) else {}
+
+        due_today = sum(1 for row in reminders if row.get("today"))
+        self.reminder_metric.setText(str(due_today + len(fired)))
+        done_habits = sum(1 for row in habits if row.get("done_today"))
+        self.habit_metric.setText(f"{done_habits}/{len(habits)}")
+        self.goal_metric.setText(str(sum(1 for row in goals if row.get("behind"))))
+        mood = self._payload.get("mood")
+        self.mood_metric.setText(f"{float(mood):.1f}/10" if isinstance(mood, (int, float)) else "—")
+        self.expense_month.setText(f"месяц · {str(expenses.get('month_text') or '0 ₽')}")
+        today_value = expenses.get("today")
+        if isinstance(today_value, (int, float)):
+            today_text = f"{today_value:,.0f}".replace(",", " ") + " ₽"
+        else:
+            today_text = "0 ₽"
+        self.expense_today.setText(f"сегодня · {today_text}")
+        self._render()
+
+    def _action_button(self, text: str, op: str, item_id: int, **payload: Any) -> QPushButton:
+        button = QPushButton(text)
+        button.clicked.connect(
+            lambda _=False, operation=op, i=int(item_id), body=dict(payload):
+            self.action_requested.emit(operation, {"id": i, **body})
+        )
+        return button
+
+    def _render(self) -> None:
+        self._clear()
+        reminders = [row for row in list(self._payload.get("reminders") or []) if isinstance(row, dict)]
+        fired = [row for row in list(self._payload.get("fired") or []) if isinstance(row, dict)]
+        habits = [row for row in list(self._payload.get("habits") or []) if isinstance(row, dict)]
+        goals = [row for row in list(self._payload.get("goals") or []) if isinstance(row, dict)]
+        lists = [row for row in list(self._payload.get("lists") or []) if isinstance(row, dict)]
+        expenses = self._payload.get("expenses") if isinstance(self._payload.get("expenses"), dict) else {}
+
+        important = fired + [row for row in reminders if row.get("today")]
+        if important:
+            self._section("На сегодня", "REMINDERS")
+            for row in important[:20]:
+                is_fired = row in fired
+                card = GlassCard("amber" if is_fired else "violet")
+                box = QVBoxLayout(card)
+                box.setContentsMargins(14, 11, 14, 11)
+                top = QHBoxLayout()
+                label = QLabel("СРАБОТАЛО" if is_fired else str(row.get("label") or "Сегодня").upper())
+                label.setObjectName("heroKicker")
+                top.addWidget(label)
+                top.addStretch(1)
+                if row.get("repeat"):
+                    repeat = QLabel(str(row.get("repeat")))
+                    repeat.setObjectName("muted")
+                    top.addWidget(repeat)
+                box.addLayout(top)
+                text = QLabel(str(row.get("text") or "Напоминание"))
+                text.setObjectName("memoryText")
+                text.setWordWrap(True)
+                box.addWidget(text)
+                actions = QHBoxLayout()
+                actions.addStretch(1)
+                reminder_id = int(row.get("id") or 0)
+                actions.addWidget(self._action_button("Отложить 10 мин", "reminder_snooze", reminder_id, minutes=10))
+                done = self._action_button("Готово", "reminder_done", reminder_id)
+                done.setObjectName("primary")
+                actions.addWidget(done)
+                box.addLayout(actions)
+                self.host.addWidget(card)
+
+        if habits:
+            self._section("Привычки", "HABITS")
+            for row in habits:
+                card = GlassCard("cyan" if row.get("done_today") else "")
+                box = QHBoxLayout(card)
+                box.setContentsMargins(14, 11, 14, 11)
+                copy = QVBoxLayout()
+                title = QLabel(str(row.get("title") or "Привычка"))
+                title.setObjectName("memoryText")
+                copy.addWidget(title)
+                meta = QLabel(
+                    f"серия {int(row.get('streak') or 0)} дн. · за 7 дней {int(row.get('week') or 0)}/7"
+                    + (f" · {str(row.get('remind_at'))}" if row.get("remind_at") else "")
+                )
+                meta.setObjectName("muted")
+                copy.addWidget(meta)
+                box.addLayout(copy, 1)
+                habit_id = int(row.get("id") or 0)
+                if row.get("done_today"):
+                    action = self._action_button("Отменить отметку", "habit_uncheck", habit_id)
+                else:
+                    action = self._action_button("Отметить", "habit_check", habit_id)
+                    action.setObjectName("primary")
+                box.addWidget(action)
+                self.host.addWidget(card)
+
+        if goals:
+            self._section("Цели", "GOALS")
+            for row in goals:
+                card = GlassCard("amber" if row.get("behind") else "cyan")
+                box = QVBoxLayout(card)
+                box.setContentsMargins(14, 11, 14, 11)
+                top = QHBoxLayout()
+                title = QLabel(str(row.get("title") or "Цель"))
+                title.setObjectName("memoryText")
+                top.addWidget(title, 1)
+                percent = int(row.get("percent") or 0)
+                pct = QLabel(f"{percent}%")
+                pct.setObjectName("memoryConfidence")
+                top.addWidget(pct)
+                box.addLayout(top)
+                progress = QProgressBar()
+                progress.setObjectName("taskProgress")
+                progress.setTextVisible(False)
+                progress.setRange(0, 100)
+                progress.setValue(max(0, min(100, percent)))
+                box.addWidget(progress)
+                pace = QLabel(str(row.get("pace") or row.get("text") or ""))
+                pace.setObjectName("taskError" if row.get("behind") else "muted")
+                pace.setWordWrap(True)
+                box.addWidget(pace)
+                actions = QHBoxLayout()
+                actions.addStretch(1)
+                goal_id = int(row.get("id") or 0)
+                plus = self._action_button("+1 к прогрессу", "goal_progress", goal_id, amount=1)
+                plus.setObjectName("primary")
+                actions.addWidget(plus)
+                box.addLayout(actions)
+                self.host.addWidget(card)
+
+        if lists:
+            self._section("Списки", "LISTS")
+            for row in lists:
+                card = GlassCard()
+                box = QVBoxLayout(card)
+                box.setContentsMargins(14, 11, 14, 11)
+                title = QLabel(f"{str(row.get('name') or 'Список').capitalize()} · {int(row.get('count') or 0)}")
+                title.setObjectName("metricValueSmall")
+                box.addWidget(title)
+                for item in list(row.get("items") or [])[:30]:
+                    if not isinstance(item, dict):
+                        continue
+                    line = QHBoxLayout()
+                    text = QLabel(str(item.get("item") or ""))
+                    text.setObjectName("todayListItem")
+                    text.setWordWrap(True)
+                    line.addWidget(text, 1)
+                    item_id = int(item.get("id") or 0)
+                    line.addWidget(self._action_button("Вычеркнуть", "list_remove", item_id))
+                    box.addLayout(line)
+                self.host.addWidget(card)
+
+        top = list(expenses.get("top") or [])
+        if top:
+            self._section("Расходы", "MONTH")
+            card = GlassCard()
+            box = QVBoxLayout(card)
+            box.setContentsMargins(14, 11, 14, 11)
+            for pair in top[:4]:
+                if not isinstance(pair, (list, tuple)) or len(pair) < 2:
+                    continue
+                row = QHBoxLayout()
+                name = QLabel(str(pair[0]).capitalize())
+                name.setObjectName("todayListItem")
+                row.addWidget(name, 1)
+                amount = QLabel(str(pair[1]))
+                amount.setObjectName("metricValueSmall")
+                row.addWidget(amount)
+                box.addLayout(row)
+            self.host.addWidget(card)
+
+        if not any((important, habits, goals, lists, top)):
+            empty = GlassCard()
+            box = QVBoxLayout(empty)
+            title = QLabel("На сегодня всё спокойно")
+            title.setObjectName("metricValueSmall")
+            box.addWidget(title)
+            hint = QLabel("Напоминания, привычки, цели и списки появятся здесь автоматически.")
+            hint.setObjectName("muted")
+            hint.setWordWrap(True)
+            box.addWidget(hint)
+            self.host.addWidget(empty)
+
+
 class LearningPage(QWidget):
     """Workspace for explicit lessons, unknown phrases, aliases and habit insights."""
 
