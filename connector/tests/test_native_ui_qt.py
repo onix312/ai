@@ -79,6 +79,7 @@ class NativeQtSmokeTests(unittest.TestCase):
         self.assertIsInstance(center.home.orb, LumaOrbCore)
         self.assertIsInstance(center.home.portrait, LumaPortrait)
         self.assertFalse(center.home.portrait._portrait.isNull())
+        self.assertFalse(center.ambient._background.isNull())
 
         center.set_home_runtime(
             connected=True,

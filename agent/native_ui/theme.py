@@ -22,14 +22,21 @@ COLORS = {
 
 def stylesheet() -> str:
     return """
-    QMainWindow, QWidget {
+    QMainWindow {
         background: #070816;
+    }
+
+    QWidget {
         color: #F4F2FF;
         font-size: 14px;
     }
 
     QWidget#shellRoot {
         background: transparent;
+    }
+
+    QWidget#settingsSurface {
+        background: rgba(8, 11, 29, 178);
     }
 
     QWidget#sidebar {
@@ -481,7 +488,7 @@ def stylesheet() -> str:
     }
 
     QFrame#glassCard {
-        background: qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #151B3B,stop:0.55 #10162F,stop:1 #0B1025);
+        background: qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 rgba(21,27,59,232),stop:0.55 rgba(16,22,47,225),stop:1 rgba(11,16,37,232));
         border: 1px solid #4B4380;
         border-radius: 16px;
     }

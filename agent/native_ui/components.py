@@ -15,6 +15,7 @@ class AmbientCanvas(QWidget):
         super().__init__(parent)
         self.setObjectName("ambientCanvas")
         self._glow = 0.58
+        self._background = QPixmap(str(Path(__file__).resolve().parent / "assets" / "luma-night-bg.png"))
         self._animation = QPropertyAnimation(self, b"glow", self)
         self._animation.setDuration(5200)
         self._animation.setStartValue(0.48)
@@ -44,6 +45,12 @@ class AmbientCanvas(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing, True)
         painter.fillRect(self.rect(), QColor("#070816"))
+
+        if not self._background.isNull():
+            painter.setOpacity(0.40)
+            painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
+            painter.drawPixmap(self.rect(), self._background)
+            painter.setOpacity(1.0)
 
         w, h = max(1, self.width()), max(1, self.height())
         violet = QRadialGradient(w * 0.74, h * 0.28, max(w, h) * 0.58)

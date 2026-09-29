@@ -1760,7 +1760,7 @@ class HomePage(QWidget):
 
         self.persona_badge = QLabel("●  PERSONA ONLINE")
         self.persona_badge.setObjectName("localPill")
-        self.persona_badge.setMaximumWidth(150)
+        self.persona_badge.setMaximumWidth(190)
         persona.addSpacing(8)
         persona.addWidget(self.persona_badge, 0, Qt.AlignLeft)
 
@@ -3162,6 +3162,7 @@ class ControlCenter(QMainWindow):
         self.stack.addWidget(skills_page)
 
         settings = QWidget()
+        settings.setObjectName("settingsSurface")
         sl = QVBoxLayout(settings)
         sl.setSpacing(12)
         title = QLabel("Настройки")
@@ -3402,6 +3403,8 @@ class ControlCenter(QMainWindow):
         self.nav.currentRowChanged.connect(self._change)
         self.nav.setCurrentRow(0)
         self.setStyleSheet(theme.stylesheet())
+        for scroll in self.findChildren(QScrollArea):
+            scroll.viewport().setStyleSheet("background: transparent;")
         self.motion_toggle.setChecked(QSettings("Luma", "Luma").value("reduced_motion", False, type=bool))
         self._set_reduced_motion(self.motion_toggle.isChecked())
 
