@@ -9,7 +9,7 @@ def main() -> int:
         from .app import run
     except ImportError as exc:
         if exc.name == "PySide6" or str(exc).startswith("No module named 'PySide6"):
-            print("Нативный интерфейс NOZZA требует PySide6.")
+            print("Нативный интерфейс Люмы требует PySide6.")
             print("Установите зависимости агента: pip install -r agent/requirements.txt")
             return 2
         raise
