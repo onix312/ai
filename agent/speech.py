@@ -241,6 +241,7 @@ class Recognizer:
         with self._lock:
             if self._model is not None:
                 return True
+            vosk_without_model = False
             try:
                 from vosk import Model, SetLogLevel  # type: ignore
 
@@ -252,6 +253,7 @@ class Recognizer:
                     self._engine = "vosk"
                     self.reason = ""
                     return True
+                vosk_without_model = True
             except ImportError:
                 pass
             except OSError as exc:
@@ -266,8 +268,11 @@ class Recognizer:
                 self.reason = ""
                 return True
             except ImportError:
-                self.reason = ("Нет vosk и нет faster-whisper: установите зависимости "
-                               "агента (agent/README.md)")
+                self.reason = (
+                    "Vosk установлен, но модель речи не найдена. Укажите LUMA_SPEECH_MODEL_PATH."
+                    if vosk_without_model else
+                    "Нет vosk и нет faster-whisper: установите зависимости агента (agent/README.md)"
+                )
                 return False
             except OSError as exc:
                 self.reason = f"Модель речи не загрузилась: {exc}"

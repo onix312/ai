@@ -14,6 +14,7 @@ class UiState:
     model_ok: bool = False
     panel_ok: bool = False
     last_error: str = ""
+    voice_error: str = ""
     voice_partial: str = ""
     audio_level: int = 0
     streaming_asr: bool = False
@@ -87,11 +88,11 @@ class UiState:
         self.activity_recent = list(activity.get("recent") or [])[:4]
         voice_state = str(voice.get("state") or payload.get("voice_state") or "idle")
         if voice_state in ("idle", "listening", "thinking", "speaking", "error"):
-            self.assistant_state = voice_state
+            self.assistant_state = "idle" if voice_state == "error" and not self.voice_enabled else voice_state
         self.pending = list(payload.get("pending") or [])
-        voice_error = str(voice.get("last_error") or "")
-        if voice_state == "error" and voice_error:
-            self.last_error = voice_error
+        self.voice_error = str(voice.get("last_error") or "")
+        if voice_state == "error" and self.voice_enabled and self.voice_error:
+            self.last_error = self.voice_error
         elif self.last_error and self.connected:
             self.last_error = ""
 

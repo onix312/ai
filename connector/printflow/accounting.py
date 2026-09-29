@@ -2244,6 +2244,10 @@ class Accounting:
     def period_bounds(self, period: str = "month", offset: int = 0) -> tuple[str, str, str]:
         """Границы отчётного периода: (начало, конец, подпись)."""
         today = date.today()
+        if period == "last7":
+            end = today + timedelta(days=1)
+            start = today - timedelta(days=6)
+            return start.isoformat(), end.isoformat(), "последние 7 дней"
         if period == "year":
             year = today.year - offset
             return f"{year}-01-01", f"{year + 1}-01-01", str(year)

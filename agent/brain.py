@@ -1273,6 +1273,10 @@ class Brain:
         last = history[-1] if history and history[-1].get("role") == "assistant" else {}
         workshop = any(word in f"{clean.casefold()} " for word in _PANEL_WORDS)
         panel_context = (last.get("meta") or {}).get("source") == "panel"
+        if re.search(r"\bпродаж\w*\s+за\s+(?:последние\s+)?7\s+дн", clean.casefold()):
+            report = self._sales_last7(session, clean, steps, started)
+            if report:
+                return report
         if workshop or panel_context:
             answer = self._ask_panel(session, clean, steps, started)
             if answer:
@@ -1353,6 +1357,34 @@ class Brain:
                            started=started, suggestions=chips)
 
     # --- панель цеха ----------------------------------------------------------
+    def _sales_last7(self, session: str, text: str, steps: list[dict[str, Any]],
+                     started: float) -> dict[str, Any] | None:
+        client = getattr(self.runner, "panel", None)
+        if not callable(getattr(client, "sales_last7", None)):
+            return None
+        data = client.sales_last7()
+        if not data.get("ok"):
+            reply = f"Не могу проверить продажи за 7 дней: {data.get('reason') or 'панель недоступна'}."
+            source = "rules"
+        else:
+            count = int(data.get("count") or 0)
+            amount = float(data.get("total_amount") or 0)
+            qty = float(data.get("total_qty") or 0)
+            profit = float(data.get("total_profit") or 0)
+            money = lambda value: f"{value:,.0f}".replace(",", " ")
+            reply = (f"За последние 7 дней: {count} позиций, {qty:g} шт., "
+                     f"выручка {money(amount)} ₽, прибыль {money(profit)} ₽.")
+            top = list(data.get("products") or [])[:3]
+            if top:
+                reply += " Больше всего выручки: " + "; ".join(
+                    f"{item.get('name') or 'Товар'} — {money(float(item.get('amount') or 0))} ₽"
+                    for item in top
+                ) + "."
+            source = "panel"
+        steps.append({"kind": "panel", "title": "Продажи за 7 дней", "detail": source})
+        return self._reply(session, text, reply, kind="answer",
+                           source=source, steps=steps, started=started)
+
     def _ask_panel(self, session: str, text: str, steps: list[dict[str, Any]],
                    started: float) -> dict[str, Any] | None:
         """Спросить мозг панели. None — панель молчит или сама не поняла (тогда решает агент).

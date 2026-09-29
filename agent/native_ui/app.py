@@ -6,6 +6,7 @@ import sys
 from typing import Any, Callable
 
 from PySide6.QtCore import QThreadPool, QTimer
+from PySide6.QtGui import QFont, QFontDatabase
 from PySide6.QtWidgets import QApplication, QSystemTrayIcon
 
 from .backend import BackendClient
@@ -24,6 +25,9 @@ class NativeApp:
     def __init__(self, qt: QApplication | None = None,
                  backend: BackendClient | None = None) -> None:
         self.qt = qt or QApplication.instance() or QApplication(sys.argv)
+        font_path = os.path.join(os.environ.get("WINDIR", r"C:\Windows"), "Fonts", "segoeui.ttf")
+        if os.path.isfile(font_path) and QFontDatabase.addApplicationFont(font_path) >= 0:
+            self.qt.setFont(QFont("Segoe UI", 10))
         self.qt.setApplicationName("Люма")
         self.qt.setOrganizationName("NOZZA")  # legacy QSettings namespace: preserves existing UI preferences
         self.qt.setQuitOnLastWindowClosed(False)
@@ -198,6 +202,8 @@ class NativeApp:
             asr_engine=self.state.asr_engine,
             vocabulary_count=self.state.vocabulary_count,
         )
+        if self.state.voice_error:
+            self.center.set_voice_diagnostics_message(self.state.voice_error)
         self.center.chat.set_live_activity(
             self.state.activity_phase,
             self.state.activity_heard,

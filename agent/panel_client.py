@@ -23,6 +23,7 @@ import json
 import mimetypes
 import pathlib
 import socket
+from datetime import date, timedelta
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -213,6 +214,44 @@ class Client:
         if not ok or not isinstance(payload, dict):
             return {"ok": False, "reason": reason or "панель не ответила"}
         return payload
+
+    def sales_last7(self) -> dict[str, Any]:
+        """Read the panel's sales ledger for the last seven calendar days."""
+        start = (date.today() - timedelta(days=6)).isoformat()
+        end = (date.today() + timedelta(days=1)).isoformat()
+        ok, payload, reason = _request(
+            f"{self.url}/api/report/sales?period=last7&limit=1",
+            timeout=self.timeout,
+        )
+        if not ok or not isinstance(payload, dict):
+            return {"ok": False, "reason": reason or "отчёт продаж недоступен"}
+        if payload.get("start") == start and payload.get("end") == end:
+            return {**payload, "ok": True}
+
+        # Older running panels treat unknown periods as a month. Derive the
+        # seven-day result from their existing ledger until they restart.
+        rows: list[dict[str, Any]] = []
+        for offset in (0, 1):
+            ok, month, reason = _request(
+                f"{self.url}/api/report/sales?period=month&offset={offset}&limit=10000",
+                timeout=self.timeout,
+            )
+            if not ok or not isinstance(month, dict):
+                return {"ok": False, "reason": reason or "отчёт продаж недоступен"}
+            rows.extend(row for row in month.get("rows", [])
+                        if isinstance(row, dict) and start <= str(row.get("at") or "")[:10] < end)
+            if (date.today() - timedelta(days=6)).month == date.today().month:
+                break
+        products: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            name = str(row.get("name") or "Товар")
+            item = products.setdefault(name, {"name": name, "amount": 0.0})
+            item["amount"] += float(row.get("amount") or 0)
+        return {"ok": True, "count": len(rows),
+                "total_qty": sum(float(row.get("qty") or 0) for row in rows),
+                "total_amount": sum(float(row.get("amount") or 0) for row in rows),
+                "total_profit": sum(float(row.get("profit") or 0) for row in rows),
+                "products": sorted(products.values(), key=lambda item: -item["amount"])}
 
     def chat(self, text: str, session: str = "voice", source: str = "agent") -> dict[str, Any]:
         """Разговор с мозгом панели (18.21): вопрос цеха отвечает панель, не агент."""
