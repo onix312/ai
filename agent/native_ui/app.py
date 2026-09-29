@@ -268,6 +268,7 @@ class NativeApp:
         self.quick.set_busy(True)
         self.quick.show_answer("Думаю…")
         self.orb.set_state("thinking")
+        self.center.chat.clear_action_trace()
         self.center.chat.append_local("Вы", clean)
 
         def done(payload: dict[str, Any]) -> None:
@@ -276,6 +277,9 @@ class NativeApp:
             self.quick.set_busy(False)
             self.quick.show_answer(reply)
             self.center.chat.append_local("Люма", reply)
+            self.center.chat.show_action_trace(
+                list(payload.get("steps") or []) if isinstance(payload.get("steps"), list) else []
+            )
             image = payload.get("image") if isinstance(payload.get("image"), dict) else {}
             image_url = str(image.get("url") or "")
             if image_url:
@@ -314,6 +318,7 @@ class NativeApp:
     def clear_chat(self) -> None:
         def done(_payload: dict[str, Any]) -> None:
             self.center.chat.set_history([])
+            self.center.chat.clear_action_trace()
             self.quick.show_answer("Диалог очищен.")
 
         self.run_async(
