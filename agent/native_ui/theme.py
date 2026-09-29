@@ -273,6 +273,13 @@ def stylesheet() -> str:
         font-weight: 650;
     }
 
+    QLabel#todayListItem {
+        background: transparent;
+        color: #D8D4E8;
+        font-size: 12px;
+        padding: 3px 0;
+    }
+
     QPushButton#memoryPin {
         background: #151C31;
         color: #9DE9D0;
