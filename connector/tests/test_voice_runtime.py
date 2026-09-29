@@ -444,6 +444,21 @@ class LocalHqTtsTests(unittest.TestCase):
             }, clear=False), patch.object(pc, "_system_speech_engine", return_value="sapi"):
                 self.assertEqual("sapi", pc.speech_engine())
 
+    def test_runtime_tts_config_validates_paths_and_speaker(self):
+        with tempfile.TemporaryDirectory() as folder:
+            executable = os.path.join(folder, "piper.exe")
+            model = os.path.join(folder, "luma.onnx")
+            open(executable, "wb").close()
+            open(model, "wb").close()
+            result = pc.configure_tts(piper=executable, model=model, speaker="3")
+            self.assertTrue(result["ok"])
+            self.assertEqual("piper", result["engine"])
+            self.assertEqual(model, result["model_path"])
+            self.assertEqual("3", result["speaker"])
+            bad = pc.configure_tts(piper=executable, model=model, speaker="female")
+            self.assertFalse(bad["ok"])
+        pc.reset_tts_config()
+
     def test_piper_failure_falls_back_to_system_tts(self):
         process = _FakeProcess()
         with patch.object(pc, "speech_engine", return_value="piper"), \

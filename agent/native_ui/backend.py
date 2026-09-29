@@ -186,6 +186,17 @@ class BackendClient:
     def reset_voice_diagnostics(self) -> dict[str, Any]:
         return self.speech_post("/voice/diagnostics/reset", {})
 
+    def tts_settings(self) -> dict[str, Any]:
+        return self.speech_get("/voice/tts")
+
+    def tts_update(self, piper: str, model: str, speaker: str) -> dict[str, Any]:
+        return self.speech_post("/voice/tts", {
+            "op": "update", "piper": piper, "model": model, "speaker": speaker,
+        })
+
+    def tts_reset(self) -> dict[str, Any]:
+        return self.speech_post("/voice/tts", {"op": "reset"})
+
     def safety_stop(self) -> dict[str, Any]:
         return self.post("/safety/stop", {})
 

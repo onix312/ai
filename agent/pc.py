@@ -1169,30 +1169,64 @@ def _system_speech_engine() -> str:
 
 
 def _piper_settings() -> tuple[str, str, str]:
-    """Return Piper executable, model and optional speaker id.
-
-    The model is intentionally external to git: voice checkpoints are large and
-    machine-specific. LUMA_* is canonical; NOZZA_* remains a compatibility alias.
-    """
+    """Return effective Piper executable, model and optional speaker id."""
+    with _TTS_LOCK:
+        overrides = dict(_TTS_OVERRIDES)
     executable = (
-        os.environ.get("LUMA_TTS_PIPER")
+        overrides.get("piper")
+        or os.environ.get("LUMA_TTS_PIPER")
         or os.environ.get("NOZZA_TTS_PIPER")
         or shutil.which("piper")
         or ""
     )
     configured_model = (
-        os.environ.get("LUMA_TTS_MODEL_PATH")
+        overrides.get("model")
+        or os.environ.get("LUMA_TTS_MODEL_PATH")
         or os.environ.get("NOZZA_TTS_MODEL_PATH")
         or ""
     ).strip()
     default_model = pathlib.Path(__file__).resolve().parents[1] / "models" / "tts" / "luma.onnx"
     model = pathlib.Path(configured_model).expanduser() if configured_model else default_model
     speaker = (
-        os.environ.get("LUMA_TTS_SPEAKER")
+        overrides.get("speaker")
+        or os.environ.get("LUMA_TTS_SPEAKER")
         or os.environ.get("NOZZA_TTS_SPEAKER")
         or ""
     ).strip()
     return str(executable), str(model), speaker
+
+
+def configure_tts(*, piper: str = "", model: str = "", speaker: str = "") -> dict[str, Any]:
+    """Apply runtime TTS settings after validation.
+
+    Empty piper/model values mean "use normal discovery/default", not disable TTS.
+    """
+    clean_piper = str(piper or "").strip()
+    clean_model = str(model or "").strip()
+    clean_speaker = str(speaker or "").strip()
+    if clean_piper:
+        resolved = shutil.which(clean_piper)
+        if not resolved and not pathlib.Path(clean_piper).expanduser().is_file():
+            return {"ok": False, "reason": "Piper executable не найден"}
+    if clean_model and not pathlib.Path(clean_model).expanduser().is_file():
+        return {"ok": False, "reason": "Файл модели TTS не найден"}
+    if clean_speaker and not re.fullmatch(r"\d+", clean_speaker):
+        return {"ok": False, "reason": "Speaker id должен быть целым числом"}
+    stop_speaking()
+    with _TTS_LOCK:
+        _TTS_OVERRIDES.update({
+            "piper": clean_piper,
+            "model": clean_model,
+            "speaker": clean_speaker,
+        })
+    return {"ok": True, "reason": "", **tts_status()}
+
+
+def reset_tts_config() -> dict[str, Any]:
+    stop_speaking()
+    with _TTS_LOCK:
+        _TTS_OVERRIDES.update({"piper": "", "model": "", "speaker": ""})
+    return {"ok": True, "reason": "", **tts_status()}
 
 
 def _piper_available() -> bool:
@@ -1216,9 +1250,12 @@ def tts_status() -> dict[str, Any]:
         "engine": engine,
         "hq_local": engine == "piper",
         "model": pathlib.Path(model).name if engine == "piper" else "",
+        "model_path": model,
+        "piper_path": executable,
         "speaker": speaker if engine == "piper" else "",
         "piper": bool(executable),
         "model_ready": pathlib.Path(model).is_file(),
+        "recommended_voice": "ru_RU-irina-medium",
     }
 
 
@@ -1234,6 +1271,7 @@ _SAPI_SCRIPT = (
 _TTS_LOCK = threading.RLock()
 _TTS_PROCESS: subprocess.Popen | None = None
 _TTS_TEMP_FILE = ""
+_TTS_OVERRIDES: dict[str, str] = {"piper": "", "model": "", "speaker": ""}
 _LAST_TTS_TEXT = ""
 _LAST_TTS_AT = 0.0
 

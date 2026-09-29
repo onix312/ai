@@ -68,6 +68,9 @@ class BackendClientTests(unittest.TestCase):
             client.stop_voice()
             client.tune_voice(420, 1.8, 220, 0.3)
             client.reset_voice_diagnostics()
+            client.tts_settings()
+            client.tts_update("piper.exe", "C:/voices/luma.onnx", "1")
+            client.tts_reset()
             client.disable_voice()
         self.assertEqual([
             ("GET", "http://127.0.0.1:8791/voice/status"),
@@ -75,6 +78,9 @@ class BackendClientTests(unittest.TestCase):
             ("POST", "http://127.0.0.1:8791/voice/stop"),
             ("POST", "http://127.0.0.1:8791/voice/tune"),
             ("POST", "http://127.0.0.1:8791/voice/diagnostics/reset"),
+            ("GET", "http://127.0.0.1:8791/voice/tts"),
+            ("POST", "http://127.0.0.1:8791/voice/tts"),
+            ("POST", "http://127.0.0.1:8791/voice/tts"),
             ("POST", "http://127.0.0.1:8791/voice/disable"),
         ], calls)
 
@@ -296,6 +302,28 @@ class UiStateTests(unittest.TestCase):
         self.assertTrue(state.voice_enabled)
         self.assertTrue(state.armed)
         self.assertEqual("speaking", state.assistant_state)
+
+    def test_hq_tts_status_is_kept_for_settings_surface(self):
+        state = UiState()
+        state.apply_status({
+            "ok": True,
+            "tts": {
+                "engine": "piper",
+                "hq_local": True,
+                "model": "luma.onnx",
+                "model_path": "C:/voices/luma.onnx",
+                "piper_path": "C:/tools/piper.exe",
+                "speaker": "2",
+                "model_ready": True,
+            },
+        })
+        self.assertEqual("piper", state.tts_engine)
+        self.assertTrue(state.tts_hq_local)
+        self.assertEqual("luma.onnx", state.tts_model)
+        self.assertEqual("C:/voices/luma.onnx", state.tts_model_path)
+        self.assertEqual("C:/tools/piper.exe", state.tts_piper_path)
+        self.assertEqual("2", state.tts_speaker)
+        self.assertTrue(state.tts_model_ready)
 
     def test_voice_diagnostics_are_kept_for_settings_surface(self):
         state = UiState()
