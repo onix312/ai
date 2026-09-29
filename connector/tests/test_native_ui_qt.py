@@ -8,6 +8,8 @@ from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from PySide6.QtCore import QBuffer, QByteArray, QIODevice
+from PySide6.QtGui import QColor, QImage
 from PySide6.QtWidgets import QApplication, QLabel
 
 from agent.native_ui.app import NativeApp
@@ -97,6 +99,23 @@ class NativeQtSmokeTests(unittest.TestCase):
         self.assertIn("48 kHz", center.home.voice_meta.text())
         self.assertIn("baya", center.voice_page.voice_name.text().casefold())
         self.assertIn("48 kHz", center.voice_page.voice_profile.text())
+        center.deleteLater()
+        self.app.processEvents()
+
+    def test_chat_can_render_printer_camera_jpeg(self):
+        center = ControlCenter()
+        image = QImage(32, 24, QImage.Format_RGB32)
+        image.fill(QColor("#8B5CF6"))
+        payload = QByteArray()
+        buffer = QBuffer(payload)
+        self.assertTrue(buffer.open(QIODevice.WriteOnly))
+        self.assertTrue(image.save(buffer, "JPEG"))
+        buffer.close()
+
+        self.assertTrue(center.chat.show_camera_image(bytes(payload), "P1S"))
+        self.assertFalse(center.chat.camera_card.isHidden())
+        self.assertIn("P1S", center.chat.camera_title.text())
+        self.assertIsNotNone(center.chat.camera_frame.pixmap())
         center.deleteLater()
         self.app.processEvents()
 
