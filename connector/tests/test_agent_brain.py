@@ -170,6 +170,12 @@ class ModelClientTests(unittest.TestCase):
         self.assertIn("app.open", app_prompt)
         self.assertLessEqual(len(app_prompt), 5600)
 
+        colloquial = skills.expand_tool_query("глянь глазами что там видно")
+        self.assertIn("экран", colloquial)
+        self.assertIn("камера", colloquial)
+        window_prompt = skills.relevant_prompt("что у меня сейчас запущено", caps)
+        self.assertIn("window.", window_prompt)
+
     def test_visible_text_drops_reasoning(self):
         self.assertEqual("Привет!\nКак дела?", model.visible_text("<think>долго</think>\nПривет!\n\nКак дела?"))
 
