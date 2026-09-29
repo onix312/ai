@@ -10,7 +10,7 @@ import time
 import unittest
 from unittest.mock import patch
 
-from agent import config, pc, speech, voice_runtime
+from agent import config, pc, silero_tts, speech, voice_runtime
 
 
 class _Recognizer:
@@ -411,6 +411,47 @@ class StreamingTtsQueueTests(unittest.TestCase):
             gate.set()
             stream._thread.join(1)
         self.assertLessEqual(len(calls), 1)
+
+
+class SileroBayaTests(unittest.TestCase):
+    def tearDown(self):
+        pc.stop_speaking()
+
+    def test_silero_baya_is_preferred_when_model_and_torch_are_ready(self):
+        with patch.object(pc, "_silero_available", return_value=True), \
+             patch.object(pc, "_piper_available", return_value=True):
+            self.assertEqual("silero", pc.speech_engine())
+
+    def test_silero_falls_back_to_piper_when_unavailable(self):
+        with patch.object(pc, "_silero_available", return_value=False), \
+             patch.object(pc, "_piper_available", return_value=True):
+            self.assertEqual("piper", pc.speech_engine())
+
+    def test_silero_status_exposes_baya_profile(self):
+        with patch.object(pc, "_silero_available", return_value=True), \
+             patch.object(pc, "_silero_model_path", return_value="C:/models/silero_v5_5_ru.pt"):
+            status = pc.tts_status()
+        self.assertEqual("silero", status["engine"])
+        self.assertEqual("baya", status["speaker"])
+        self.assertEqual("v5_5_ru", status["silero_model_id"])
+        self.assertEqual(48000, status["sample_rate"])
+
+    def test_silero_speak_falls_back_without_losing_queue_contract(self):
+        with patch.object(pc, "speech_engine", return_value="silero"), \
+             patch.object(pc, "_silero_speak", return_value=({}, "failed")) as silero, \
+             patch.object(pc, "_piper_available", return_value=False), \
+             patch.object(pc, "_system_speech_engine", return_value="sapi"), \
+             patch.object(pc, "_system_speak", return_value=({"engine": "sapi"}, "")) as system:
+            result, reason = pc.speak("Привет")
+        self.assertEqual("", reason)
+        self.assertEqual("sapi", result["engine"])
+        silero.assert_called_once()
+        system.assert_called_once()
+
+    def test_silero_constants_match_installer_profile(self):
+        self.assertEqual("v5_5_ru", silero_tts.MODEL_ID)
+        self.assertEqual("baya", silero_tts.SPEAKER)
+        self.assertEqual(48000, silero_tts.SAMPLE_RATE)
 
 
 class LocalHqTtsTests(unittest.TestCase):
