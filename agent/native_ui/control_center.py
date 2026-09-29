@@ -290,7 +290,8 @@ class ChatPage(QWidget):
         self._render_turns()
 
     def set_live_activity(self, phase: str = "idle", heard: str = "", reply: str = "",
-                          skill: str = "", detail: str = "", task_id: int = 0) -> None:
+                          skill: str = "", detail: str = "", task_id: int = 0,
+                          audio_level: int = 0) -> None:
         clean_phase = str(phase or "idle").casefold()
         orb_state = {
             "executing": "working",
@@ -301,6 +302,7 @@ class ChatPage(QWidget):
                              "waiting", "error", "stopped"}:
             orb_state = "idle"
         self.live_orb.set_state(orb_state)
+        self.live_orb.set_activity(audio_level)
         self.live_portrait.set_state(orb_state)
         self.welcome_portrait.set_state(orb_state)
 
@@ -797,6 +799,16 @@ class VoicePage(QWidget):
         content.addLayout(left, 7)
         content.addWidget(diagnostics_card, 5)
         root.addLayout(content, 1)
+
+    def set_runtime_state(self, state: str, audio_level: int = 0) -> None:
+        clean = str(state or "idle").casefold()
+        clean = {"executing": "working", "task": "working"}.get(clean, clean)
+        if clean not in {"idle", "listening", "thinking", "speaking", "working",
+                          "waiting", "error", "stopped"}:
+            clean = "idle"
+        self.portrait.set_state(clean)
+        self.preview_orb.set_state(clean)
+        self.preview_orb.set_activity(audio_level)
 
     def set_voice_profile(self, *, engine: str, speaker: str, sample_rate: int,
                           model: str, ready: bool) -> None:
@@ -1800,6 +1812,7 @@ class ControlCenter(QMainWindow):
             task_id=task_id,
             safety_stopped=safety_stopped,
         )
+        self.voice_page.set_runtime_state("stopped" if safety_stopped else state, audio_level)
 
     def update_status(self, connected: bool, armed: bool, model_ok: bool,
                       panel_ok: bool, error: str = "", safety_stopped: bool = False,
