@@ -165,7 +165,7 @@ def _post_stream(url: str, payload: dict[str, Any], timeout: float,
                 break
         if cancel is not None and cancel.cancelled:
             return False, {"cancelled": True}, "Отменено"
-        return True, {"message": {"content": "".join(parts)}, **last}, ""
+        return True, {**last, "message": {"content": "".join(parts)}}, ""
     except urllib.error.HTTPError as exc:
         return False, {}, f"рантайм ответил {exc.code}"
     except (urllib.error.URLError, OSError, ValueError) as exc:
