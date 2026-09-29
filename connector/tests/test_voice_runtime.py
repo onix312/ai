@@ -104,8 +104,9 @@ class VoiceStreamingTests(unittest.TestCase):
 
     def test_runtime_tuning_is_bounded_and_resettable(self):
         runtime = voice_runtime.VoiceRuntime(_Recognizer())
-        tuned = runtime.tune({"multiplier": 9, "margin": -5, "alpha": 0.01})
+        tuned = runtime.tune({"vad_threshold": 99999, "multiplier": 9, "margin": -5, "alpha": 0.01})
         self.assertTrue(tuned["ok"])
+        self.assertEqual(12000, tuned["vad_threshold"])
         self.assertEqual(4.0, tuned["echo_gate_multiplier"])
         self.assertEqual(0, tuned["echo_gate_margin"])
         self.assertEqual(0.05, tuned["echo_floor_alpha"])
@@ -115,9 +116,29 @@ class VoiceStreamingTests(unittest.TestCase):
         self.assertTrue(reset["ok"])
         self.assertEqual(0, reset["echo_floor"])
         self.assertEqual(0, reset["echo_suppressed"])
+        self.assertEqual(config.VOICE_VAD_THRESHOLD, reset["vad_threshold"])
         self.assertAlmostEqual(config.VOICE_ECHO_GATE_MULTIPLIER, reset["echo_gate_multiplier"])
         self.assertEqual(config.VOICE_ECHO_GATE_MARGIN, reset["echo_gate_margin"])
         self.assertAlmostEqual(config.VOICE_ECHO_FLOOR_ALPHA, reset["echo_floor_alpha"])
+
+    def test_runtime_vad_threshold_changes_start_gate(self):
+        recognizer = _StreamingRecognizer()
+        runtime = voice_runtime.VoiceRuntime(recognizer)
+        runtime.tune({"vad_threshold": 700, "multiplier": 1.0, "margin": 0, "alpha": 0.2})
+        frames = queue.Queue()
+        below = struct.pack("<4h", 0, 500, -450, 0)
+        above = struct.pack("<4h", 0, 1100, -900, 0)
+        silent = struct.pack("<4h", 0, 10, -10, 0)
+        frames.put(below)
+        frames.put(above)
+        for _ in range(8):
+            frames.put(silent)
+
+        with patch.object(runtime, "_should_run", return_value=True), \
+             patch.object(pc, "is_speaking", return_value=True):
+            chunks, _during_output, _text = runtime._next_phrase(frames)
+
+        self.assertEqual(above, chunks[0], "below-threshold speaker leakage must not start ASR")
 
     def test_runtime_tuning_rejects_invalid_values(self):
         runtime = voice_runtime.VoiceRuntime(_Recognizer())
