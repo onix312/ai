@@ -5,7 +5,7 @@ import html
 import json
 from typing import Any
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QTimer, Qt, Signal
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QComboBox, QDoubleSpinBox, QFrame, QHBoxLayout, QLabel, QLineEdit,
@@ -1700,6 +1700,9 @@ class HomePage(QWidget):
 
     def __init__(self) -> None:
         super().__init__()
+        self._motion_state = "idle"
+        self._motion_audio = 0
+        self._motion_phase = 0
         root = QVBoxLayout(self)
         root.setContentsMargins(2, 2, 2, 2)
         root.setSpacing(14)
@@ -1758,7 +1761,24 @@ class HomePage(QWidget):
         self.state_detail.setWordWrap(True)
         self.state_detail.setMaximumWidth(360)
         orb_column.addWidget(self.state_detail)
+
+        self.signal_caption = QLabel("SIGNAL · IDLE")
+        self.signal_caption.setObjectName("signalCaption")
+        self.signal_caption.setAlignment(Qt.AlignCenter)
+        orb_column.addWidget(self.signal_caption)
+        self.signal_bar = QProgressBar()
+        self.signal_bar.setObjectName("runtimeSignal")
+        self.signal_bar.setRange(0, 1000)
+        self.signal_bar.setValue(90)
+        self.signal_bar.setTextVisible(False)
+        self.signal_bar.setMaximumWidth(310)
+        orb_column.addWidget(self.signal_bar, 0, Qt.AlignCenter)
         hero_layout.addLayout(orb_column, 8)
+
+        self._motion_timer = QTimer(self)
+        self._motion_timer.setInterval(80)
+        self._motion_timer.timeout.connect(self._animate_signal)
+        self._motion_timer.start()
 
         telemetry = QVBoxLayout()
         telemetry.setSpacing(10)
@@ -1840,6 +1860,44 @@ class HomePage(QWidget):
         action_box.addLayout(actions)
         root.addWidget(action_card)
 
+    def _animate_signal(self) -> None:
+        self._motion_phase = (self._motion_phase + 1) % 40
+        state = self._motion_state
+        if state in ("listening", "speaking"):
+            value = min(1000, max(120, int(self._motion_audio / 7)))
+        elif state in ("thinking", "working"):
+            wave = self._motion_phase if self._motion_phase <= 20 else 40 - self._motion_phase
+            value = 240 + wave * (28 if state == "thinking" else 22)
+        elif state == "waiting":
+            wave = self._motion_phase if self._motion_phase <= 20 else 40 - self._motion_phase
+            value = 100 + wave * 9
+        elif state == "error":
+            value = 820
+        elif state == "stopped":
+            value = 0
+        else:
+            value = 90
+        self.signal_bar.setValue(max(0, min(1000, int(value))))
+
+    def _set_state_accent(self, state: str) -> None:
+        clean = str(state or "idle").casefold()
+        self.state_title.setProperty("lumaState", clean)
+        self.signal_caption.setProperty("lumaState", clean)
+        for widget in (self.state_title, self.signal_caption):
+            widget.style().unpolish(widget)
+            widget.style().polish(widget)
+        labels = {
+            "idle": "SIGNAL · IDLE",
+            "listening": "SIGNAL · LISTENING",
+            "thinking": "SIGNAL · THINKING",
+            "speaking": "SIGNAL · SPEAKING",
+            "working": "SIGNAL · EXECUTING",
+            "waiting": "SIGNAL · WAITING",
+            "error": "SIGNAL · ERROR",
+            "stopped": "SIGNAL · STOPPED",
+        }
+        self.signal_caption.setText(labels.get(clean, "SIGNAL · ACTIVE"))
+
     def set_runtime(self, *, connected: bool, state: str, audio_level: int = 0,
                     heard: str = "", reply: str = "", skill: str = "",
                     detail: str = "", task_id: int = 0,
@@ -1852,6 +1910,10 @@ class HomePage(QWidget):
         if orb_state not in self.orb_state_names():
             orb_state = "idle"
 
+        self._motion_state = orb_state
+        self._motion_audio = max(0, int(audio_level or 0))
+        self._set_state_accent(orb_state)
+        self._animate_signal()
         self.orb.set_state(orb_state)
         self.orb.set_activity(audio_level)
         self.portrait.set_state(orb_state)
