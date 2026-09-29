@@ -1502,6 +1502,8 @@ class ActivityPage(QWidget):
         self.task_filter.blockSignals(True)
         self.task_filter.clear()
         self.task_filter.addItem("Все задачи", 0)
+        if tasks:
+            self._section("Задачи", "TASK ENGINE")
         for task in tasks:
             task_id = int(task.get("id") or 0)
             self.task_filter.addItem(
@@ -1535,19 +1537,58 @@ class TasksPage(QWidget):
         refresh.clicked.connect(self.refresh_requested)
         head.addWidget(refresh)
         self.layout.addLayout(head)
+
+        sub = QLabel("Цели, маршруты, verification и подтверждения — в одном операционном экране.")
+        sub.setObjectName("muted")
+        sub.setWordWrap(True)
+        self.layout.addWidget(sub)
+
+        metrics = QHBoxLayout()
+        metrics.setSpacing(10)
+        self.tasks_running_metric = QLabel("0")
+        self.tasks_running_metric.setObjectName("opsMetric")
+        self.tasks_waiting_metric = QLabel("0")
+        self.tasks_waiting_metric.setObjectName("opsMetric")
+        self.tasks_verified_metric = QLabel("0")
+        self.tasks_verified_metric.setObjectName("opsMetricReady")
+        self.tasks_pending_metric = QLabel("0")
+        self.tasks_pending_metric.setObjectName("opsMetricDanger")
+        for caption, value, accent in (
+            ("RUNNING", self.tasks_running_metric, "cyan"),
+            ("WAITING", self.tasks_waiting_metric, "violet"),
+            ("VERIFIED", self.tasks_verified_metric, ""),
+            ("CONFIRM", self.tasks_pending_metric, "amber"),
+        ):
+            card = GlassCard(accent)
+            box = QVBoxLayout(card)
+            box.setContentsMargins(13, 10, 13, 10)
+            label = QLabel(caption)
+            label.setObjectName("metricLabel")
+            box.addWidget(label)
+            box.addWidget(value)
+            metrics.addWidget(card, 1)
+        self.layout.addLayout(metrics)
+
+        planner_card = GlassCard("violet")
+        planner_box = QVBoxLayout(planner_card)
+        planner_box.setContentsMargins(14, 12, 14, 12)
+        planner_label = QLabel("PLAN A GOAL")
+        planner_label.setObjectName("heroKicker")
+        planner_box.addWidget(planner_label)
         planner_row = QHBoxLayout()
         self.goal_input = QLineEdit()
-        self.goal_input.setPlaceholderText("Цель: например, подготовь компьютер к работе")
+        self.goal_input.setPlaceholderText("Например: подготовь компьютер к работе")
         planner_row.addWidget(self.goal_input, 1)
         preview = QPushButton("Составить план")
         preview.setObjectName("primary")
         preview.clicked.connect(self._preview_plan)
         planner_row.addWidget(preview)
-        self.layout.addLayout(planner_row)
+        planner_box.addLayout(planner_row)
         self.planner_message = QLabel("")
         self.planner_message.setObjectName("muted")
         self.planner_message.setWordWrap(True)
-        self.layout.addWidget(self.planner_message)
+        planner_box.addWidget(self.planner_message)
+        self.layout.addWidget(planner_card)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
@@ -1572,6 +1613,21 @@ class TasksPage(QWidget):
             if widget is not None:
                 widget.deleteLater()
 
+    def _section(self, title: str, caption: str = "") -> None:
+        row = QFrame()
+        row.setObjectName("taskSection")
+        box = QVBoxLayout(row)
+        box.setContentsMargins(2, 10, 2, 4)
+        box.setSpacing(1)
+        heading = QLabel(str(title))
+        heading.setObjectName("sectionTitle")
+        box.addWidget(heading)
+        if caption:
+            hint = QLabel(str(caption).upper())
+            hint.setObjectName("heroKicker")
+            box.addWidget(hint)
+        self.host.addWidget(row)
+
     def set_payload(self, payload: dict[str, Any]) -> None:
         self._clear()
         plans = list(payload.get("plans") or [])
@@ -1579,9 +1635,28 @@ class TasksPage(QWidget):
         tasks = list(payload.get("tasks") or [])
         pending = list(payload.get("pending") or [])
         notifications = list(payload.get("notifications") or [])
+
+        all_steps = [
+            step for task in tasks for step in list(task.get("steps") or [])
+            if isinstance(step, dict)
+        ]
+        self.tasks_running_metric.setText(str(sum(
+            1 for task in tasks if str(task.get("status") or "") == "running"
+        )))
+        self.tasks_waiting_metric.setText(str(sum(
+            1 for task in tasks if str(task.get("status") or "") in ("waiting", "paused")
+        )))
+        self.tasks_verified_metric.setText(str(sum(
+            1 for step in all_steps
+            if str((step.get("verification") or {}).get("status") or "") == "verified"
+        )))
+        self.tasks_pending_metric.setText(str(len(pending)))
+
         if not plans and not replans and not tasks and not pending and not notifications:
             self.host.addWidget(QLabel("Ничего не ждёт."))
             return
+        if plans:
+            self._section("Планы", "PLANNER PREVIEW")
         for plan in plans:
             card = QFrame()
             card.setObjectName("glassCard")
@@ -1589,7 +1664,9 @@ class TasksPage(QWidget):
             box = QVBoxLayout(card)
             title = str(plan.get("title") or "План")
             summary = str(plan.get("summary") or "")
-            box.addWidget(QLabel(f"План: {title}"))
+            plan_title = QLabel(title)
+            plan_title.setObjectName("taskTitle")
+            box.addWidget(plan_title)
             if summary:
                 note = QLabel(summary)
                 note.setWordWrap(True)
@@ -1622,13 +1699,15 @@ class TasksPage(QWidget):
             box.addLayout(buttons)
             self.host.addWidget(card)
 
+        if replans:
+            self._section("Новые маршруты", "REPLAN")
         for replan in replans:
             card = QFrame()
             card.setObjectName("glassCard")
             card.setProperty("accent", "amber")
             box = QVBoxLayout(card)
-            heading = QLabel(f"Новый маршрут для задачи #{replan.get('task_id')}")
-            heading.setObjectName("pageTitle")
+            heading = QLabel(f"Новый маршрут · задача #{replan.get('task_id')}")
+            heading.setObjectName("taskTitle")
             box.addWidget(heading)
             for field in ("reason", "summary"):
                 if replan.get(field):
@@ -1739,8 +1818,16 @@ class TasksPage(QWidget):
                     text_line += f"\n      {compact}"
                 step_label = QLabel(text_line)
                 step_label.setWordWrap(True)
-                step_label.setObjectName("taskStepCurrent" if seq == current_index and status not in ("done", "cancelled")
-                                         else "taskStep")
+                if seq == current_index and status not in ("done", "cancelled"):
+                    step_object = "taskStepCurrent"
+                else:
+                    step_object = {
+                        "done": "taskStepDone",
+                        "failed": "taskStepFailed",
+                        "waiting": "taskStepWaiting",
+                        "cancelled": "taskStepCancelled",
+                    }.get(step_status, "taskStep")
+                step_label.setObjectName(step_object)
                 box.addWidget(step_label)
 
             current = next((step for step in steps if int(step.get("seq") or 0) == current_index), None)
@@ -1778,9 +1865,12 @@ class TasksPage(QWidget):
             box.addLayout(buttons)
             self.host.addWidget(card)
 
+        if pending:
+            self._section("Требуют решения", "CONFIRMATIONS")
         for row in pending:
             card = QFrame()
             card.setObjectName("glassCard")
+            card.setProperty("accent", "amber")
             box = QVBoxLayout(card)
             box.addWidget(QLabel(str(row.get("text") or row.get("skill") or "Действие требует решения")))
             buttons = QHBoxLayout()
@@ -1795,11 +1885,20 @@ class TasksPage(QWidget):
             buttons.addWidget(yes)
             box.addLayout(buttons)
             self.host.addWidget(card)
+        if notifications:
+            self._section("Уведомления", "EVENTS")
         for row in notifications:
-            text = f"{row.get('title') or 'Уведомление'}: {row.get('text') or ''}"
-            label = QLabel(text)
-            label.setWordWrap(True)
-            self.host.addWidget(label)
+            card = GlassCard()
+            box = QVBoxLayout(card)
+            box.setContentsMargins(12, 9, 12, 9)
+            title = QLabel(str(row.get("title") or "Уведомление"))
+            title.setObjectName("metricValueSmall")
+            box.addWidget(title)
+            text = QLabel(str(row.get("text") or ""))
+            text.setObjectName("muted")
+            text.setWordWrap(True)
+            box.addWidget(text)
+            self.host.addWidget(card)
 
 
 class ControlCenter(QMainWindow):
