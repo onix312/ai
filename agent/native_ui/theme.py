@@ -224,6 +224,17 @@ def stylesheet() -> str:
         font-weight: 800;
     }
 
+    QLabel#memoryMetric, QLabel#memoryMetricPinned {
+        background: transparent;
+        color: #F5F2FF;
+        font-size: 23px;
+        font-weight: 800;
+    }
+
+    QLabel#memoryMetricPinned {
+        color: #C7B8FF;
+    }
+
     QLabel#skillMetricReady {
         color: #78EDC6;
     }
@@ -233,6 +244,13 @@ def stylesheet() -> str:
         border: 1px solid #25294A;
         border-radius: 14px;
         padding: 4px;
+    }
+
+    QTextBrowser#memoryBrowser {
+        background: #0D0F20;
+        border: 1px solid #25294A;
+        border-radius: 14px;
+        padding: 5px;
     }
 
     QTextBrowser#activityTimeline {
