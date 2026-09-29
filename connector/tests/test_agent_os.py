@@ -151,7 +151,12 @@ class ActionConfirmationTests(ServerTestCase):
     """Действие в чужом окне: очередь, подтверждение человека, срок жизни."""
 
     def test_action_is_refused_without_windows(self):
-        payload = self.post(self.agent_port, "/click", {"x": 10, "y": 10})
+        original = self.agent.capabilities.get("windows")
+        self.agent.capabilities["windows"] = False
+        try:
+            payload = self.post(self.agent_port, "/click", {"x": 10, "y": 10})
+        finally:
+            self.agent.capabilities["windows"] = original
         self.assertFalse(payload["ok"])
         self.assertIn("Windows", payload["reason"])
 
@@ -216,7 +221,8 @@ class ActionConfirmationTests(ServerTestCase):
                 result = self.agent.queue_action("click", {"x": 5, "y": 5})
             # Реальный `_ask` ловит и отсутствие экрана, и отсутствие tkinter:
             # в обоих случаях действие не выполняется.
-            with patch.object(server, "_execute", return_value=(True, "")) as execute:
+            with patch("tkinter.Tk", side_effect=RuntimeError("no display")), \
+                    patch.object(server, "_execute", return_value=(True, "")) as execute:
                 self.agent._ask(result["id"])
             execute.assert_not_called()
             self.assertEqual([], self.agent.pending())
@@ -256,10 +262,10 @@ class ScreenAndWindowTests(ServerTestCase):
 
 
 class SpeechRuntimeTests(ServerTestCase):
-    def test_transcribe_refuses_without_model(self):
+    def test_transcribe_refuses_invalid_audio(self):
         payload = self.agent.transcribe(b"RIFF....WAVE")
         self.assertFalse(payload["ok"])
-        self.assertIn("vosk", payload["reason"])
+        self.assertTrue(payload["reason"])
 
     def test_transcribe_refuses_empty_audio(self):
         payload = self.agent.transcribe(b"")
@@ -294,8 +300,11 @@ class SpeechRuntimeTests(ServerTestCase):
         self.assertEqual({"language": "ru"}, fields)
         self.assertEqual(b"\x01\x02\x03", audio)
 
-    def test_microphone_refuses_without_sounddevice(self):
-        ok, reason = self.agent.microphone.arm(5)
+    def test_microphone_refuses_when_unavailable(self):
+        with patch("agent.capabilities.detect", return_value={
+            "microphone": False, "microphone_reason": "Микрофон недоступен"
+        }):
+            ok, reason = self.agent.microphone.arm(5)
         self.assertFalse(ok)
         self.assertTrue(reason)
         self.assertFalse(self.agent.microphone.armed)

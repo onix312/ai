@@ -557,6 +557,7 @@ class ServerPersonalTests(unittest.TestCase):
         cls.server.shutdown()
         cls.server.server_close()
         cls.speech.server_close()
+        cls.agent.runner.store.close()
         cls._ports.stop()
         cls._env.stop()
         cls._tmp.cleanup()

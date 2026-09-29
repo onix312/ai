@@ -765,7 +765,7 @@ SKILLS: dict[str, dict[str, Any]] = {
         "host": "agent", "risk": "system",
         "params": {"seconds": "int"},
         "requires": ("speech_in",), "ideas": ("И163",),
-        "doc": "sounddevice + vosk/faster-whisper. Микрофон закрыт по умолчанию (решение владельца): открывается только после подтверждения и только на названное число секунд.",
+        "doc": "sounddevice + vosk/faster-whisper. Микрофон включается по явной команде и только на названное число секунд.",
     },
     "voice.say": {
         "title": "Озвучить",
@@ -777,11 +777,11 @@ SKILLS: dict[str, dict[str, Any]] = {
     },
     "voice.dictate": {
         "title": "Диктовка",
-        "description": "Диктовка в активное поле: послушать, распознать и ввести текст (с подтверждением).",
+        "description": "Диктовка в активное поле: послушать, распознать и ввести текст.",
         "host": "agent", "risk": "write",
         "params": {"seconds": "int"},
         "requires": ("speech_in", "windows"), "ideas": ("И151",),
-        "doc": "Слушает названное число секунд, распознаёт и вводит в активное окно — после подтверждения.",
+        "doc": "По явной команде слушает названное число секунд, распознаёт и вводит в активное окно.",
     },
     "voice.note": {
         "title": "Голосовая заметка",
@@ -955,7 +955,7 @@ SKILLS: dict[str, dict[str, Any]] = {
     },
     "system.hotkey": {
         "title": "Сочетание клавиш",
-        "description": "Нажать сочетание клавиш в активном окне (Ctrl+S, Win+D, Enter) — с подтверждением.",
+        "description": "Нажать сочетание клавиш в активном окне (Ctrl+S, Win+D, Enter).",
         "host": "agent", "risk": "write",
         "params": {"keys": "text"},
         "requires": ("windows",), "ideas": ("И303",),
@@ -971,7 +971,7 @@ SKILLS: dict[str, dict[str, Any]] = {
     },
     "window.close": {
         "title": "Закрыть окно",
-        "description": "Попросить программу закрыть окно: про несохранённое она спросит сама. С подтверждением.",
+        "description": "Попросить программу закрыть окно: про несохранённое она спросит сама.",
         "host": "agent", "risk": "write",
         "params": {"title": "text"},
         "requires": ("windows",), "ideas": ("И304",),

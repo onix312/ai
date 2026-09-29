@@ -14,19 +14,29 @@ class QuickPanel(QWidget):
         super().__init__()
         self.setWindowFlags(Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
         self.setAttribute(Qt.WA_TranslucentBackground, True)
-        self.setFixedWidth(720)
+        self.setFixedWidth(680)
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         card = QFrame()
         card.setObjectName("card")
         card.setStyleSheet("""
-        QFrame#card { background:#0f172a; border:1px solid #334155; border-radius:20px; }
-        QLineEdit { background:transparent; border:0; color:#f8fafc; font-size:20px; padding:16px; }
-        QLabel { color:#94a3b8; }
-        QPushButton { background:#1e293b; color:#cbd5e1; border:0; border-radius:9px; padding:7px 10px; }
-        QPushButton:hover { background:#334155; }
+        QFrame#card { background:#111d30; border:1px solid #354660; border-radius:18px; }
+        QLineEdit { background:#16243a; border:1px solid #32435e; border-radius:11px; color:#f8fafc; font-size:18px; padding:13px 15px; }
+        QLabel { color:#9fb0c9; }
+        QLabel#quickBrand { color:#f8fafc; font-size:16px; font-weight:700; }
+        QPushButton { background:#1c2d47; color:#d2deed; border:1px solid #31445f; border-radius:10px; padding:8px 11px; }
+        QPushButton:hover { background:#2a4264; }
         """)
         box = QVBoxLayout(card)
+        box.setContentsMargins(18, 16, 18, 16)
+        box.setSpacing(12)
+        header = QHBoxLayout()
+        brand = QLabel("Люма")
+        brand.setObjectName("quickBrand")
+        header.addWidget(brand)
+        header.addStretch(1)
+        header.addWidget(QLabel("Esc — закрыть"))
+        box.addLayout(header)
         row = QHBoxLayout()
         self.input = QLineEdit()
         self.input.setPlaceholderText("Спроси Люму или скажи, что сделать…")
@@ -35,7 +45,7 @@ class QuickPanel(QWidget):
         box.addLayout(row)
         self.answer = QLabel("")
         self.answer.setWordWrap(True)
-        self.answer.setStyleSheet("color:#e2e8f0; padding:0 16px 8px 16px; font-size:14px;")
+        self.answer.setStyleSheet("color:#d8e5f4; font-size:14px;")
         box.addWidget(self.answer)
         self.hints = QHBoxLayout()
         for text in ("Что у меня сегодня?", "Как там PrintFlow?", "Открой загрузки"):

@@ -1567,4 +1567,7 @@ def speak(text: str, rate: int = 0, volume: int = 100) -> tuple[dict[str, Any], 
             return state, reason
         engine = _system_speech_engine()
 
+    if not engine:
+        return {}, "Нет движка озвучки: в Windows нужен PowerShell, в Linux — espeak-ng"
+
     return _system_speak(clean, rate, volume, engine=engine)

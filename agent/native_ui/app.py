@@ -668,7 +668,8 @@ class NativeApp:
 
     def restart_ui(self) -> None:
         self._save_geometry()
-        args = [sys.executable, "-m", "agent.native_ui", *sys.argv[1:]]
+        args = ([sys.executable, *sys.argv[1:]] if getattr(sys, "frozen", False)
+                else [sys.executable, "-m", "agent.desktop", *sys.argv[1:]])
         if self._hotkey_registered:
             unregister(0, QUICK_HOTKEY_ID)
         if self._stop_hotkey_registered:

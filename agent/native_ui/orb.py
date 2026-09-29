@@ -29,22 +29,25 @@ class VoiceOrb(QWidget):
             Qt.WindowDoesNotAcceptFocus
         )
         self.setAttribute(Qt.WA_TranslucentBackground, True)
-        self.setFixedSize(390, 150)
+        self.setFixedSize(370, 72)
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 8, 16, 8)
+        layout.setContentsMargins(68, 12, 14, 12)
+        layout.setSpacing(3)
         self.label = QLabel("Люма · Готова")
-        self.label.setAlignment(Qt.AlignCenter)
-        self.label.setStyleSheet("color: white; font-size: 14px; font-weight: 700;")
+        self.label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        self.label.setStyleSheet("color:#f8fafc; font-size:14px; font-weight:700;")
         layout.addWidget(self.label)
         self.context_label = QLabel("")
-        self.context_label.setAlignment(Qt.AlignCenter)
+        self.context_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         self.context_label.setWordWrap(True)
-        self.context_label.setStyleSheet("color: rgba(255,255,255,210); font-size: 12px;")
+        self.context_label.setStyleSheet("color:#b7c6db; font-size:12px;")
+        self.context_label.hide()
         layout.addWidget(self.context_label)
         self.reply_label = QLabel("")
-        self.reply_label.setAlignment(Qt.AlignCenter)
+        self.reply_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         self.reply_label.setWordWrap(True)
-        self.reply_label.setStyleSheet("color: rgba(255,255,255,170); font-size: 11px;")
+        self.reply_label.setStyleSheet("color:#92a4be; font-size:11px;")
+        self.reply_label.hide()
         layout.addWidget(self.reply_label)
         self._pulse_timer = QTimer(self)
         self._pulse_timer.timeout.connect(self._tick)
@@ -97,6 +100,13 @@ class VoiceOrb(QWidget):
                 if text:
                     snippets.append(text)
             self.reply_label.setText(" · ".join(snippets))
+        self.context_label.setVisible(bool(self.context_label.text()))
+        self.reply_label.setVisible(bool(self.reply_label.text()))
+        target_height = 112 if self.context_label.text() or self.reply_label.text() else 72
+        if self.height() != target_height:
+            self.setFixedHeight(target_height)
+            if self.isVisible():
+                self.show_near_bottom()
         self.update()
 
     def _tick(self) -> None:
@@ -108,7 +118,7 @@ class VoiceOrb(QWidget):
         screen = self.screen()
         if screen:
             geo = screen.availableGeometry()
-            self.move(geo.center().x() - self.width() // 2, geo.bottom() - self.height() - 42)
+            self.move(geo.center().x() - self.width() // 2, geo.bottom() - self.height() - 24)
         self.show()
         self.raise_()
 
@@ -116,32 +126,38 @@ class VoiceOrb(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
         tones = {
-            "idle": QColor("#334155"),
-            "listening": QColor("#0891b2"),
-            "thinking": QColor("#7c3aed"),
-            "speaking": QColor("#16a34a"),
-            "working": QColor("#d97706"),
-            "waiting": QColor("#475569"),
-            "error": QColor("#dc2626"),
-            "stopped": QColor("#991b1b"),
+            "idle": QColor("#64748b"),
+            "listening": QColor("#22b8cf"),
+            "thinking": QColor("#9b7bff"),
+            "speaking": QColor("#43c996"),
+            "working": QColor("#f4b860"),
+            "waiting": QColor("#94a3b8"),
+            "error": QColor("#f87171"),
+            "stopped": QColor("#ef4444"),
         }
         c = tones[self._state]
+        center_y = self.height() // 2
+        painter.setPen(QPen(QColor("#33435c"), 1))
+        painter.setBrush(QColor("#111d30"))
+        painter.drawRoundedRect(self.rect().adjusted(2, 2, -2, -2), 20, 20)
         if self._state in ("listening", "thinking", "speaking", "working", "waiting"):
             pulse = abs(10 - self._pulse) / 10.0
             halo = QColor(c)
-            halo.setAlpha(int(28 + 42 * pulse))
-            painter.setPen(QPen(halo, 3))
-            painter.setBrush(Qt.NoBrush)
-            painter.drawRoundedRect(self.rect().adjusted(3, 3, -3, -3), 20, 20)
-        painter.setPen(QPen(QColor(255, 255, 255, 36), 1))
+            halo.setAlpha(int(30 + 55 * pulse))
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(halo)
+            painter.drawEllipse(11, center_y - 24, 48, 48)
+        painter.setPen(Qt.NoPen)
         painter.setBrush(c)
-        painter.drawRoundedRect(self.rect().adjusted(6, 6, -6, -6), 18, 18)
+        painter.drawEllipse(20, center_y - 15, 30, 30)
+        painter.setBrush(QColor("#111d30"))
+        painter.drawEllipse(29, center_y - 6, 12, 12)
 
         if self._state == "listening" and self._audio_level:
             # Нормализованный индикатор громкости. Он декоративный и не влияет
             # на VAD threshold: решение «слышит/не слышит» остаётся в runtime.
             strength = min(1.0, self._audio_level / 8000.0)
-            width = int((self.width() - 36) * strength)
+            width = int((self.width() - 80) * strength)
             painter.setPen(Qt.NoPen)
-            painter.setBrush(QColor(255, 255, 255, 80))
-            painter.drawRoundedRect(18, self.height() - 11, width, 4, 2, 2)
+            painter.setBrush(c)
+            painter.drawRoundedRect(68, self.height() - 9, width, 3, 2, 2)

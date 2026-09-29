@@ -20,6 +20,13 @@ def _pretty(value: Any) -> str:
 class TextPage(QWidget):
     refresh_requested = Signal()
 
+    LABELS = {
+        "memories": "Сохранено", "learned": "Освоено", "unknown": "Требует уточнения",
+        "aliases": "Ваши названия", "insights": "Наблюдения", "feedback": "Обратная связь",
+        "skills": "Возможности", "entries": "Последние действия", "reminders": "Напоминания",
+        "todos": "Дела", "goals": "Цели", "habits": "Привычки", "expenses": "Расходы",
+    }
+
     def __init__(self, title: str, subtitle: str = "") -> None:
         super().__init__()
         layout = QVBoxLayout(self)
@@ -33,6 +40,9 @@ class TextPage(QWidget):
             sub.setObjectName("muted")
             text.addWidget(sub)
         header.addLayout(text, 1)
+        self.raw_button = QPushButton("Показать данные")
+        self.raw_button.clicked.connect(self._toggle_raw)
+        header.addWidget(self.raw_button)
         refresh = QPushButton("Обновить")
         refresh.clicked.connect(self.refresh_requested)
         header.addWidget(refresh)
@@ -40,27 +50,65 @@ class TextPage(QWidget):
         self.browser = QTextBrowser()
         self.browser.setOpenExternalLinks(True)
         layout.addWidget(self.browser, 1)
+        self._payload: Any = None
+        self._show_raw = False
 
     def set_payload(self, value: Any) -> None:
-        self.browser.setPlainText(_pretty(value))
+        self._payload = value
+        self._render()
+
+    def _toggle_raw(self) -> None:
+        self._show_raw = not self._show_raw
+        self.raw_button.setText("Красивый вид" if self._show_raw else "Показать данные")
+        self._render()
+
+    def _render(self) -> None:
+        if self._show_raw:
+            self.browser.setPlainText(_pretty(self._payload))
+            return
+        payload = self._payload if isinstance(self._payload, dict) else {}
+        sections = []
+        for key, value in payload.items():
+            if key in {"ok", "count", "ready", "unavailable", "stats", "layers"} or not value:
+                continue
+            title = html.escape(self.LABELS.get(key, key.replace("_", " ").capitalize()))
+            if isinstance(value, list):
+                cards = [self._card(item) for item in value]
+            elif isinstance(value, dict):
+                cards = [self._card({"title": name, "value": item}) for name, item in value.items()]
+            else:
+                cards = [self._card(value)]
+            if cards:
+                sections.append(f"<h2>{title}</h2>" + "".join(cards))
+        self.browser.setHtml(
+            "<div style='margin:18px 24px; color:#e5e7eb;'>" +
+            ("".join(sections) if sections else
+             "<h2>Пока здесь пусто</h2><p style='color:#94a3b8;'>Данные появятся после первого действия.</p>") +
+            "</div>"
+        )
+
+    @staticmethod
+    def _card(item: Any) -> str:
+        if not isinstance(item, dict):
+            return f"<p style='margin:10px 0;'>{html.escape(str(item))}</p>"
+        heading = next((str(item[key]) for key in ("title", "name", "text", "phrase", "message")
+                        if item.get(key)), "Запись")
+        details = []
+        for key in ("meaning_text", "description", "value", "status", "state", "reason", "at"):
+            value = item.get(key)
+            if value not in (None, "", [], {}) and str(value) != heading:
+                details.append(html.escape(str(value)))
+        badge = "<span style='color:#fbbf24;'>Недоступно</span>" if item.get("available") is False else ""
+        body = "<br>".join(details[:3])
+        return ("<table width='100%' cellspacing='0' cellpadding='12' style='margin:9px 0; border:1px solid #334155;'>"
+                "<tr><td bgcolor='#172337'><b>" + html.escape(heading) + "</b> " + badge +
+                ("<br><span style='color:#aabbd2;'>" + body + "</span>" if body else "") +
+                "</td></tr></table>")
 
 
 class ChatPage(QWidget):
     submitted = Signal(str)
     clear_requested = Signal()
-
-    EMPTY_HTML = """
-    <div style="margin:28px 36px; color:#e8edf7;">
-      <p style="font-size:27px; font-weight:700; margin-bottom:8px;">Привет, я Люма</p>
-      <p style="font-size:15px; color:#9fb0c9; margin-bottom:26px;">
-        Спросите о делах или поручите действие на компьютере.
-      </p>
-      <p style="font-size:14px; font-weight:600; color:#d7e3f6;">С чего начать</p>
-      <p style="font-size:14px; color:#a9b9d0;">• Что у меня сегодня?</p>
-      <p style="font-size:14px; color:#a9b9d0;">• Покажи мои задачи</p>
-      <p style="font-size:14px; color:#a9b9d0;">• Что ты умеешь?</p>
-    </div>
-    """
 
     def __init__(self) -> None:
         super().__init__()
@@ -78,10 +126,31 @@ class ChatPage(QWidget):
         self.live.setObjectName("muted")
         self.live.setWordWrap(True)
         layout.addWidget(self.live)
+
+        self.content = QStackedWidget()
+        welcome = QWidget()
+        intro = QVBoxLayout(welcome)
+        intro.setContentsMargins(56, 20, 56, 20)
+        intro.addStretch(2)
+        greeting = QLabel("Привет, я Люма")
+        greeting.setObjectName("welcomeTitle")
+        intro.addWidget(greeting)
+        description = QLabel("Могу помочь с делами, ответить на вопрос и выполнить действие на компьютере.")
+        description.setObjectName("welcomeText")
+        description.setWordWrap(True)
+        intro.addWidget(description)
+        intro.addSpacing(24)
+        for prompt in ("Что у меня сегодня?", "Продажи за 7 дней", "Что ты умеешь?"):
+            button = QPushButton(prompt)
+            button.setObjectName("suggestion")
+            button.clicked.connect(lambda _=False, value=prompt: self._pick_prompt(value))
+            intro.addWidget(button)
+        intro.addStretch(3)
+        self.content.addWidget(welcome)
         self.feed = QTextBrowser()
-        self.feed.setHtml(self.EMPTY_HTML)
+        self.content.addWidget(self.feed)
         self._has_history = False
-        layout.addWidget(self.feed, 1)
+        layout.addWidget(self.content, 1)
         row = QHBoxLayout()
         self.input = QLineEdit()
         self.input.setPlaceholderText("Спроси Люму или скажи, что сделать…")
@@ -92,6 +161,10 @@ class ChatPage(QWidget):
         send.clicked.connect(self._submit)
         row.addWidget(send)
         layout.addLayout(row)
+
+    def _pick_prompt(self, text: str) -> None:
+        self.input.setText(text)
+        self.input.setFocus()
 
     def _submit(self) -> None:
         text = self.input.text().strip()
@@ -106,8 +179,9 @@ class ChatPage(QWidget):
             who = "Вы" if role == "user" else "Люма"
             text = str(turn.get("text") or "")
             chunks.append(f"<p><b>{who}</b><br>{html.escape(text)}</p>")
-        self.feed.setHtml("".join(chunks) if chunks else self.EMPTY_HTML)
+        self.feed.setHtml("".join(chunks))
         self._has_history = bool(chunks)
+        self.content.setCurrentIndex(1 if chunks else 0)
         bar = self.feed.verticalScrollBar()
         bar.setValue(bar.maximum())
 
@@ -115,6 +189,7 @@ class ChatPage(QWidget):
         if not self._has_history:
             self.feed.clear()
             self._has_history = True
+            self.content.setCurrentIndex(1)
         self.feed.append(f"<p><b>{html.escape(who)}</b><br>{html.escape(text)}</p>")
 
     def set_live_activity(self, phase: str = "idle", heard: str = "", reply: str = "",
@@ -1131,6 +1206,8 @@ class ControlCenter(QMainWindow):
         QListWidget#nav::item:hover { background:#1b2c45; color:white; }
         QListWidget#nav::item:selected { background:#243d68; color:white; }
         QLabel#pageTitle { font-size:24px; font-weight:700; }
+        QLabel#welcomeTitle { color:#f8fafc; font-size:32px; font-weight:700; }
+        QLabel#welcomeText { color:#9fb0c9; font-size:15px; }
         QLabel#muted { color:#94a3b8; }
         QLabel#footer { background:#111827; color:#94a3b8; padding:8px 14px; }
         QTextBrowser, QLineEdit { background:#121c2f; color:#e5e7eb; border:1px solid #2c3a52; border-radius:10px; padding:10px; selection-background-color:#335991; }
@@ -1138,6 +1215,8 @@ class ControlCenter(QMainWindow):
         QPushButton:hover { background:#334155; }
         QPushButton#primary { background:#2563eb; }
         QPushButton#primary:hover { background:#1d4ed8; }
+        QPushButton#suggestion { background:#16243a; border:1px solid #32435e; border-radius:12px; padding:15px 18px; text-align:left; }
+        QPushButton#suggestion:hover { background:#223858; border-color:#4f6f9e; }
         QPushButton#danger { background:#991b1b; color:white; font-weight:700; }
         QPushButton#danger:hover { background:#b91c1c; }
         """)
