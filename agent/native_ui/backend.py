@@ -200,6 +200,19 @@ class BackendClient:
     def tts_test(self) -> dict[str, Any]:
         return self.speech_post("/voice/tts", {"op": "test"})
 
+    def pronunciation_items(self) -> dict[str, Any]:
+        return self.speech_post("/voice/tts", {"op": "pronunciations"})
+
+    def pronunciation_set(self, source: str, target: str) -> dict[str, Any]:
+        return self.speech_post("/voice/tts", {
+            "op": "pronunciation_set", "source": source, "target": target,
+        })
+
+    def pronunciation_delete(self, source: str) -> dict[str, Any]:
+        return self.speech_post("/voice/tts", {
+            "op": "pronunciation_delete", "source": source,
+        })
+
     def safety_stop(self) -> dict[str, Any]:
         return self.post("/safety/stop", {})
 
