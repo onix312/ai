@@ -252,6 +252,31 @@ class UiStateTests(unittest.TestCase):
         })
         self.assertTrue(state.safety_stopped)
 
+    def test_live_activity_is_kept_for_orb_and_chat_surface(self):
+        state = UiState()
+        state.apply_status({
+            "ok": True,
+            "voice": {"state": "idle"},
+            "activity": {
+                "current": {
+                    "phase": "executing",
+                    "heard": "открой телеграм",
+                    "reply": "",
+                    "skill": "app.open",
+                    "task_id": 7,
+                    "detail": "Открыть Telegram",
+                    "active": True,
+                },
+                "recent": [{"phase": "done", "reply": "Готово."}],
+            },
+        })
+        self.assertTrue(state.activity_active)
+        self.assertEqual("executing", state.activity_phase)
+        self.assertEqual("открой телеграм", state.activity_heard)
+        self.assertEqual("app.open", state.activity_skill)
+        self.assertEqual(7, state.activity_task_id)
+        self.assertEqual("Готово.", state.activity_recent[0]["reply"])
+
     def test_voice_runtime_state_is_authoritative(self):
         state = UiState()
         state.apply_status({
