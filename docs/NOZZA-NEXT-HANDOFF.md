@@ -1,5 +1,14 @@
 # NOZZA — handoff и roadmap после Verification Engine 1.0
 
+> **Актуализация 29.09.2026, Native UI 2.0 Phase 5:** Phase 4 уже в `main`.
+> Текущая ветка добавляет фильтры и task drill-down на странице **Активность**:
+> выбор задачи/status, поиск по skill/result/outcome, verification evidence,
+> provider result и durable applied replan history из Task Engine. Активные
+> replan drafts показываются отдельно. UI не выдумывает task↔journal связи,
+> если их нет в схеме. Следом: optional HQ local TTS или first-run voice
+> calibration wizard, если это окажется полезнее по реальному использованию.
+
+
 > **Актуализация 29.09.2026, Native UI 2.0 Phase 4:** Phase 3 уже в `main`.
 > Текущая ветка добавляет Voice 3 Diagnostics в Control Center: live mic level,
 > ASR engine, vocabulary size, VAD/echo telemetry и RAM-only runtime tuning
