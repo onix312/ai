@@ -261,6 +261,10 @@ class UnderstandTests(unittest.TestCase):
         "Открой Steam": ("app.open", {"target": "steam"}),
         "Открой стим": ("app.open", {"target": "стим"}),
         "Открой apex": ("app.open", {"target": "apex"}),
+        "зайди в телеграм": ("app.open", {"target": "телеграм"}),
+        "что у меня сейчас запущено": ("window.list", {"limit": 15}),
+        "какая программа сейчас активна": ("window.active", {}),
+        "глянь на экран": ("screen.describe", {}),
         "нажми кнопку сохранить": ("screen.find_and_click", {"text": "сохранить"}),
         "найди на экране отправить и нажми": ("screen.find_and_click", {"text": "отправить"}),
         "как там компьютер": ("system.health", {}),
@@ -277,6 +281,11 @@ class UnderstandTests(unittest.TestCase):
             self.assertIsNotNone(plan, phrase)
             self.assertEqual((skill, params), (plan["skill"], plan["params"]), phrase)
             self.assertIn(plan["skill"], skills.SKILLS, "правило ведёт в несуществующий навык")
+
+    def test_browser_open_question_is_not_stolen_by_window_list_rule(self):
+        plan = brain.understand("что открыто в браузере")
+        self.assertIsNotNone(plan)
+        self.assertEqual("browser.tabs", plan["skill"])
 
     def test_workshop_phrases_are_not_pc_commands(self):
         for phrase in ("запусти печать", "закрой заказ 15", "открой склад", "убавь цену", "сделай звук 3d печати",
