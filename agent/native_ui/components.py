@@ -114,7 +114,8 @@ class StatusHeader(QFrame):
         layout.addWidget(self.local_pill)
 
     def set_status(self, *, connected: bool, armed: bool, model_ok: bool,
-                   panel_ok: bool, safety_stopped: bool, error: str = "") -> None:
+                   panel_ok: bool, safety_stopped: bool, error: str = "",
+                   assistant_state: str = "idle") -> None:
         if not connected:
             self.title.setText("Люма недоступна")
             self.subtitle.setText(error or "Локальный backend не отвечает")
@@ -127,11 +128,22 @@ class StatusHeader(QFrame):
             self.state_pill.setText("STOPPED")
             return
 
-        self.title.setText("Люма готова")
+        state = str(assistant_state or "idle").casefold()
+        titles = {
+            "idle": "Люма готова",
+            "listening": "Люма слушает",
+            "thinking": "Люма думает",
+            "speaking": "Люма отвечает",
+            "executing": "Люма выполняет",
+            "task": "Люма ведёт задачу",
+            "waiting": "Люма ждёт",
+            "error": "Люме нужна помощь",
+        }
+        self.title.setText(titles.get(state, "Люма работает"))
         pieces = [
             "wake word включён" if armed else "wake word выключен",
             "модель готова" if model_ok else "модель не готова",
             "PrintFlow подключён" if panel_ok else "PrintFlow не подключён",
         ]
         self.subtitle.setText(" · ".join(pieces))
-        self.state_pill.setText("LISTENING" if armed else "IDLE")
+        self.state_pill.setText(state.upper() if state else ("LISTENING" if armed else "IDLE"))
