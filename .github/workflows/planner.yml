@@ -30,7 +30,10 @@ jobs:
         run: >-
           python -m unittest
           connector.tests.test_agent_planner
+          connector.tests.test_agent_brain.PcHelpersTests
+          connector.tests.test_agent_brain.UnderstandTests
           connector.tests.test_agent_brain.BrainChatTests
+          connector.tests.test_agent_brain.BrainPanelTests
           connector.tests.test_native_ui
 
   windows-ui:
