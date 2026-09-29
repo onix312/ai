@@ -1430,10 +1430,34 @@ class Brain:
         steps.append({"kind": "panel", "title": "Свежий кадр камеры",
                       "detail": f"{pname} · {len(frame) // 1024} КБ"})
 
-        can_see, vision_reason = model.vision_ok()
+        state = model.status()
+        vision_state = dict(state)
+        can_see = False
+        vision_reason = str(state.get("reason") or "")
+        if state.get("ok"):
+            can_see, vision_reason = model.vision_ok(
+                url=str(state.get("url") or ""), name=str(state.get("model") or "")
+            )
+            if not can_see:
+                alternate = model.pick_vision(list(state.get("models") or []))
+                if alternate and alternate != str(state.get("model") or ""):
+                    alt_ok, alt_reason = model.vision_ok(
+                        url=str(state.get("url") or ""), name=alternate
+                    )
+                    if alt_ok:
+                        vision_state = model.status(
+                            url=str(state.get("url") or ""), name=alternate
+                        )
+                        can_see = bool(vision_state.get("ok"))
+                        vision_reason = "" if can_see else str(vision_state.get("reason") or "")
+                        if can_see:
+                            steps.append({"kind": "model", "title": "Vision-модель",
+                                          "detail": f"автоматически выбрана {alternate}"})
+                    elif alt_reason:
+                        vision_reason = alt_reason
+
         reply = ""
         if can_see:
-            state = model.status()
             prompt = (
                 "Перед тобой свежий кадр камеры 3D-принтера во время печати. "
                 "Опиши только то, что действительно видно на кадре, кратко и по-русски. "
@@ -1444,7 +1468,7 @@ class Brain:
             )
             seen = model.chat(
                 [{"role": "user", "content": prompt}],
-                images=[frame], temperature=0.1, max_chars=1200, state=state,
+                images=[frame], temperature=0.1, max_chars=1200, state=vision_state,
             )
             if seen.get("ok") and seen.get("text"):
                 reply = f"Посмотрела свежий кадр с {pname}. {str(seen['text']).strip()}"
