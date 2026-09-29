@@ -8,7 +8,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication, QLabel
 
-from agent.native_ui.control_center import ControlCenter, TasksPage
+from agent.native_ui.control_center import ActivityPage, ControlCenter, TasksPage
 from agent.native_ui.orb import VoiceOrb
 from agent.native_ui.quick_panel import QuickPanel
 
@@ -99,6 +99,32 @@ class NativeQtSmokeTests(unittest.TestCase):
             },
         })
         center.set_page_payload("memory", {"memories": [{"text": "пример"}]})
+        center.set_page_payload("activity", {
+            "activity": {
+                "current": {
+                    "phase": "executing", "heard": "открой телеграм",
+                    "reply": "", "skill": "app.open", "task_id": 4,
+                    "detail": "Открыть Telegram", "active": True,
+                },
+                "recent": [{"phase": "done", "reply": "Готово.", "active": False}],
+            },
+            "tasks": [{
+                "id": 4, "title": "Подготовить рабочее место", "status": "paused",
+                "progress": 1, "total_steps": 2,
+                "steps": [
+                    {"seq": 0, "skill": "app.open", "status": "done",
+                     "finished_at": "2026-09-29 05:00:00",
+                     "verification": {"status": "verified", "reason": "окно найдено"}},
+                    {"seq": 1, "skill": "window.focus", "status": "pending",
+                     "verification": {}},
+                ],
+            }],
+            "journal": [{
+                "at": "2026-09-29 05:00:01", "skill": "app.open",
+                "outcome": "ok", "detail": "Telegram открыт", "target": "Telegram",
+            }],
+        })
+
         center.set_page_payload("tasks", {
             "plans": [{
                 "id": "p1", "title": "Рабочее место", "summary": "Открыть нужные программы",
@@ -157,6 +183,13 @@ class NativeQtSmokeTests(unittest.TestCase):
         self.assertIn("Autopilot включён", center.proactivity_status.text())
         self.assertIn("[suppressed] Цель", center.events_view.toPlainText())
         self.assertIn("quiet hours", center.events_view.toPlainText())
+        self.assertIsInstance(center.pages["activity"], ActivityPage)
+        timeline = center.pages["activity"].browser.toPlainText()
+        self.assertIn("открой телеграм", timeline)
+        self.assertIn("app.open", timeline)
+        self.assertIn("проверка: verified", timeline)
+        self.assertIn("окно найдено", timeline)
+        self.assertIn("Telegram открыт", timeline)
         self.assertIsInstance(center.pages["tasks"], TasksPage)
         task_page = center.pages["tasks"]
         labels = [w.text() for w in task_page.findChildren(QLabel)]
