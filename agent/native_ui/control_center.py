@@ -2366,7 +2366,6 @@ class ControlCenter(QMainWindow):
         persona_buttons = QHBoxLayout()
         save_persona = QPushButton("Сохранить стиль")
         save_persona.setObjectName("persona_save")
-        save_persona.setObjectName("primary")
         save_persona.clicked.connect(self._emit_persona_save)
         reset_persona = QPushButton("По умолчанию")
         reset_persona.setObjectName("persona_reset")
@@ -2424,7 +2423,7 @@ class ControlCenter(QMainWindow):
 
         autonomy_buttons = QHBoxLayout()
         save_autonomy = QPushButton("Сохранить автономность")
-        save_autonomy.setObjectName("primary")
+        save_autonomy.setObjectName("autonomy_save")
         save_autonomy.clicked.connect(self._emit_autonomy_save)
         reset_autonomy = QPushButton("По умолчанию")
         reset_autonomy.setObjectName("autonomy_reset")
@@ -2504,7 +2503,7 @@ class ControlCenter(QMainWindow):
 
         pro_buttons = QHBoxLayout()
         save_proactivity = QPushButton("Сохранить инициативность")
-        save_proactivity.setObjectName("primary")
+        save_proactivity.setObjectName("proactivity_save")
         save_proactivity.clicked.connect(self._emit_proactivity_save)
         reset_proactivity = QPushButton("По умолчанию")
         reset_proactivity.setObjectName("proactivity_reset")
