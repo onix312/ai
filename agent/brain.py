@@ -1190,6 +1190,32 @@ def model_plan_problem(answer: dict[str, Any], caps: dict[str, Any],
     return "; ".join(hard)
 
 
+def adaptive_decision_problem(answer: dict[str, Any], caps: dict[str, Any],
+                              learned: dict[str, dict[str, Any]] | None = None,
+                              require_observation: bool = False) -> str:
+    """Validate one next-step decision from the bounded adaptive loop."""
+    if not isinstance(answer, dict):
+        return "решение agent loop не является объектом"
+    if bool(answer.get("done")):
+        if str(answer.get("skill") or "").strip():
+            return "done=true требует пустой skill"
+        return ""
+    name = str(answer.get("skill") or "").strip().casefold()
+    if not name:
+        return "нужно выбрать skill или вернуть done=true"
+    skill = skills.get(name, learned)
+    if skill is None:
+        return f"функции «{name}» нет в реестре"
+    available, why = skills.availability(skill, caps)
+    if not available:
+        return f"«{name}» недоступен: {why}"
+    if require_observation and skills.risk_of(skill) != "read":
+        return "первый шаг условной задачи должен быть read-наблюдением"
+    _params, errors = skills.check_params(skill, answer.get("params"))
+    hard = [error for error in errors if "не объявлен" not in error]
+    return "; ".join(hard)
+
+
 class Brain:
     """Разговор с помощником: правила → контекст → память → модель → навык → ответ."""
 
@@ -2349,6 +2375,199 @@ class Brain:
                            source=source or plan.get("source") or "rules", steps=steps, started=started,
                            suggestions=suggestions_for(name, result), extra=extra, save=save)
 
+    def _adaptive_loop(self, session: str, text: str, history: list[dict[str, Any]],
+                       steps: list[dict[str, Any]], started: float, state: dict[str, Any],
+                       retrieval_query: str, initial_reply: str = "") -> dict[str, Any]:
+        """Bounded observe -> decide -> act loop for genuinely conditional goals.
+
+        It never executes an unregistered skill, never bypasses Agent.run_skill,
+        stops on confirmation, and writes one final conversation turn.
+        """
+        learned = self.runner.learned()
+        observations: list[dict[str, Any]] = []
+        seen_actions: set[str] = set()
+        last_result: dict[str, Any] = {}
+        last_skill = ""
+        final_reply = ""
+        validator_feedback = ""
+
+        steps.append({
+            "kind": "agent",
+            "title": "Agent Loop",
+            "detail": f"условная задача · максимум {MAX_ADAPTIVE_STEPS} шага",
+        })
+
+        for index in range(MAX_ADAPTIVE_STEPS):
+            observed_skills = " ".join(str(row.get("skill") or "") for row in observations)
+            loop_catalog = skills.relevant_prompt(
+                f"{retrieval_query} | {observed_skills} | {validator_feedback}",
+                self.runner.caps, learned, max_items=44, max_chars=8200,
+            )
+            observation_json = json.dumps(observations, ensure_ascii=False, default=str)[:7000]
+            system = (
+                f"Ты — {config.ASSISTANT_NAME}. Управляешь bounded agent loop для ОДНОЙ условной задачи. "
+                "Не раскрывай скрытые рассуждения. Выбирай только следующий проверяемый шаг.\n"
+                "Верни ОДИН JSON: "
+                "{\"done\": false, \"skill\": \"имя функции\", \"params\": {}, \"reply\": \"\"} "
+                "или {\"done\": true, \"skill\": \"\", \"params\": {}, \"reply\": \"краткий итог\"}.\n"
+                "Правила:\n"
+                "1. Используй только функции каталога ниже.\n"
+                "2. На первом шаге обязательно сначала получи read-наблюдение, если ещё нет фактов для условия.\n"
+                "3. Следующий шаг выбирай только по исходной цели и ФАКТИЧЕСКИМ observations.\n"
+                "4. Не повторяй уже выполненный skill с теми же params.\n"
+                "5. done=true только когда цель достигнута, дальнейшее действие не нужно или безопасно продолжить нельзя.\n"
+                "6. Не утверждай успех действия, которого нет в observations.\n"
+                f"\nКаталог функций:\n{loop_catalog}"
+            )
+            prompt = (
+                f"Исходная цель человека: {text}\n"
+                f"Наблюдения выполненных шагов: {observation_json or '[]'}"
+            )
+            if validator_feedback:
+                prompt += f"\nПредыдущее решение отклонено валидатором: {validator_feedback[:500]}"
+
+            token = self._begin_model_turn(session)
+            try:
+                decision_reply = model.chat(
+                    [{"role": "user", "content": prompt}],
+                    system=system, fmt="json", temperature=0.0,
+                    timeout=min(PLAN_TIMEOUT_SEC, config.MODEL_TIMEOUT_SEC),
+                    state=state, cancel=token,
+                )
+            finally:
+                self._end_model_turn(session, token)
+
+            if decision_reply.get("cancelled"):
+                return self._reply(
+                    session, text, "", kind="cancelled", source="agent-loop",
+                    steps=steps, started=started, save=False,
+                )
+            decision = model.parse_json(str(decision_reply.get("text") or "")) if decision_reply.get("ok") else {}
+            problem = adaptive_decision_problem(
+                decision, self.runner.caps, learned,
+                require_observation=not observations,
+            ) if decision else str(decision_reply.get("reason") or "agent loop не вернул JSON")
+
+            if problem:
+                validator_feedback = problem
+                steps.append({
+                    "kind": "check",
+                    "title": f"Agent Loop · решение {index + 1}",
+                    "detail": f"отклонено: {problem[:180]}",
+                })
+                continue
+
+            validator_feedback = ""
+            if bool(decision.get("done")):
+                final_reply = " ".join(str(decision.get("reply") or "").split())
+                steps.append({
+                    "kind": "agent",
+                    "title": "Agent Loop · завершён",
+                    "detail": f"после {len(observations)} выполненных шагов",
+                })
+                kind = "action" if observations else "answer"
+                if not final_reply:
+                    final_reply = (
+                        summarize(last_skill, last_result)
+                        if last_skill and last_result
+                        else (initial_reply or "Готово.")
+                    )
+                return self._reply(
+                    session, text, final_reply, kind=kind, skill=last_skill,
+                    result=_trim(last_result) if last_result else {},
+                    source="agent-loop", steps=steps, started=started,
+                    extra={"agent_loop": {"iterations": len(observations), "completed": True}},
+                )
+
+            name = str(decision.get("skill") or "").strip().casefold()
+            skill = skills.get(name, learned)
+            assert skill is not None  # validated above
+            params, errors = skills.check_params(skill, decision.get("params"))
+            hard = [error for error in errors if "не объявлен" not in error]
+            if hard:
+                validator_feedback = "; ".join(hard)
+                continue
+
+            signature = json.dumps([name, params], ensure_ascii=False, sort_keys=True, default=str)
+            if signature in seen_actions:
+                steps.append({
+                    "kind": "check",
+                    "title": "Agent Loop · защита от цикла",
+                    "detail": f"не повторяю {name} с теми же параметрами",
+                })
+                return self._reply(
+                    session, text,
+                    "Не стала повторять то же действие по кругу. Нужна новая информация или уточнение цели.",
+                    kind="clarify", skill=last_skill, result=_trim(last_result) if last_result else {},
+                    source="agent-loop", steps=steps, started=started,
+                    extra={"agent_loop": {"iterations": len(observations), "completed": False}},
+                )
+            seen_actions.add(signature)
+
+            steps.append({
+                "kind": "agent",
+                "title": f"Agent Loop · шаг {index + 1}",
+                "detail": executor_describe(skill, params),
+            })
+            try:
+                set_activity = getattr(self.agent, "set_activity", None)
+                if callable(set_activity):
+                    set_activity(
+                        "executing", session=session, skill=name,
+                        detail=f"Agent Loop {index + 1}/{MAX_ADAPTIVE_STEPS}: {executor_describe(skill, params)}",
+                        active=True,
+                    )
+            except Exception:
+                pass
+
+            result = self._run(name, params, popup=session != WINDOW_SESSION)
+            result = result if isinstance(result, dict) else {"ok": False, "reason": "исполнитель вернул неверный ответ"}
+            last_result = result
+            last_skill = name
+            fact = compact_result_context(result)
+            observations.append({"skill": name, "params": params, "result": fact})
+            steps.append({
+                "kind": "check",
+                "title": f"Наблюдение · {skill['title']}",
+                "detail": summarize(name, result)[:220],
+            })
+
+            if result.get("queued") and result.get("id"):
+                pending = {"id": result.get("id"), "text": result.get("text")}
+                if result.get("ttl"):
+                    pending["ttl"] = int(result["ttl"])
+                return self._reply(
+                    session, text,
+                    f"Следующий шаг требует подтверждения: {result.get('text') or skill['title']}.",
+                    kind="pending", skill=name, params=params, result=_trim(result),
+                    pending=pending, source="agent-loop", steps=steps, started=started,
+                    extra={"agent_loop": {"iterations": len(observations), "completed": False}},
+                )
+            if result.get("autonomy_blocked"):
+                return self._reply(
+                    session, text,
+                    str(result.get("reason") or "Agent Loop остановлен policy автономности."),
+                    kind="error", skill=name, params=params, result=_trim(result),
+                    source="agent-loop", steps=steps, started=started,
+                    extra={"agent_loop": {"iterations": len(observations), "completed": False}},
+                )
+
+        steps.append({
+            "kind": "check",
+            "title": "Agent Loop · лимит",
+            "detail": f"остановка после {MAX_ADAPTIVE_STEPS} решений",
+        })
+        final_reply = (
+            "Остановилась на безопасном лимите Agent Loop. "
+            "Результаты выполненных шагов сохранены; для продолжения нужна новая команда."
+        )
+        return self._reply(
+            session, text, final_reply, kind="action" if observations else "clarify",
+            skill=last_skill, result=_trim(last_result) if last_result else {},
+            source="agent-loop", steps=steps, started=started,
+            extra={"agent_loop": {"iterations": len(observations), "completed": False}},
+        )
+
     def _volume_delta(self, params: dict[str, Any]) -> dict[str, Any]:
         """«Громче» — это «текущая + 10»: навык получает уровень, а не догадку."""
         delta = int(params.pop("delta", 0) or 0)
@@ -2592,6 +2811,17 @@ class Brain:
         raw_steps = answer.get("steps")
         if ask:
             return self._reply(session, text, ask, kind="clarify", source="model", steps=steps, started=started)
+
+        if answer.get("adaptive") is True:
+            steps.append({
+                "kind": "model",
+                "title": "Условный план",
+                "detail": "следующий шаг зависит от реального результата",
+            })
+            return self._adaptive_loop(
+                session, text, history, steps, started, state,
+                retrieval_query, initial_reply=said,
+            )
 
         if isinstance(raw_steps, list) and raw_steps:
             if len(raw_steps) > 8:
