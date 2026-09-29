@@ -143,6 +143,9 @@ class BackendClient:
     def learning(self) -> dict[str, Any]:
         return self.get("/learning")
 
+    def learning_op(self, op: str, **payload: Any) -> dict[str, Any]:
+        return self.post("/learning", {"op": str(op), **payload})
+
     def memory(self, query: str = "") -> dict[str, Any]:
         suffix = "?" + urllib.parse.urlencode({"q": query, "session": "native"})
         return self.get("/memory" + suffix)

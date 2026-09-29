@@ -10,11 +10,11 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QBuffer, QByteArray, QIODevice
 from PySide6.QtGui import QColor, QImage
-from PySide6.QtWidgets import QApplication, QLabel, QProgressBar, QPushButton
+from PySide6.QtWidgets import QApplication, QLabel, QLineEdit, QProgressBar, QPushButton
 
 from agent.native_ui.app import NativeApp
 from agent.native_ui.components import LumaPortrait
-from agent.native_ui.control_center import ActivityPage, ChatPage, ControlCenter, HomePage, MemoryPage, SkillsPage, TasksPage, TextPage, VoicePage
+from agent.native_ui.control_center import ActivityPage, ChatPage, ControlCenter, HomePage, JournalPage, LearningPage, MemoryPage, SkillsPage, TasksPage, TextPage, VoicePage
 from agent.native_ui.orb import LumaOrbCore, VoiceOrb
 from agent.native_ui.quick_panel import QuickPanel
 
@@ -193,6 +193,104 @@ class NativeQtSmokeTests(unittest.TestCase):
         page.deleteLater()
         self.app.processEvents()
 
+    def test_learning_workspace_teaches_and_confirms_forget(self):
+        page = LearningPage()
+        page.set_payload({
+            "learned": [{
+                "id": 17, "phrase": "рабочий режим", "meaning_text": "открыть Telegram",
+                "source": "taught", "source_title": "научили", "uses": 3,
+                "good": 2, "bad": 0, "active": 1,
+            }],
+            "unknown": [{
+                "id": 31, "text": "вруби рабочку", "norm": "вруби рабочку",
+                "count": 3, "last_at": "2026-09-29 21:00:00",
+            }],
+            "aliases": [{"word": "телега", "meaning": "телеграм", "uses": 5}],
+            "insights": [{
+                "text": "Около 20:00 вы обычно просите «открой Steam» — 4 дня.",
+                "skill": "app.open", "phrase": "открой Steam", "days": 4, "hour": 20,
+            }],
+            "feedback": {"good": 8, "bad": 2},
+        })
+        self.assertEqual("1", page.learned_metric.text())
+        self.assertEqual("1", page.unknown_metric.text())
+        self.assertEqual("1", page.alias_metric.text())
+        self.assertEqual("1", page.insight_metric.text())
+        self.assertIn("👍 8", page.feedback_status.text())
+
+        actions = []
+        page.action_requested.connect(lambda op, payload: actions.append((op, dict(payload))))
+
+        meaning = next(
+            field for field in page.findChildren(QLineEdit)
+            if "Что эта фраза" in field.placeholderText()
+        )
+        meaning.setText("открой Steam")
+        teach = next(button for button in page.findChildren(QPushButton) if button.text() == "Научить")
+        teach.click()
+        self.assertIn(("teach", {"phrase": "вруби рабочку", "meaning": "открой Steam"}), actions)
+
+        forget = next(button for button in page.findChildren(QPushButton) if button.text() == "Забыть урок")
+        forget.click()
+        self.assertFalse(any(op == "forget" for op, _payload in actions))
+        self.assertEqual("Подтвердить удаление", forget.text())
+        forget.click()
+        self.assertIn(("forget", {"id": 17}), actions)
+
+        page.search.setText("телега")
+        self.app.processEvents()
+        visible = []
+        for index in range(page.host.count()):
+            card = page.host.itemAt(index).widget()
+            if card is not None:
+                visible.extend(label.text() for label in card.findChildren(QLabel))
+        self.assertTrue(any("телега" in value for value in visible))
+        self.assertFalse(any("рабочий режим" in value for value in visible))
+        page.deleteLater()
+        self.app.processEvents()
+
+    def test_journal_workspace_is_filterable_read_only_audit(self):
+        page = JournalPage()
+        page.set_payload({
+            "entries": [
+                {
+                    "id": 1, "at": "2026-09-29 20:00:00", "skill": "app.open",
+                    "outcome": "ok", "detail": "Steam открыт", "target": "Steam",
+                    "params": {"target": "steam"},
+                },
+                {
+                    "id": 2, "at": "2026-09-29 20:01:00", "skill": "window.close",
+                    "outcome": "denied", "detail": "нужное окно не найдено", "target": "Блокнот",
+                    "params": {"title": "Блокнот"},
+                },
+            ],
+            "count": 2,
+            "stats": {"journal": 20},
+        })
+        self.assertEqual("2", page.total_metric.text())
+        self.assertEqual("1", page.ok_metric.text())
+        self.assertEqual("1", page.error_metric.text())
+        self.assertEqual("2", page.skills_metric.text())
+        visible = page.browser.toPlainText()
+        self.assertIn("app.open", visible)
+        self.assertIn("window.close", visible)
+        self.assertIn("Steam открыт", visible)
+
+        page.outcome_filter.setCurrentIndex(page.outcome_filter.findData("denied"))
+        self.app.processEvents()
+        denied = page.browser.toPlainText()
+        self.assertIn("window.close", denied)
+        self.assertNotIn("app.open", denied)
+
+        page.outcome_filter.setCurrentIndex(0)
+        page.search.setText("Steam")
+        self.app.processEvents()
+        searched = page.browser.toPlainText()
+        self.assertIn("app.open", searched)
+        self.assertNotIn("window.close", searched)
+        page.deleteLater()
+        self.app.processEvents()
+
     def test_skills_page_is_searchable_capability_map(self):
         center = ControlCenter()
         self.assertIsInstance(center.pages["skills"], SkillsPage)
@@ -368,6 +466,29 @@ class NativeQtSmokeTests(unittest.TestCase):
             "count": 2,
             "layers": {"working": [], "episodic": [], "semantic": [], "user_model": []},
         })
+        center.set_page_payload("learning", {
+            "learned": [{
+                "id": 17, "phrase": "рабочий режим", "meaning_text": "открыть Telegram",
+                "source": "taught", "source_title": "научили", "uses": 3,
+                "good": 2, "bad": 0, "active": 1,
+            }],
+            "unknown": [{"id": 31, "text": "вруби рабочку", "count": 2,
+                         "last_at": "2026-09-29 21:00:00"}],
+            "aliases": [{"word": "телега", "meaning": "телеграм", "uses": 5}],
+            "insights": [{"text": "Обычно вечером вы открываете Steam.",
+                          "skill": "app.open", "phrase": "открой Steam",
+                          "days": 4, "hour": 20}],
+            "feedback": {"good": 8, "bad": 2},
+        })
+        center.set_page_payload("journal", {
+            "entries": [{
+                "id": 1, "at": "2026-09-29 20:00:00", "skill": "app.open",
+                "outcome": "ok", "detail": "Steam открыт", "target": "Steam",
+                "params": {"target": "steam"},
+            }],
+            "count": 1,
+            "stats": {"journal": 20},
+        })
         center.set_page_payload("activity", {
             "activity": {
                 "current": {
@@ -499,6 +620,11 @@ class NativeQtSmokeTests(unittest.TestCase):
                 filtered_memory.extend(label.text() for label in card.findChildren(QLabel))
         self.assertTrue(any("Мария любит PETG" in value for value in filtered_memory))
         self.assertFalse(any("Обычно печать начинается вечером" in value for value in filtered_memory))
+        self.assertIsInstance(center.pages["learning"], LearningPage)
+        self.assertEqual("1", center.pages["learning"].learned_metric.text())
+        self.assertEqual("1", center.pages["learning"].unknown_metric.text())
+        self.assertIsInstance(center.pages["journal"], JournalPage)
+        self.assertIn("Steam открыт", center.pages["journal"].browser.toPlainText())
         self.assertIsInstance(center.pages["activity"], ActivityPage)
         timeline = center.pages["activity"].browser.toPlainText()
         self.assertIn("открой телеграм", timeline)

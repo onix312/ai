@@ -167,6 +167,30 @@ class BackendClientTests(unittest.TestCase):
             ("POST", "http://127.0.0.1:8799/memory", {"op": "forget", "id": 11}),
         ], calls)
 
+    def test_learning_api_preserves_exact_operation_payloads(self):
+        client = BackendClient()
+        calls = []
+
+        def fake(req, timeout=0):
+            body = json.loads(req.data.decode("utf-8")) if req.data else None
+            calls.append((req.get_method(), req.full_url, body))
+            return _Response({"ok": True})
+
+        with mock.patch("urllib.request.urlopen", fake):
+            client.learning()
+            client.learning_op("teach", phrase="вруби рабочку", meaning="открой Telegram")
+            client.learning_op("forget", id=17)
+            client.learning_op("alias_forget", word="телега")
+            client.learning_op("dismiss", id=31)
+        self.assertEqual([
+            ("GET", "http://127.0.0.1:8799/learning", None),
+            ("POST", "http://127.0.0.1:8799/learning",
+             {"op": "teach", "phrase": "вруби рабочку", "meaning": "открой Telegram"}),
+            ("POST", "http://127.0.0.1:8799/learning", {"op": "forget", "id": 17}),
+            ("POST", "http://127.0.0.1:8799/learning", {"op": "alias_forget", "word": "телега"}),
+            ("POST", "http://127.0.0.1:8799/learning", {"op": "dismiss", "id": 31}),
+        ], calls)
+
     def test_provider_catalog_uses_agent_port(self):
         client = BackendClient()
         urls = []

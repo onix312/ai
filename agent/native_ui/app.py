@@ -81,6 +81,7 @@ class NativeApp:
         self.center.pronunciation_delete.connect(self.delete_pronunciation)
         self.center.memory_pin.connect(self.memory_pin)
         self.center.memory_forget.connect(self.memory_forget)
+        self.center.learning_action.connect(self.learning_action)
         self.center.task_command.connect(self.task_command)
         self.center.plan_preview.connect(self.plan_preview)
         self.center.plan_command.connect(self.plan_command)
@@ -495,6 +496,24 @@ class NativeApp:
             self.refresh_page("tasks")
 
         self.run_async(lambda: self.backend.replan_op("preview", task_id=task_id), done)
+
+    def learning_action(self, op: str, payload: dict[str, Any]) -> None:
+        clean = str(op or "").strip()
+        body = dict(payload or {})
+        if not clean:
+            return
+
+        def done(result: dict[str, Any]) -> None:
+            if not result.get("ok"):
+                self.quick.show_answer(str(result.get("reason") or "Не удалось изменить обучение."))
+            elif result.get("say"):
+                self.quick.show_answer(str(result.get("say")))
+            self.refresh_page("learning")
+
+        self.run_async(
+            lambda: self.backend.learning_op(clean, **body),
+            done,
+        )
 
     def memory_pin(self, memory_id: int, pinned: bool) -> None:
         if int(memory_id or 0) <= 0:
