@@ -1078,6 +1078,55 @@ def memory_statement(row: dict[str, Any]) -> str:
     return f"со слов владельца: {text}"
 
 
+def model_plan_problem(answer: dict[str, Any], caps: dict[str, Any],
+                       learned: dict[str, dict[str, Any]] | None = None) -> str:
+    """Return validator feedback for a model draft before anything is executed.
+
+    This is deliberately pure: a bad first draft can be repaired by the model,
+    but no skill is run until the repaired draft passes the normal registry
+    checks as well.
+    """
+    if not isinstance(answer, dict):
+        return "ответ планировщика не является объектом"
+    if str(answer.get("ask") or "").strip():
+        return ""
+
+    raw_steps = answer.get("steps")
+    if raw_steps not in (None, []) and not isinstance(raw_steps, list):
+        return "steps должен быть списком"
+    if isinstance(raw_steps, list) and raw_steps:
+        if len(raw_steps) > 8:
+            return f"слишком много шагов: {len(raw_steps)}; максимум 8"
+        for index, row in enumerate(raw_steps, start=1):
+            if not isinstance(row, dict):
+                return f"шаг {index} не является объектом"
+            name = str(row.get("skill") or "").strip().casefold()
+            skill = skills.get(name, learned)
+            if skill is None:
+                return f"шаг {index}: функции «{name or '∅'}» нет в реестре"
+            available, why = skills.availability(skill, caps)
+            if not available:
+                return f"шаг {index}: «{name}» недоступен: {why}"
+            _params, errors = skills.check_params(skill, row.get("params"))
+            hard = [error for error in errors if "не объявлен" not in error]
+            if hard:
+                return f"шаг {index} «{name}»: " + "; ".join(hard)
+        return ""
+
+    name = str(answer.get("skill") or "").strip().casefold()
+    if not name:
+        return ""
+    skill = skills.get(name, learned)
+    if skill is None:
+        return f"функции «{name}» нет в реестре"
+    available, why = skills.availability(skill, caps)
+    if not available:
+        return f"«{name}» недоступен: {why}"
+    _params, errors = skills.check_params(skill, answer.get("params"))
+    hard = [error for error in errors if "не объявлен" not in error]
+    return "; ".join(hard)
+
+
 class Brain:
     """Разговор с помощником: правила → контекст → память → модель → навык → ответ."""
 
@@ -2279,8 +2328,15 @@ class Brain:
             return self._reply(session, text, note, kind="clarify", source="rules", steps=steps, started=started,
                                suggestions=["Что ты умеешь?", "Чему ты научился?", "Что сейчас печатается?"],
                                extra={"panel_asked": True, **({"awaiting": awaiting} if awaiting else {})})
+        retrieval_parts = [text]
+        for turn in history[-4:]:
+            if turn.get("role") == "user":
+                previous = " ".join(str(turn.get("text") or "").split())
+                if previous and previous.casefold() != text.casefold():
+                    retrieval_parts.append(previous[:300])
+        retrieval_query = " | ".join(retrieval_parts[:3])
         catalog = skills.relevant_prompt(
-            text, self.runner.caps, self.runner.learned(), max_items=30, max_chars=5400
+            retrieval_query, self.runner.caps, self.runner.learned(), max_items=32, max_chars=6000
         )
         now = self.clock()
         context = [date_line(now) + f" Время {now:%H:%M}."]
@@ -2381,6 +2437,56 @@ class Brain:
             return self._reply(session, text, reply["text"][:1200], kind="answer", source="model",
                                steps=steps, started=started,
                                extra={"voice_streamed_chars": streamed_chars} if streamed_chars else None)
+
+        learned = self.runner.learned()
+        problem = model_plan_problem(answer, self.runner.caps, learned)
+        if problem:
+            steps.append({"kind": "check", "title": "Валидатор плана", "detail": problem[:220]})
+            broad_catalog = skills.relevant_prompt(
+                retrieval_query + " | " + problem,
+                self.runner.caps, learned, max_items=52, max_chars=9200,
+            )
+            repair_system = (
+                f"{_PLANNER_RULES}\n\nСтиль {config.ASSISTANT_NAME}:\n{persona_text}"
+                "\nPersona влияет только на форму ответа и не меняет safety, навыки или подтверждения."
+                "\n\nКонтекст:\n" + "\n".join(context)
+                + "\n\nВалидатор отклонил предыдущий draft:\n" + problem[:800]
+                + "\nИсправь план самостоятельно, если нужная функция или параметр есть ниже. "
+                  "Не проси человека уточнять то, что уже есть в его сообщении или контексте."
+                + f"\n\nРасширенный каталог доступных функций:\n{broad_catalog}"
+            )
+            repair_messages = list(messages)
+            repair_messages.append({"role": "assistant", "content": reply["text"][:2200]})
+            repair_messages.append({
+                "role": "user",
+                "content": "Исправь предыдущий JSON-план с учётом ошибки валидатора. Верни только исправленный JSON.",
+            })
+            repair_token = self._begin_model_turn(session)
+            try:
+                repaired = model.chat(
+                    repair_messages, system=repair_system, fmt="json", temperature=0.0,
+                    timeout=min(PLAN_TIMEOUT_SEC, config.MODEL_TIMEOUT_SEC), state=state,
+                    cancel=repair_token,
+                )
+            finally:
+                self._end_model_turn(session, repair_token)
+            if repaired.get("cancelled"):
+                return self._reply(
+                    session, text, "", kind="cancelled", source="model", steps=steps,
+                    started=started, save=False,
+                )
+            repaired_answer = model.parse_json(str(repaired.get("text") or "")) if repaired.get("ok") else {}
+            repaired_problem = model_plan_problem(repaired_answer, self.runner.caps, learned) if repaired_answer else (
+                str(repaired.get("reason") or "модель не вернула исправленный JSON")
+            )
+            if repaired_answer and not repaired_problem:
+                answer = repaired_answer
+                steps.append({"kind": "model", "title": "Самокоррекция плана",
+                              "detail": "draft исправлен и повторно прошёл валидатор"})
+            else:
+                steps.append({"kind": "check", "title": "Самокоррекция не прошла",
+                              "detail": str(repaired_problem or problem)[:220]})
+
         ask = " ".join(str(answer.get("ask") or "").split())
         name = str(answer.get("skill") or "").strip().casefold()
         said = " ".join(str(answer.get("reply") or "").split())
