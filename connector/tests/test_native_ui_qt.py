@@ -110,6 +110,16 @@ class NativeQtSmokeTests(unittest.TestCase):
                 "relationship": {"professional": "профессионально", "friendly": "дружелюбно", "warm": "тепло"},
             },
         })
+        center.set_pronunciation_payload({
+            "ok": True,
+            "items": {"Bambu": "бэмбу", "MIKHAIL": "михаил"},
+            "custom_terms": 2,
+            "builtin_terms": 24,
+            "dictionary_path": "C:/Users/test/.printflow/tts-pronunciations.json",
+        })
+        self.assertEqual(2, center.pronunciation_list.count())
+        self.assertIn("Пользовательских правил: 2", center.pronunciation_status.text())
+
         center.set_page_payload("memory", {"memories": [{"text": "пример"}]})
         center.set_page_payload("activity", {
             "activity": {
