@@ -189,6 +189,23 @@ def _normalize_pause_punctuation(text: str) -> str:
     return text
 
 
+def quality_status() -> dict[str, object]:
+    path = _default_dictionary_path()
+    custom = {}
+    try:
+        stamp = path.stat().st_mtime_ns
+    except OSError:
+        stamp = 0
+    if stamp:
+        custom = _load_dictionary(str(path), stamp)
+    return {
+        "enabled": True,
+        "builtin_terms": len(_BUILTIN),
+        "custom_terms": len(custom),
+        "dictionary_path": str(path),
+    }
+
+
 def prepare_tts_text(text: str, overrides: Mapping[str, str] | None = None) -> str:
     """Return a pronunciation-friendly string for local Piper TTS."""
     clean = " ".join(str(text or "").split())
