@@ -253,6 +253,7 @@ class NativeApp:
         loaders: dict[str, Callable[[], Any]] = {
             "today": self.backend.personal,
             "tasks": self._load_tasks,
+            "activity": self._load_activity,
             "memory": self.backend.memory,
             "learning": self.backend.learning,
             "skills": self.backend.skills,
@@ -261,6 +262,17 @@ class NativeApp:
         fn = loaders.get(key)
         if fn:
             self.run_async(fn, lambda payload, k=key: self.center.set_page_payload(k, payload))
+
+    def _load_activity(self) -> dict[str, Any]:
+        status = self.backend.status()
+        tasks = self.backend.tasks(20)
+        journal = self.backend.journal(60)
+        activity = status.get("activity") if isinstance(status.get("activity"), dict) else {}
+        return {
+            "activity": activity,
+            "tasks": tasks.get("tasks") or [],
+            "journal": journal.get("entries") or [],
+        }
 
     def _load_tasks(self) -> dict[str, Any]:
         pending = self.backend.pending()
