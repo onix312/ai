@@ -401,10 +401,13 @@ class SkillsPage(QWidget):
         self.total_metric.setObjectName("skillMetric")
         self.off_metric = QLabel("0")
         self.off_metric.setObjectName("skillMetric")
+        self.learned_metric = QLabel("0")
+        self.learned_metric.setObjectName("skillMetricReady")
         for title_text, widget in (
             ("ГОТОВО", self.ready_metric),
             ("ВСЕГО", self.total_metric),
             ("НЕДОСТУПНО", self.off_metric),
+            ("ОБУЧЕНО", self.learned_metric),
         ):
             card = GlassCard("cyan" if title_text == "ГОТОВО" else "")
             box = QVBoxLayout(card)
@@ -427,6 +430,16 @@ class SkillsPage(QWidget):
         self.state_filter.addItem("Что не работает", "off")
         self.state_filter.currentIndexChanged.connect(self._render)
         filter_row.addWidget(self.state_filter)
+        self.provider_filter = QComboBox()
+        self.provider_filter.addItem("Все providers", "")
+        self.provider_filter.currentIndexChanged.connect(self._render)
+        filter_row.addWidget(self.provider_filter)
+        self.risk_filter = QComboBox()
+        self.risk_filter.addItem("Любой риск", "")
+        for value in ("read", "soft", "write", "system"):
+            self.risk_filter.addItem(value, value)
+        self.risk_filter.currentIndexChanged.connect(self._render)
+        filter_row.addWidget(self.risk_filter)
         root.addLayout(filter_row)
 
         brain_note = QLabel(
@@ -448,18 +461,35 @@ class SkillsPage(QWidget):
         self.ready_metric.setText(str(ready))
         self.total_metric.setText(str(len(rows)))
         self.off_metric.setText(str(len(rows) - ready))
+        self.learned_metric.setText(str(sum(1 for row in rows if row.get("learned"))))
+        current_provider = str(self.provider_filter.currentData() or "")
+        providers = sorted({str(row.get("provider") or "local") for row in rows})
+        self.provider_filter.blockSignals(True)
+        self.provider_filter.clear()
+        self.provider_filter.addItem("Все providers", "")
+        for provider in providers:
+            self.provider_filter.addItem(provider, provider)
+        provider_index = self.provider_filter.findData(current_provider)
+        self.provider_filter.setCurrentIndex(provider_index if provider_index >= 0 else 0)
+        self.provider_filter.blockSignals(False)
         self._render()
 
     def _render(self) -> None:
         rows = [row for row in list(self._payload.get("skills") or []) if isinstance(row, dict)]
         needle = " ".join(self.search.text().casefold().split())
         mode = str(self.state_filter.currentData() or "all")
+        wanted_provider = str(self.provider_filter.currentData() or "")
+        wanted_risk = str(self.risk_filter.currentData() or "")
         filtered = []
         for row in rows:
             available = bool(row.get("available"))
             if mode == "ready" and not available:
                 continue
             if mode == "off" and available:
+                continue
+            if wanted_provider and str(row.get("provider") or "local") != wanted_provider:
+                continue
+            if wanted_risk and str(row.get("risk") or "read") != wanted_risk:
                 continue
             hay = " ".join(
                 str(row.get(key) or "") for key in ("name", "title", "description", "reason", "provider")
@@ -2311,16 +2341,31 @@ class ControlCenter(QMainWindow):
 
         settings = QWidget()
         sl = QVBoxLayout(settings)
+        sl.setSpacing(12)
         title = QLabel("Настройки")
         title.setObjectName("pageTitle")
         sl.addWidget(title)
+        subtitle = QLabel("Persona, автономность, инициативность, providers и аварийное управление.")
+        subtitle.setObjectName("muted")
+        subtitle.setWordWrap(True)
+        sl.addWidget(subtitle)
+
+        runtime_card = GlassCard("cyan")
+        runtime_box = QVBoxLayout(runtime_card)
+        runtime_box.setContentsMargins(14, 11, 14, 12)
+        runtime_head = QLabel("RUNTIME // SAFETY")
+        runtime_head.setObjectName("heroKicker")
+        runtime_box.addWidget(runtime_head)
         self.settings_status = QLabel("Backend: …")
+        self.settings_status.setObjectName("settingsState")
         self.settings_status.setWordWrap(True)
-        sl.addWidget(self.settings_status)
+        runtime_box.addWidget(self.settings_status)
         self.settings_hotkey = QLabel(
-            "Быстрая команда: Ctrl + Shift + Space · STOP ALL: Ctrl + Alt + Shift + Space"
+            "Quick command: Ctrl + Shift + Space · STOP ALL: Ctrl + Alt + Shift + Space"
         )
-        sl.addWidget(self.settings_hotkey)
+        self.settings_hotkey.setObjectName("muted")
+        self.settings_hotkey.setWordWrap(True)
+        runtime_box.addWidget(self.settings_hotkey)
         controls = QHBoxLayout()
         self.mic_button = QPushButton("🎤 Включить wake word")
         self.mic_button.clicked.connect(self.mic_toggle)
@@ -2329,15 +2374,17 @@ class ControlCenter(QMainWindow):
         self.stop_all_button.setObjectName("danger")
         self.stop_all_button.clicked.connect(self.safety_toggle)
         controls.addWidget(self.stop_all_button)
-        sl.addLayout(controls)
+        controls.addStretch(1)
+        runtime_box.addLayout(controls)
+        sl.addWidget(runtime_card)
 
-        voice_link = QLabel("Голос, Baya, произношение и диагностика вынесены в отдельный раздел «Голос».")
-        voice_link.setObjectName("muted")
+        voice_link = QLabel("VOICE · Baya, произношение и диагностика находятся в отдельном разделе «Голос».")
+        voice_link.setObjectName("voiceChain")
         voice_link.setWordWrap(True)
         sl.addWidget(voice_link)
 
         persona_title = QLabel("Persona Люмы")
-        persona_title.setStyleSheet("font-size:16px; font-weight:700; margin-top:12px;")
+        persona_title.setObjectName("sectionTitle")
         sl.addWidget(persona_title)
         self.persona_boxes: dict[str, QComboBox] = {}
         persona_fields = (
@@ -2372,7 +2419,7 @@ class ControlCenter(QMainWindow):
         self.persona_status.setObjectName("muted")
         sl.addWidget(self.persona_status)
         autonomy_title = QLabel("Autonomy")
-        autonomy_title.setStyleSheet("font-size:16px; font-weight:700; margin-top:12px;")
+        autonomy_title.setObjectName("sectionTitle")
         sl.addWidget(autonomy_title)
 
         level_row = QHBoxLayout()
@@ -2420,7 +2467,7 @@ class ControlCenter(QMainWindow):
         sl.addWidget(self.autonomy_status)
 
         proactivity_title = QLabel("Proactivity")
-        proactivity_title.setStyleSheet("font-size:16px; font-weight:700; margin-top:12px;")
+        proactivity_title.setObjectName("sectionTitle")
         sl.addWidget(proactivity_title)
 
         pro_mode_row = QHBoxLayout()
@@ -2494,7 +2541,7 @@ class ControlCenter(QMainWindow):
         self.events_view.setPlainText("Событий пока нет.")
         sl.addWidget(self.events_view)
         providers_title = QLabel("Providers")
-        providers_title.setStyleSheet("font-size:16px; font-weight:700; margin-top:12px;")
+        providers_title.setObjectName("sectionTitle")
         sl.addWidget(providers_title)
         self.providers_view = QTextBrowser()
         self.providers_view.setMaximumHeight(220)
