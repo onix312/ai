@@ -595,6 +595,15 @@ def understand(text: str) -> dict[str, Any] | None:
         return _plan("screen.shot", {}, "экран: снимок")
     if re.search(r"что (у меня |сейчас )?на экране|опиши экран|что ты видишь", low):
         return _plan("screen.describe", {}, "экран: описать")
+    match = re.match(
+        r"^(?:найди\s+(?:на\s+экране\s+)?(?P<find>.+?)\s+и\s+(?:нажми|кликни)(?:\s+(?:на|по))?\s*(?:него|неё|это)?|"
+        r"(?:нажми|кликни)(?:\s+(?:на|по))?\s+(?:кнопк\w*\s+)?(?P<click>.+))$",
+        low,
+    )
+    if match:
+        target = str(match.group("find") or match.group("click") or "").strip(" .,!?")
+        if target:
+            return _plan("screen.find_and_click", {"text": target}, "экран: найти и кликнуть")
     match = re.match(r"^найди на экране\s+(?P<t>.+)$", low)
     if match:
         return _plan("screen.find", {"text": match.group("t")}, "экран: найти")
@@ -891,6 +900,12 @@ def summarize(skill: str, result: dict[str, Any]) -> str:
         found = result.get("found") or {}
         return (f"Нашёл «{found.get('text') or found.get('title') or ''}» ({result.get('method')})."
                 if found else "На экране этого не видно.")
+    if skill == "screen.find_and_click":
+        found = result.get("found") or {}
+        clicked = result.get("clicked") or {}
+        label = found.get("text") or found.get("title") or clicked.get("text") or ""
+        return (f"Нашла «{label}» и кликнула ({result.get('method')})."
+                if clicked else str(result.get("reason") or "Элемент найден, но клик не выполнен."))
     if skill in ("day.briefing", "day.summary"):
         lines = result.get("lines") or []
         return "\n".join(str(line) for line in lines[:8]) or str(result.get("text") or "Сводка пуста.")
