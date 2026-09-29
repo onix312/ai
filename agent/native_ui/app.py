@@ -30,6 +30,7 @@ class NativeApp:
         self.backend = backend or BackendClient()
         self.state = UiState()
         self.pool = QThreadPool.globalInstance()
+        self._workers: set[Worker] = set()
         self._busy_status = False
         self._busy_chat = False
         self._hotkey_filter: HotkeyFilter | None = None
@@ -93,8 +94,11 @@ class NativeApp:
     def run_async(self, fn: Callable[[], Any], done: Callable[[Any], None],
                   failed: Callable[[str], None] | None = None) -> None:
         worker = Worker(fn)
+        worker.setAutoDelete(False)
+        self._workers.add(worker)
         worker.signals.done.connect(done)
         worker.signals.failed.connect(failed or self._show_error)
+        worker.signals.finished.connect(self._workers.discard)
         self.pool.start(worker)
 
     # --------------------------------------------------------------- status
