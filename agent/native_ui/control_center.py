@@ -861,10 +861,10 @@ class ControlCenter(QMainWindow):
         self.tts_piper.setPlaceholderText("Piper executable · пусто = искать piper в PATH")
         sl.addWidget(self.tts_piper)
         self.tts_model = QLineEdit()
-        self.tts_model.setPlaceholderText("Путь к .onnx · рекомендовано ru_RU-irina-medium")
+        self.tts_model.setPlaceholderText("Piper fallback · путь к .onnx (необязательно)")
         sl.addWidget(self.tts_model)
         self.tts_speaker = QLineEdit()
-        self.tts_speaker.setPlaceholderText("Speaker id · обычно пусто для Irina")
+        self.tts_speaker.setPlaceholderText("Piper fallback · speaker id")
         sl.addWidget(self.tts_speaker)
 
         tts_buttons = QHBoxLayout()
@@ -887,8 +887,8 @@ class ControlCenter(QMainWindow):
         sl.addLayout(tts_buttons)
 
         self.tts_status = QLabel(
-            "Рекомендуемый профиль: ru_RU-irina-medium. "
-            "Если HQ-модель недоступна, Люма автоматически использует системный голос."
+            "Основной голос: Silero v5_5_ru · Baya · 48 kHz. "
+            "Piper и системный TTS остаются автоматическим fallback."
         )
         self.tts_status.setObjectName("muted")
         self.tts_status.setWordWrap(True)
@@ -1256,15 +1256,19 @@ class ControlCenter(QMainWindow):
         synth_ms = int(payload.get("last_synth_ms") or 0)
         last_chars = int(payload.get("last_chars") or 0)
         latency = f" · synth {synth_ms} ms/{last_chars} chars" if synth_ms and last_chars else ""
+        speaker = str(payload.get("speaker") or "")
+        sample_rate = int(payload.get("sample_rate") or 0)
+        voice = f" · {speaker}" if speaker else ""
+        rate = f" · {sample_rate // 1000} kHz" if sample_rate else ""
         self.tts_meta.setText(
             f"TTS: {engine} · HQ {'✓' if hq else '–'} · "
-            f"model {'✓' if ready else '–'}" + (f" · {model}" if model else "") + latency
+            f"model {'✓' if ready else '–'}" + (f" · {model}" if model else "") + voice + rate + latency
         )
         editing = any(widget.hasFocus() for widget in (self.tts_piper, self.tts_model, self.tts_speaker))
         if not editing:
             self.tts_piper.setText(str(payload.get("piper_path") or ""))
-            self.tts_model.setText(str(payload.get("model_path") or ""))
-            self.tts_speaker.setText(str(payload.get("speaker") or ""))
+            self.tts_model.setText(str(payload.get("piper_model_path") or payload.get("model_path") or ""))
+            self.tts_speaker.setText(str(payload.get("piper_speaker") or ""))
 
     def set_tts_message(self, text: str) -> None:
         self.tts_status.setText(str(text or ""))
