@@ -37,7 +37,7 @@ import uuid
 import webbrowser
 from typing import Any
 
-from . import winapi
+from . import tts_quality, winapi
 
 IS_WINDOWS = sys.platform.startswith("win")
 IS_MAC = sys.platform == "darwin"
@@ -1256,6 +1256,7 @@ def tts_status() -> dict[str, Any]:
         "piper": bool(executable),
         "model_ready": pathlib.Path(model).is_file(),
         "recommended_voice": "ru_RU-irina-medium",
+        "quality": tts_quality.quality_status(),
         "last_engine": str(_TTS_METRICS.get("last_engine") or ""),
         "last_synth_ms": int(_TTS_METRICS.get("last_synth_ms") or 0),
         "last_chars": int(_TTS_METRICS.get("last_chars") or 0),
@@ -1560,7 +1561,8 @@ def speak(text: str, rate: int = 0, volume: int = 100) -> tuple[dict[str, Any], 
 
     engine = speech_engine()
     if engine == "piper":
-        state, reason = _piper_speak(clean, rate, volume)
+        prepared = tts_quality.prepare_tts_text(clean)
+        state, reason = _piper_speak(prepared or clean, rate, volume)
         if state or reason == "Озвучка остановлена":
             return state, reason
         engine = _system_speech_engine()
