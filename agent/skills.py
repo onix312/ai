@@ -1461,7 +1461,11 @@ def relevant_prompt(query: str, caps: dict[str, Any],
         name = str(row.get("name") or "")
         group = name.split(".", 1)[0]
         hay = " ".join((
-            name, str(row.get("title") or ""), str(row.get("description") or ""),
+            name,
+            str(row.get("title") or ""),
+            str(row.get("description") or ""),
+            str(row.get("doc") or ""),
+            str(row.get("provider") or ""),
             " ".join(str(key) for key in (row.get("params") or {}).keys()),
         )).casefold().replace("ё", "е")
         value = 0
