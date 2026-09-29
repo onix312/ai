@@ -1256,6 +1256,7 @@ def tts_status() -> dict[str, Any]:
         "piper": bool(executable),
         "model_ready": pathlib.Path(model).is_file(),
         "recommended_voice": "ru_RU-irina-medium",
+        "quality": tts_quality.quality_status(),
         "last_engine": str(_TTS_METRICS.get("last_engine") or ""),
         "last_synth_ms": int(_TTS_METRICS.get("last_synth_ms") or 0),
         "last_chars": int(_TTS_METRICS.get("last_chars") or 0),
