@@ -85,7 +85,7 @@ class NativeQtSmokeTests(unittest.TestCase):
             "last_chars": 24,
         })
         self.assertEqual("thinking", center.home.orb.state())
-        self.assertIn("Формирую", center.home.activity_value.text())
+        self.assertIn("app.open", center.home.activity_value.text())
         self.assertIn("baya", center.home.voice_value.text().casefold())
         self.assertIn("48 kHz", center.home.voice_meta.text())
         center.deleteLater()
