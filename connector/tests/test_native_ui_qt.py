@@ -14,7 +14,7 @@ from PySide6.QtWidgets import QApplication, QLabel, QProgressBar
 
 from agent.native_ui.app import NativeApp
 from agent.native_ui.components import LumaPortrait
-from agent.native_ui.control_center import ActivityPage, ChatPage, ControlCenter, HomePage, SkillsPage, TasksPage, TextPage, VoicePage
+from agent.native_ui.control_center import ActivityPage, ChatPage, ControlCenter, HomePage, MemoryPage, SkillsPage, TasksPage, TextPage, VoicePage
 from agent.native_ui.orb import LumaOrbCore, VoiceOrb
 from agent.native_ui.quick_panel import QuickPanel
 
@@ -300,7 +300,24 @@ class NativeQtSmokeTests(unittest.TestCase):
         self.assertEqual(2, center.pronunciation_list.count())
         self.assertIn("Пользовательских правил: 2", center.pronunciation_status.text())
 
-        center.set_page_payload("memory", {"memories": [{"text": "пример"}]})
+        center.set_page_payload("memory", {
+            "memories": [
+                {
+                    "id": 11, "text": "Мария любит PETG", "kind": "preference",
+                    "subject": "Мария", "source": "chat", "origin": "explicit",
+                    "confidence": 1.0, "pinned": True, "layer": "user_model",
+                    "observed_count": 1, "uses": 3, "provenance": "chat",
+                },
+                {
+                    "id": 12, "text": "Обычно печать начинается вечером", "kind": "fact",
+                    "subject": "печать", "source": "observed", "origin": "observed",
+                    "confidence": 0.8, "pinned": False, "layer": "semantic",
+                    "observed_count": 4, "uses": 0, "provenance": "наблюдения",
+                },
+            ],
+            "count": 2,
+            "layers": {"working": [], "episodic": [], "semantic": [], "user_model": []},
+        })
         center.set_page_payload("activity", {
             "activity": {
                 "current": {
@@ -414,6 +431,20 @@ class NativeQtSmokeTests(unittest.TestCase):
         self.assertIn("Autopilot включён", center.proactivity_status.text())
         self.assertIn("[suppressed] Цель", center.events_view.toPlainText())
         self.assertIn("quiet hours", center.events_view.toPlainText())
+        self.assertIsInstance(center.pages["memory"], MemoryPage)
+        memory_page = center.pages["memory"]
+        self.assertEqual("2", memory_page.total_metric.text())
+        self.assertEqual("1", memory_page.pinned_metric.text())
+        self.assertEqual("1", memory_page.model_metric.text())
+        self.assertEqual("1", memory_page.semantic_metric.text())
+        memory_labels = [w.text() for w in memory_page.findChildren(QLabel)]
+        self.assertTrue(any("Мария любит PETG" in value for value in memory_labels))
+        self.assertTrue(any("Обычно печать начинается вечером" in value for value in memory_labels))
+        memory_page.search.setText("Мария")
+        self.app.processEvents()
+        filtered_memory = [w.text() for w in memory_page.findChildren(QLabel)]
+        self.assertTrue(any("Мария любит PETG" in value for value in filtered_memory))
+        self.assertFalse(any("Обычно печать начинается вечером" in value for value in filtered_memory))
         self.assertIsInstance(center.pages["activity"], ActivityPage)
         timeline = center.pages["activity"].browser.toPlainText()
         self.assertIn("открой телеграм", timeline)
