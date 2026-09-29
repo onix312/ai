@@ -63,7 +63,8 @@ class VoiceRuntime:
         self.partial_phrase = ""
         self.audio_level = 0
         self.echo_floor = 0.0
-        self.echo_threshold = int(config.VOICE_VAD_THRESHOLD)
+        self.vad_threshold = int(config.VOICE_VAD_THRESHOLD)
+        self.echo_threshold = int(self.vad_threshold)
         self.echo_suppressed = 0
         self.echo_gate_multiplier = float(config.VOICE_ECHO_GATE_MULTIPLIER)
         self.echo_gate_margin = int(config.VOICE_ECHO_GATE_MARGIN)
@@ -111,7 +112,7 @@ class VoiceRuntime:
             "echo_gate_multiplier": float(self.echo_gate_multiplier),
             "echo_gate_margin": int(self.echo_gate_margin),
             "echo_floor_alpha": float(self.echo_floor_alpha),
-            "vad_threshold": int(config.VOICE_VAD_THRESHOLD),
+            "vad_threshold": int(self.vad_threshold),
             "streaming_asr": bool(self.streaming_asr),
             "asr_engine": str(getattr(self.recognizer, "name", "") or ""),
             "vocabulary_count": len(self.vocabulary_terms),
@@ -175,6 +176,8 @@ class VoiceRuntime:
         """Adjust lightweight echo-gate tuning at runtime. RAM-only."""
         data = payload or {}
         try:
+            if "vad_threshold" in data:
+                self.vad_threshold = min(12000, max(40, int(data["vad_threshold"])))
             if "multiplier" in data:
                 self.echo_gate_multiplier = min(4.0, max(1.0, float(data["multiplier"])))
             if "margin" in data:
@@ -188,7 +191,8 @@ class VoiceRuntime:
     def reset_diagnostics(self) -> dict[str, Any]:
         """Reset learned acoustic floor/counters and restore default tuning."""
         self.echo_floor = 0.0
-        self.echo_threshold = int(config.VOICE_VAD_THRESHOLD)
+        self.vad_threshold = int(config.VOICE_VAD_THRESHOLD)
+        self.echo_threshold = int(self.vad_threshold)
         self.echo_suppressed = 0
         self.echo_gate_multiplier = float(config.VOICE_ECHO_GATE_MULTIPLIER)
         self.echo_gate_margin = int(config.VOICE_ECHO_GATE_MARGIN)
@@ -343,7 +347,7 @@ class VoiceRuntime:
                 speaking_now = pc.is_speaking()
             except Exception:
                 speaking_now = False
-            threshold = int(config.VOICE_VAD_THRESHOLD)
+            threshold = int(self.vad_threshold)
             if speaking_now and not started and self.echo_floor > 0:
                 threshold = max(
                     threshold,
@@ -359,7 +363,7 @@ class VoiceRuntime:
                         self.echo_floor = float(level)
                     else:
                         self.echo_floor = (1.0 - alpha) * self.echo_floor + alpha * float(level)
-                    if level >= config.VOICE_VAD_THRESHOLD:
+                    if level >= self.vad_threshold:
                         self.echo_suppressed += 1
             elif not started:
                 self.echo_floor *= 0.92
@@ -415,7 +419,7 @@ class VoiceRuntime:
                 break
 
         self.audio_level = 0
-        self.echo_threshold = int(config.VOICE_VAD_THRESHOLD)
+        self.echo_threshold = int(self.vad_threshold)
         final = ""
         if stream is not None:
             try:
