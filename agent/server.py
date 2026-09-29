@@ -40,7 +40,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
 from . import brain as brain_mod
-from . import autonomy as autonomy_mod, capabilities, config, event_engine as event_mod, executor, pc, persona as persona_mod, planner, replanner, skills, speech, task_engine, tts_quality, ui, voice_runtime, window, winapi
+from . import autonomy as autonomy_mod, capabilities, config, event_engine as event_mod, executor, pc, persona as persona_mod, planner, replanner, skills, speech, task_engine, tts_service, ui, voice_runtime, window, winapi
 from .providers import registry as provider_registry
 
 # Ожидающее действие живёт недолго: неподтверждённый клик не должен висеть
@@ -83,7 +83,7 @@ class Agent:
             "updated_at": time.time(),
         }
         self._activity_recent: list[dict[str, Any]] = []
-        self._tts_preferences_loaded = False
+        self._tts: tts_service.TtsService | None = None
         # Голос: фраза после стоп-слова идёт мозгу, ответ звучит вслух.
         self.microphone.handler = self.voice_phrase
         self.microphone.cancel_handler = lambda: self.brain.cancel_session("voice")
@@ -198,66 +198,21 @@ class Agent:
         """Исполнитель навыков: реестр, способности, своя база, клиент панели."""
         if self._runner is None:
             self._runner = executor.Runner()
-        if not self._tts_preferences_loaded:
-            self._restore_tts_preferences()
+            self._tts = tts_service.TtsService(self._runner.store)
+            self._tts.restore()
         return self._runner
 
-    def _restore_tts_preferences(self) -> None:
-        if self._runner is None or self._tts_preferences_loaded:
-            return
-        self._tts_preferences_loaded = True
-        try:
-            values = {}
-            for field in ("piper", "model", "speaker"):
-                row = self._runner.store.get_preference(f"tts.{field}")
-                values[field] = str((row or {}).get("value") or "")
-            pc.configure_tts(**values)
-        except Exception:
-            # TTS preferences must never prevent the local agent from starting.
-            pass
+    @property
+    def tts(self) -> tts_service.TtsService:
+        _ = self.runner
+        assert self._tts is not None
+        return self._tts
 
     def tts_settings(self) -> dict[str, Any]:
-        _ = self.runner
-        return {"ok": True, **pc.tts_status()}
+        return self.tts.settings()
 
     def update_tts_settings(self, payload: dict[str, Any]) -> dict[str, Any]:
-        op = str(payload.get("op") or "update").strip().casefold()
-        if op == "pronunciations":
-            return tts_quality.pronunciation_payload()
-        if op == "pronunciation_set":
-            return tts_quality.set_pronunciation(
-                str(payload.get("source") or ""),
-                str(payload.get("target") or ""),
-            )
-        if op == "pronunciation_delete":
-            return tts_quality.delete_pronunciation(str(payload.get("source") or ""))
-        if op == "test":
-            phrase = str(payload.get("text") or "Привет. Я Люма. Проверяю локальный голос.").strip()
-            state, reason = pc.speak(phrase[:240])
-            return {"ok": bool(state), "reason": reason, "speech": state, **pc.tts_status()}
-        if op == "reset":
-            result = pc.reset_tts_config()
-            for field in ("piper", "model", "speaker"):
-                try:
-                    self.runner.store.delete_preference(f"tts.{field}")
-                except Exception:
-                    pass
-            return result
-
-        values = {
-            "piper": str(payload.get("piper") or "").strip(),
-            "model": str(payload.get("model") or "").strip(),
-            "speaker": str(payload.get("speaker") or "").strip(),
-        }
-        result = pc.configure_tts(**values)
-        if not result.get("ok"):
-            return result
-        for field, value in values.items():
-            if value:
-                self.runner.store.set_preference(f"tts.{field}", value)
-            else:
-                self.runner.store.delete_preference(f"tts.{field}")
-        return result
+        return self.tts.update(payload)
 
     @property
     def brain(self) -> brain_mod.Brain:
