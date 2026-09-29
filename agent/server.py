@@ -88,20 +88,24 @@ class Agent:
         self.microphone.cancel_handler = lambda: self.brain.cancel_session("voice")
         self.microphone.vocabulary_provider = self.voice_vocabulary
 
-    def set_activity(self, phase: str, *, session: str = "", heard: str = "",
-                     reply: str = "", skill: str = "", task_id: int = 0,
-                     detail: str = "", active: bool = True) -> None:
-        """Ephemeral UI activity. Never persisted to conversation or memory."""
+    def set_activity(self, phase: str, *, session: str | None = None,
+                     heard: str | None = None, reply: str | None = None,
+                     skill: str | None = None, task_id: int | None = None,
+                     detail: str | None = None, active: bool = True) -> None:
+        """Ephemeral UI activity. Never persisted to conversation or memory.
+
+        None preserves the previous field; an explicit empty value clears it.
+        """
         with self._activity_lock:
             current = dict(self._activity)
             next_item = {
                 "phase": str(phase or "idle"),
-                "session": str(session or current.get("session") or ""),
-                "heard": str(heard if heard != "" else current.get("heard") or "")[:500],
-                "reply": str(reply if reply != "" else current.get("reply") or "")[:1200],
-                "skill": str(skill if skill != "" else current.get("skill") or "")[:120],
-                "task_id": int(task_id or current.get("task_id") or 0),
-                "detail": str(detail if detail != "" else current.get("detail") or "")[:300],
+                "session": str(current.get("session") or "") if session is None else str(session or ""),
+                "heard": str(current.get("heard") or "")[:500] if heard is None else str(heard or "")[:500],
+                "reply": str(current.get("reply") or "")[:1200] if reply is None else str(reply or "")[:1200],
+                "skill": str(current.get("skill") or "")[:120] if skill is None else str(skill or "")[:120],
+                "task_id": int(current.get("task_id") or 0) if task_id is None else int(task_id or 0),
+                "detail": str(current.get("detail") or "")[:300] if detail is None else str(detail or "")[:300],
                 "active": bool(active),
                 "updated_at": time.time(),
             }
