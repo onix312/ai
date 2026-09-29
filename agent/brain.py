@@ -1084,7 +1084,8 @@ def compact_result_context(result: dict[str, Any] | None) -> dict[str, Any]:
         return {}
     out: dict[str, Any] = {}
     for key in ("ok", "title", "reason", "target", "state", "status", "level",
-                "muted", "count", "progress", "window", "model", "engine"):
+                "muted", "count", "progress", "window", "model", "engine",
+                "cpu_percent", "memory", "battery", "uptime_hours"):
         value = result.get(key)
         if value not in (None, "", [], {}):
             out[key] = value
