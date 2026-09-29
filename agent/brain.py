@@ -123,17 +123,16 @@ class _VoiceReplyStream:
         decoded, closed = _decode_json_string_prefix(raw[match.end():])
         if len(decoded) <= self.emitted:
             return
-        boundary = self.emitted
-        for found in re.finditer(r"(?<=[.!?…])(?:\s+|$)", decoded[self.emitted:]):
-            boundary = self.emitted + found.end()
+        boundaries = [self.emitted + found.end() for found in re.finditer(
+            r"(?<=[.!?…])\s+", decoded[self.emitted:]
+        )]
         if closed:
-            boundary = len(decoded)
-        if boundary <= self.emitted:
-            return
-        phrase = decoded[self.emitted:boundary].strip()
-        self.emitted = boundary
-        if phrase and self.sink(phrase):
-            self.count += len(phrase)
+            boundaries.append(len(decoded))
+        for boundary in boundaries:
+            phrase = decoded[self.emitted:boundary].strip()
+            self.emitted = boundary
+            if phrase and self.sink(phrase):
+                self.count += len(phrase)
 
 
 def normalize_phrase(text: str) -> str:

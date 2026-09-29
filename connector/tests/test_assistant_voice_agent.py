@@ -356,7 +356,10 @@ class PanelWiringTests(unittest.TestCase):
 
 class DoctorRuntimeTests(unittest.TestCase):
     def test_defaults_include_voice_and_agent(self):
-        settings = pf.read_assistant_settings()
+        with tempfile.TemporaryDirectory() as tempdir, patch.object(
+            pf, "DB_FILE", pathlib.Path(tempdir) / "missing.db"
+        ):
+            settings = pf.read_assistant_settings()
         self.assertFalse(settings["assistant_speech_enabled"])
         self.assertFalse(settings["assistant_agent_enabled"])
         self.assertEqual("http://127.0.0.1:8791", settings["assistant_speech_url"])

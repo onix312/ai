@@ -3,12 +3,15 @@ from __future__ import annotations
 
 import os
 import unittest
+from types import SimpleNamespace
+from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication, QLabel
 
-from agent.native_ui.control_center import ActivityPage, ControlCenter, TasksPage
+from agent.native_ui.app import NativeApp
+from agent.native_ui.control_center import ActivityPage, ChatPage, ControlCenter, TasksPage, TextPage
 from agent.native_ui.orb import VoiceOrb
 from agent.native_ui.quick_panel import QuickPanel
 
@@ -17,6 +20,39 @@ class NativeQtSmokeTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.app = QApplication.instance() or QApplication([])
+
+    def test_chat_welcome_and_readable_data_view(self):
+        chat = ChatPage()
+        self.assertEqual(chat.content.currentIndex(), 0)
+        chat.set_history([{"role": "user", "text": "<b>привет</b>"}])
+        self.assertEqual(chat.content.currentIndex(), 1)
+        self.assertIn("<b>привет</b>", chat.feed.toPlainText())
+        chat.set_history([])
+        self.assertEqual(chat.content.currentIndex(), 0)
+
+        page = TextPage("Память")
+        page.set_payload({"ok": True, "memories": [{"text": "Мой факт"}]})
+        self.assertIn("Мой факт", page.browser.toPlainText())
+        page._toggle_raw()
+        self.assertIn('"memories"', page.browser.toPlainText())
+        chat.deleteLater()
+        page.deleteLater()
+
+    def test_restart_relaunches_backend_too(self):
+        fake = SimpleNamespace(_save_geometry=lambda: None,
+                               _hotkey_registered=False, _stop_hotkey_registered=False)
+        with patch("agent.native_ui.app.os.execv") as execv:
+            NativeApp.restart_ui(fake)
+        self.assertIn("agent.desktop", execv.call_args.args[1])
+
+    def test_voice_orb_stays_compact_without_activity(self):
+        orb = VoiceOrb()
+        self.assertEqual(orb.height(), 72)
+        orb.set_live(heard="Проверка", reply="Готово")
+        self.assertEqual(orb.height(), 112)
+        orb.set_live()
+        self.assertEqual(orb.height(), 72)
+        orb.deleteLater()
 
     def test_windows_construct_and_accept_state(self):
         orb = VoiceOrb()

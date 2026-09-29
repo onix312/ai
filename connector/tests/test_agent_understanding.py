@@ -111,10 +111,12 @@ class ChainTests(BrainCase):
         self.assertEqual({"level": 30}, self.agent.calls[0][1])
 
     def test_chain_of_three(self):
-        self.say("громкость 20 и тише и открой блокнот")
+        with patch.object(pc, "volume_get", return_value=({"level": 20, "muted": False}, "")), \
+                patch.object(pc, "volume_set", side_effect=lambda level: ({"level": level}, "")):
+            self.say("громкость 20 и тише и открой блокнот")
         self.assertEqual(["system.volume", "system.volume", "app.open"], self.skills_called())
         self.assertEqual({"level": 20}, self.agent.calls[0][1])
-        self.assertEqual({"delta": -10}, self.agent.calls[1][1])
+        self.assertEqual({"level": 10}, self.agent.calls[1][1])
 
     def test_unmatched_part_cancels_the_chain(self):
         answer = self.say("открой телеграм и квазимодо бла")

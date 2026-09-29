@@ -13,6 +13,7 @@ Voice Engine 2.0 использует этот модуль как локаль�
 from __future__ import annotations
 
 import json
+import wave
 import pathlib
 import queue
 import threading
@@ -302,7 +303,7 @@ class Recognizer:
             if self._engine == "vosk":
                 return self._vosk(audio), ""
             return self._whisper(audio, language)
-        except (OSError, ValueError, RuntimeError) as exc:
+        except (OSError, ValueError, RuntimeError, EOFError, wave.Error) as exc:
             return "", f"Распознавание не удалось: {exc}"
 
     def _vosk(self, audio: bytes) -> str:
