@@ -683,6 +683,21 @@ class HomePage(QWidget):
         voice_box.addWidget(self.voice_meta)
         telemetry.addWidget(voice_card)
 
+        brain_card = GlassCard("violet")
+        brain_box = QVBoxLayout(brain_card)
+        brain_box.setContentsMargins(14, 12, 14, 12)
+        brain_label = QLabel("BRAIN // INTELLIGENCE")
+        brain_label.setObjectName("metricLabel")
+        brain_box.addWidget(brain_label)
+        self.brain_value = QLabel("READY")
+        self.brain_value.setObjectName("metricValueSmall")
+        brain_box.addWidget(self.brain_value)
+        self.brain_meta = QLabel("Локальная модель · функции загружаются…")
+        self.brain_meta.setObjectName("muted")
+        self.brain_meta.setWordWrap(True)
+        brain_box.addWidget(self.brain_meta)
+        telemetry.addWidget(brain_card)
+
         activity_card = GlassCard()
         activity_box = QVBoxLayout(activity_card)
         activity_box.setContentsMargins(14, 12, 14, 12)
@@ -781,6 +796,27 @@ class HomePage(QWidget):
 
         self.heard_value.setText(f"Вы: {heard_clean}" if heard_clean else "")
         self.heard_value.setVisible(bool(heard_clean))
+
+    def set_brain(self, *, model_ok: bool, ready: int = 0, total: int = 0,
+                  route: str = "ready", repaired: bool = False) -> None:
+        clean_route = str(route or "ready").casefold()
+        labels = {
+            "rules": "RULES",
+            "rule": "RULES",
+            "model": "MODEL",
+            "panel": "PRINTFLOW",
+            "panel-camera": "VISION",
+            "task": "TASK",
+            "planner": "PLANNER",
+            "memory": "MEMORY",
+            "ready": "READY",
+        }
+        label = "SELF-CORRECTED" if repaired else labels.get(clean_route, clean_route.upper()[:24] or "READY")
+        self.brain_value.setText(label)
+        model_text = "model ready" if model_ok else "model offline"
+        tools = f"{int(ready)}/{int(total)} функций" if total else "функции загружаются"
+        suffix = " · repair loop" if repaired else " · context + tool router"
+        self.brain_meta.setText(f"{model_text} · {tools}{suffix}")
 
     @staticmethod
     def orb_state_names() -> set[str]:
