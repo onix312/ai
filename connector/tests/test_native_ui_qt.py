@@ -78,6 +78,7 @@ class NativeQtSmokeTests(unittest.TestCase):
         self.assertIsInstance(center.pages["voice"], VoicePage)
         self.assertIsInstance(center.home.orb, LumaOrbCore)
         self.assertIsInstance(center.home.portrait, LumaPortrait)
+        self.assertFalse(center.home.portrait._portrait.isNull())
 
         center.set_home_runtime(
             connected=True,

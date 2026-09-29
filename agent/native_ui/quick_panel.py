@@ -1,12 +1,11 @@
 """Quick Panel в стиле Spotlight/PowerToys Run."""
 from __future__ import annotations
 
-from typing import Callable
-
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QLineEdit, QPushButton, QVBoxLayout, QWidget
 
 from . import theme
+from .components import LumaPortrait
 
 
 class QuickPanel(QWidget):
@@ -16,16 +15,16 @@ class QuickPanel(QWidget):
         super().__init__()
         self.setWindowFlags(Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
         self.setAttribute(Qt.WA_TranslucentBackground, True)
-        self.setFixedWidth(680)
+        self.setFixedWidth(690)
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         card = QFrame()
         card.setObjectName("card")
         card.setStyleSheet(theme.stylesheet() + """
         QFrame#card {
-            background:#101225;
-            border:1px solid #514487;
-            border-radius:20px;
+            background:#0C1025;
+            border:2px solid #8466F7;
+            border-radius:22px;
         }
         QLineEdit {
             background:#15172D;
@@ -59,15 +58,29 @@ class QuickPanel(QWidget):
         }
         """)
         box = QVBoxLayout(card)
-        box.setContentsMargins(18, 16, 18, 16)
-        box.setSpacing(12)
+        box.setContentsMargins(20, 16, 20, 18)
+        box.setSpacing(14)
         header = QHBoxLayout()
-        brand = QLabel("LUMA")
+        brand = QLabel("✦  LUMA")
         brand.setObjectName("quickBrand")
         header.addWidget(brand)
         header.addStretch(1)
-        header.addWidget(QLabel("Esc — закрыть"))
+        header.addWidget(QLabel("БЫСТРАЯ ПАНЕЛЬ  ·  Esc — закрыть"))
         box.addLayout(header)
+        hero = QHBoxLayout()
+        copy = QVBoxLayout()
+        greeting = QLabel("Привет!\nЯ LUMA")
+        greeting.setStyleSheet("color:#FFFFFF;font-size:27px;font-weight:800;background:transparent;")
+        copy.addWidget(greeting)
+        subtitle = QLabel("Слушаю тебя…\nВсегда рядом ♡")
+        subtitle.setStyleSheet("color:#D2C6FF;font-size:14px;background:transparent;")
+        copy.addWidget(subtitle)
+        copy.addStretch(1)
+        hero.addLayout(copy, 2)
+        portrait = LumaPortrait()
+        portrait.setFixedSize(240, 185)
+        hero.addWidget(portrait, 3, Qt.AlignRight)
+        box.addLayout(hero)
         row = QHBoxLayout()
         self.input = QLineEdit()
         self.input.setPlaceholderText("Спроси Люму или скажи, что сделать…")
@@ -78,18 +91,26 @@ class QuickPanel(QWidget):
         self.answer.setWordWrap(True)
         self.answer.setStyleSheet("color:#E7E3F3; font-size:14px; background:transparent;")
         box.addWidget(self.answer)
-        self.hints = QHBoxLayout()
-        for text in ("Что у меня сегодня?", "Как там PrintFlow?", "Открой загрузки"):
-            b = QPushButton(text)
-            b.clicked.connect(lambda _=False, t=text: self._pick(t))
-            self.hints.addWidget(b)
-        self.hints.addStretch(1)
-        box.addLayout(self.hints)
+        actions = QHBoxLayout()
+        for icon, title, prompt in (
+            ("◫", "Открыть\nприложение", "Открой "),
+            ("▣", "Найти\nфайл", "Найди файл "),
+            ("♫", "Включить\nмузыку", "Включи музыку"),
+            ("✎", "Создать\nзаметку", "Создай заметку "),
+        ):
+            button = QPushButton(f"{icon}\n{title}")
+            button.setMinimumHeight(72)
+            button.clicked.connect(lambda _=False, value=prompt: self._pick(value))
+            actions.addWidget(button, 1)
+        box.addLayout(actions)
         root.addWidget(card)
 
     def _pick(self, text: str) -> None:
         self.input.setText(text)
-        self._submit()
+        if text.endswith(" "):
+            self.input.setFocus()
+        else:
+            self._submit()
 
     def _submit(self) -> None:
         text = self.input.text().strip()

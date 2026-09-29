@@ -1,8 +1,10 @@
 """Reusable visual components for Luma's native UI."""
 from __future__ import annotations
 
+from pathlib import Path
+
 from PySide6.QtCore import QEasingCurve, QPointF, Property, QPropertyAnimation, QRectF, Qt, QTimer
-from PySide6.QtGui import QBrush, QColor, QPainter, QPainterPath, QPen, QRadialGradient
+from PySide6.QtGui import QBrush, QColor, QPainter, QPen, QPixmap, QRadialGradient
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 
@@ -49,7 +51,7 @@ class AmbientCanvas(QWidget):
 
 
 class LumaPortrait(QWidget):
-    """Asset-free stylized female AI portrait used until a final character asset ships."""
+    """Luma's portrait with a state-colored, softly animated halo."""
 
     STATE_COLORS = {
         "idle": QColor("#8B5CF6"),
@@ -67,6 +69,7 @@ class LumaPortrait(QWidget):
         self._state = "idle"
         self._phase = 0.0
         self._compact = bool(compact)
+        self._portrait = QPixmap(str(Path(__file__).resolve().parent / "assets" / "luma-portrait.png"))
         self.setAttribute(Qt.WA_TranslucentBackground, True)
         self.setMinimumSize(108, 132)
         if compact:
@@ -113,72 +116,21 @@ class LumaPortrait(QWidget):
         painter.setBrush(QBrush(halo))
         painter.drawEllipse(QPointF(cx, h * 0.48), w * 0.49, h * 0.48)
 
-        # Hair mass, deliberately long and soft to read as Luma's female persona.
-        hair = QPainterPath()
-        hair.moveTo(cx, h * 0.13)
-        hair.cubicTo(w * 0.18, h * 0.15, w * 0.13, h * 0.44, w * 0.24, h * 0.77)
-        hair.cubicTo(w * 0.30, h * 0.91, w * 0.39, h * 0.84, cx, h * 0.88)
-        hair.cubicTo(w * 0.63, h * 0.85, w * 0.72, h * 0.92, w * 0.78, h * 0.77)
-        hair.cubicTo(w * 0.88, h * 0.43, w * 0.82, h * 0.16, cx, h * 0.13)
-        painter.setBrush(QColor("#ECEBFF"))
-        painter.setPen(QPen(self._with_alpha(color, 105), max(1.0, w * 0.009)))
-        painter.drawPath(hair)
+        if not self._portrait.isNull():
+            # Crop a little of the wide artwork in compact placements so the face remains legible.
+            inset = 0.1 if self._compact else 0.0
+            source = QRectF(
+                self._portrait.width() * inset,
+                0,
+                self._portrait.width() * (1 - 2 * inset),
+                self._portrait.height(),
+            )
+            painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
+            painter.drawPixmap(QRectF(0, 0, w, h), self._portrait, source)
 
-        # Face.
-        face = QPainterPath()
-        face.moveTo(cx, h * 0.22)
-        face.cubicTo(w * 0.35, h * 0.22, w * 0.31, h * 0.38, w * 0.34, h * 0.53)
-        face.cubicTo(w * 0.38, h * 0.67, w * 0.44, h * 0.72, cx, h * 0.73)
-        face.cubicTo(w * 0.56, h * 0.72, w * 0.63, h * 0.67, w * 0.66, h * 0.53)
-        face.cubicTo(w * 0.69, h * 0.38, w * 0.65, h * 0.22, cx, h * 0.22)
-        painter.setPen(QPen(QColor("#D8D5EC"), max(1.0, w * 0.007)))
-        painter.setBrush(QColor("#F1E7E5"))
-        painter.drawPath(face)
-
-        # Side bangs.
-        painter.setPen(Qt.NoPen)
-        painter.setBrush(QColor("#F8F7FF"))
-        left_bang = QPainterPath()
-        left_bang.moveTo(cx, h * 0.18)
-        left_bang.cubicTo(w * 0.31, h * 0.20, w * 0.30, h * 0.36, w * 0.39, h * 0.48)
-        left_bang.cubicTo(w * 0.42, h * 0.35, w * 0.45, h * 0.25, cx, h * 0.18)
-        painter.drawPath(left_bang)
-        right_bang = QPainterPath()
-        right_bang.moveTo(cx, h * 0.18)
-        right_bang.cubicTo(w * 0.69, h * 0.20, w * 0.70, h * 0.34, w * 0.61, h * 0.46)
-        right_bang.cubicTo(w * 0.59, h * 0.34, w * 0.55, h * 0.24, cx, h * 0.18)
-        painter.drawPath(right_bang)
-
-        # Eyes with state glow.
-        eye_y = h * 0.47
-        eye_dx = w * 0.105
-        painter.setPen(Qt.NoPen)
-        painter.setBrush(self._with_alpha(color, 65))
-        painter.drawEllipse(QPointF(cx - eye_dx, eye_y), w * 0.055, h * 0.043)
-        painter.drawEllipse(QPointF(cx + eye_dx, eye_y), w * 0.055, h * 0.043)
-        painter.setBrush(color.lighter(150))
-        painter.drawEllipse(QPointF(cx - eye_dx, eye_y), w * 0.026, h * 0.024)
-        painter.drawEllipse(QPointF(cx + eye_dx, eye_y), w * 0.026, h * 0.024)
-
-        # Minimal nose/mouth, softer while speaking.
-        painter.setPen(QPen(QColor("#9B7180"), max(1.0, w * 0.008), Qt.SolidLine, Qt.RoundCap))
-        mouth_y = h * 0.61
-        mouth_half = w * (0.035 + (0.012 * pulse if self._state == "speaking" else 0.0))
-        painter.drawLine(QPointF(cx - mouth_half, mouth_y), QPointF(cx + mouth_half, mouth_y))
-
-        # Shoulders / luminous collar.
-        shoulders = QPainterPath()
-        shoulders.moveTo(w * 0.18, h * 0.98)
-        shoulders.cubicTo(w * 0.24, h * 0.79, w * 0.38, h * 0.76, cx, h * 0.78)
-        shoulders.cubicTo(w * 0.62, h * 0.76, w * 0.76, h * 0.79, w * 0.82, h * 0.98)
-        painter.setBrush(QColor("#17152D"))
-        painter.setPen(QPen(self._with_alpha(color, 110), max(1.0, w * 0.01)))
-        painter.drawPath(shoulders)
-
-        collar = QRectF(w * 0.38, h * 0.79, w * 0.24, h * 0.055)
-        painter.setPen(Qt.NoPen)
-        painter.setBrush(self._with_alpha(color, 120 + int(45 * pulse)))
-        painter.drawRoundedRect(collar, collar.height() / 2, collar.height() / 2)
+        painter.setBrush(Qt.NoBrush)
+        painter.setPen(QPen(self._with_alpha(color, 120 + int(60 * pulse)), max(1.0, w * 0.012)))
+        painter.drawEllipse(QRectF(w * 0.06, h * 0.12, w * 0.88, h * 0.76))
 
 
 class GlassCard(QFrame):
