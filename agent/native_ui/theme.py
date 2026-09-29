@@ -243,6 +243,14 @@ def stylesheet() -> str:
         font-size: 10px;
     }
 
+    QLabel#settingsState {
+        background: transparent;
+        color: #F5F2FF;
+        font-size: 14px;
+        font-weight: 650;
+        padding: 3px 0;
+    }
+
     QPushButton#memoryPin {
         background: #151C31;
         color: #9DE9D0;
