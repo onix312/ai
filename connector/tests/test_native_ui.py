@@ -316,23 +316,29 @@ class UiStateTests(unittest.TestCase):
         state.apply_status({
             "ok": True,
             "tts": {
-                "engine": "piper",
+                "engine": "silero",
                 "hq_local": True,
-                "model": "luma.onnx",
-                "model_path": "C:/voices/luma.onnx",
+                "model": "silero_v5_5_ru.pt",
+                "model_path": "C:/voices/silero_v5_5_ru.pt",
                 "piper_path": "C:/tools/piper.exe",
-                "speaker": "2",
+                "piper_model_path": "C:/voices/luma.onnx",
+                "piper_speaker": "2",
+                "speaker": "baya",
+                "sample_rate": 48000,
                 "model_ready": True,
                 "last_synth_ms": 184,
                 "last_chars": 42,
             },
         })
-        self.assertEqual("piper", state.tts_engine)
+        self.assertEqual("silero", state.tts_engine)
         self.assertTrue(state.tts_hq_local)
-        self.assertEqual("luma.onnx", state.tts_model)
-        self.assertEqual("C:/voices/luma.onnx", state.tts_model_path)
+        self.assertEqual("silero_v5_5_ru.pt", state.tts_model)
+        self.assertEqual("C:/voices/silero_v5_5_ru.pt", state.tts_model_path)
         self.assertEqual("C:/tools/piper.exe", state.tts_piper_path)
-        self.assertEqual("2", state.tts_speaker)
+        self.assertEqual("C:/voices/luma.onnx", state.tts_piper_model_path)
+        self.assertEqual("2", state.tts_piper_speaker)
+        self.assertEqual("baya", state.tts_speaker)
+        self.assertEqual(48000, state.tts_sample_rate)
         self.assertTrue(state.tts_model_ready)
         self.assertEqual(184, state.tts_last_synth_ms)
         self.assertEqual(42, state.tts_last_chars)
