@@ -157,6 +157,19 @@ class ModelClientTests(unittest.TestCase):
         self.assertEqual("qwen2.5vl:3b", model.pick_vision(models))
         self.assertEqual("", model.pick_vision(["qwen2.5:3b", "nomic-embed-text"]))
 
+    def test_relevant_skill_prompt_surfaces_functions_from_full_registry(self):
+        caps = {name: True for name in skills.CAPABILITIES}
+        screen_prompt = skills.relevant_prompt(
+            "посмотри на экран, найди кнопку сохранить и нажми её", caps
+        )
+        self.assertIn("screen.find_and_click", screen_prompt)
+        self.assertIn("screen.", screen_prompt)
+        self.assertLessEqual(len(screen_prompt), 5600)
+
+        app_prompt = skills.relevant_prompt("запусти Steam и потом открой папку загрузок", caps)
+        self.assertIn("app.open", app_prompt)
+        self.assertLessEqual(len(app_prompt), 5600)
+
     def test_visible_text_drops_reasoning(self):
         self.assertEqual("Привет!\nКак дела?", model.visible_text("<think>долго</think>\nПривет!\n\nКак дела?"))
 
@@ -517,6 +530,61 @@ class BrainChatTests(unittest.TestCase):
         self.assertEqual([], self.agent.calls, "шаги исполняет Task Engine, а не Brain напрямую")
         self.assertEqual(7, answer["task"]["id"])
 
+
+    def test_model_can_build_checked_multi_step_action(self):
+        sink = _TaskSink()
+        self.agent.tasks = sink
+        raw = json.dumps({
+            "skill": "",
+            "params": {},
+            "steps": [
+                {"skill": "app.open", "params": {"target": "telegram"}},
+                {"skill": "system.health", "params": {}},
+            ],
+            "reply": "",
+            "ask": "",
+        }, ensure_ascii=False)
+        captured = {}
+
+        def fake_chat(*_args, system="", **_kwargs):
+            captured["system"] = system
+            return {"ok": True, "text": raw, "reason": "", "model": "qwen2.5:3b"}
+
+        with patch.object(model, "status", return_value={
+                "ok": True, "model": "qwen2.5:3b", "reason": "",
+                "url": "http://127.0.0.1:11434", "models": ["qwen2.5:3b"],
+             }), patch.object(model, "chat", side_effect=fake_chat):
+            answer = self.brain.chat("подготовь меня к работе и проверь состояние компьютера")
+
+        self.assertEqual("task", answer["kind"], answer)
+        self.assertEqual(["app.open", "system.health"],
+                         [row["skill"] for row in sink.created[0]["steps"]])
+        self.assertIn("Релевантные доступные навыки", captured["system"])
+        self.assertIn("system.health", captured["system"])
+        self.assertEqual([], self.agent.calls, "многошаговый план исполняет Task Engine")
+
+    def test_model_multi_step_rejects_hallucinated_function(self):
+        raw = json.dumps({
+            "skill": "",
+            "params": {},
+            "steps": [
+                {"skill": "app.open", "params": {"target": "telegram"}},
+                {"skill": "format.disk", "params": {}},
+            ],
+            "reply": "",
+            "ask": "",
+        })
+        with patch.object(model, "status", return_value={
+                "ok": True, "model": "qwen2.5:3b", "reason": "",
+                "url": "http://127.0.0.1:11434", "models": ["qwen2.5:3b"],
+             }), patch.object(model, "chat", return_value={
+                "ok": True, "text": raw, "reason": "", "model": "qwen2.5:3b",
+             }):
+            answer = self.brain.chat("сделай две системные операции")
+
+        self.assertEqual("clarify", answer["kind"])
+        self.assertEqual([], self.agent.calls)
+        self.assertIn("доступной функцией", answer["reply"])
 
 class FakePanel:
     """Панель цеха без сети: заранее заданные ответы мозга панели и сводка."""
