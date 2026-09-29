@@ -1,5 +1,9 @@
 # PyInstaller specification for the standalone Windows desktop build.
+import os
+
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules
+
+ROOT = os.path.abspath(os.path.join(SPECPATH, ".."))
 
 hiddenimports = []
 for package in ("agent", "pywinauto", "rapidocr_onnxruntime", "vosk"):
@@ -16,8 +20,8 @@ for package in ("rapidocr_onnxruntime", "vosk"):
         pass
 
 a = Analysis(
-    ["luma.py"],
-    pathex=["."],
+    [os.path.join(ROOT, "luma.py")],
+    pathex=[ROOT],
     binaries=[],
     datas=datas,
     hiddenimports=hiddenimports,
