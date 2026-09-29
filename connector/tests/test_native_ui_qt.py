@@ -422,6 +422,10 @@ class NativeQtSmokeTests(unittest.TestCase):
         self.assertIn("окно найдено", timeline)
         self.assertIn("Telegram открыт", timeline)
         activity_page = center.pages["activity"]
+        self.assertEqual("EXECUTING", activity_page.activity_metric.text())
+        self.assertEqual("1", activity_page.running_metric.text())
+        self.assertEqual("1", activity_page.verified_metric.text())
+        self.assertEqual("1", activity_page.failed_metric.text())
         task_index = activity_page.task_filter.findData(4)
         self.assertGreaterEqual(task_index, 0)
         activity_page.task_filter.setCurrentIndex(task_index)
@@ -429,7 +433,7 @@ class NativeQtSmokeTests(unittest.TestCase):
         drill = activity_page.browser.toPlainText()
         self.assertIn("evidence:", drill)
         self.assertIn("Telegram", drill)
-        self.assertIn("provider result:", drill)
+        self.assertIn("provider:", drill)
         self.assertIn("Проверка окна не прошла", drill)
         self.assertIn("было: window.focus", drill)
         self.assertIn("стало: system.health → window.focus", drill)
@@ -441,9 +445,13 @@ class NativeQtSmokeTests(unittest.TestCase):
         self.assertNotIn("window.focus · pending", filtered)
         self.assertIsInstance(center.pages["tasks"], TasksPage)
         task_page = center.pages["tasks"]
+        self.assertEqual("0", task_page.tasks_running_metric.text())
+        self.assertEqual("1", task_page.tasks_waiting_metric.text())
+        self.assertEqual("1", task_page.tasks_verified_metric.text())
+        self.assertEqual("1", task_page.tasks_pending_metric.text())
         labels = [w.text() for w in task_page.findChildren(QLabel)]
         self.assertTrue(any("Подготовить рабочее место" in text for text in labels))
-        self.assertTrue(any("План: Рабочее место" in text for text in labels))
+        self.assertTrue(any(text == "Рабочее место" for text in labels))
         self.assertTrue(any("target=telegram" in text for text in labels))
         self.assertTrue(any("verified 1" in text and "assumed 1" in text for text in labels))
         self.assertTrue(any("Новый маршрут" in text for text in labels))
@@ -455,6 +463,9 @@ class NativeQtSmokeTests(unittest.TestCase):
         current_steps = [w.text() for w in task_page.findChildren(QLabel)
                          if w.objectName() == "taskStepCurrent"]
         self.assertTrue(any("system.media" in text for text in current_steps))
+        done_steps = [w.text() for w in task_page.findChildren(QLabel)
+                      if w.objectName() == "taskStepDone"]
+        self.assertTrue(any("app.open" in text for text in done_steps))
         self.assertTrue(any("Сейчас выполняю" in w.text()
                             for w in task_page.findChildren(QLabel)
                             if w.objectName() == "taskNow"))
