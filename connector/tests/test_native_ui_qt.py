@@ -10,7 +10,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QBuffer, QByteArray, QIODevice
 from PySide6.QtGui import QColor, QImage
-from PySide6.QtWidgets import QApplication, QLabel, QProgressBar
+from PySide6.QtWidgets import QApplication, QLabel, QProgressBar, QPushButton
 
 from agent.native_ui.app import NativeApp
 from agent.native_ui.components import LumaPortrait
@@ -476,6 +476,12 @@ class NativeQtSmokeTests(unittest.TestCase):
         self.assertIn("Autopilot включён", center.proactivity_status.text())
         self.assertIn("[suppressed] Цель", center.events_view.toPlainText())
         self.assertIn("quiet hours", center.events_view.toPlainText())
+        self.assertEqual("settingsStatus", center.settings_status.objectName())
+        self.assertEqual("settingsDataView", center.events_view.objectName())
+        self.assertEqual("settingsDataView", center.providers_view.objectName())
+        self.assertIsNotNone(center.findChild(QPushButton, "persona_save"))
+        self.assertIsNotNone(center.findChild(QPushButton, "autonomy_save"))
+        self.assertIsNotNone(center.findChild(QPushButton, "proactivity_save"))
         self.assertIsInstance(center.pages["activity"], ActivityPage)
         timeline = center.pages["activity"].browser.toPlainText()
         self.assertIn("открой телеграм", timeline)
