@@ -289,7 +289,7 @@ class UnderstandTests(unittest.TestCase):
 
     def test_workshop_phrases_are_not_pc_commands(self):
         for phrase in ("запусти печать", "закрой заказ 15", "открой склад", "убавь цену", "сделай звук 3d печати",
-                       "какая погода"):
+                       "что сейчас открыто на принтере", "что сейчас активно печатается", "какая погода"):
             self.assertIsNone(brain.understand(phrase), phrase)
 
     def test_follow_ups_use_previous_turn(self):
