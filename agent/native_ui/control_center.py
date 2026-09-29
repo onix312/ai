@@ -215,6 +215,20 @@ class MemoryPage(QWidget):
         self.scroll.setWidget(self.host_widget)
         root.addWidget(self.scroll, 1)
 
+    def _forget_click(self, button: QPushButton, memory_id: int) -> None:
+        armed = bool(button.property("confirmArmed"))
+        if not armed:
+            button.setProperty("confirmArmed", True)
+            button.setText("Подтвердить удаление")
+            button.setToolTip("Повторный клик удалит эту запись памяти без возможности отмены.")
+            button.style().unpolish(button)
+            button.style().polish(button)
+            return
+        button.setProperty("confirmArmed", False)
+        button.setText("Забыть")
+        button.setToolTip("")
+        self.forget_requested.emit(int(memory_id))
+
     def _clear(self) -> None:
         while self.host.count():
             item = self.host.takeAt(0)
@@ -350,7 +364,10 @@ class MemoryPage(QWidget):
             actions.addWidget(pin)
             forget = QPushButton("Забыть")
             forget.setObjectName("danger")
-            forget.clicked.connect(lambda _=False, i=memory_id: self.forget_requested.emit(i))
+            forget.setProperty("confirmArmed", False)
+            forget.clicked.connect(
+                lambda _=False, button=forget, i=memory_id: self._forget_click(button, i)
+            )
             actions.addWidget(forget)
             box.addLayout(actions)
             self.host.addWidget(card)
