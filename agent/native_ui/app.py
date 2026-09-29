@@ -173,7 +173,28 @@ class NativeApp:
         self.center.update_status(
             self.state.connected, self.state.voice_enabled, self.state.model_ok,
             self.state.panel_ok, self.state.last_error,
-            self.state.safety_stopped,
+            self.state.safety_stopped, self.state.assistant_state,
+        )
+        activity_state = {
+            "thinking": "thinking",
+            "speaking": "speaking",
+            "executing": "working",
+            "task": "working",
+            "waiting": "waiting",
+            "error": "error",
+        }.get(self.state.activity_phase, "")
+        voice_state = self.state.assistant_state
+        display_state = activity_state if self.state.activity_active and activity_state else voice_state
+        self.center.set_home_runtime(
+            connected=self.state.connected,
+            state=display_state,
+            audio_level=self.state.audio_level,
+            heard=self.state.activity_heard or self.state.voice_partial,
+            reply=self.state.activity_reply,
+            skill=self.state.activity_skill,
+            detail=self.state.activity_detail,
+            task_id=self.state.activity_task_id,
+            safety_stopped=self.state.safety_stopped,
         )
         if not self.state.connected:
             if self.orb.isVisible():
@@ -185,7 +206,10 @@ class NativeApp:
             "model": self.state.tts_model,
             "model_path": self.state.tts_model_path,
             "piper_path": self.state.tts_piper_path,
+            "piper_model_path": self.state.tts_piper_model_path,
+            "piper_speaker": self.state.tts_piper_speaker,
             "speaker": self.state.tts_speaker,
+            "sample_rate": self.state.tts_sample_rate,
             "model_ready": self.state.tts_model_ready,
             "last_synth_ms": self.state.tts_last_synth_ms,
             "last_chars": self.state.tts_last_chars,
@@ -204,29 +228,21 @@ class NativeApp:
         )
         if self.state.voice_error:
             self.center.set_voice_diagnostics_message(self.state.voice_error)
+        chat_phase = self.state.activity_phase if self.state.activity_active else display_state
         self.center.chat.set_live_activity(
-            self.state.activity_phase,
+            chat_phase,
             self.state.activity_heard,
             self.state.activity_reply,
             self.state.activity_skill,
             self.state.activity_detail,
             self.state.activity_task_id,
+            self.state.audio_level,
         )
         if self.state.safety_stopped:
             self.orb.set_state("stopped")
             self.orb.set_activity(0, "")
             self.orb.set_live(detail="STOP ALL активен", recent=self.state.activity_recent)
             return
-        activity_state = {
-            "thinking": "thinking",
-            "speaking": "speaking",
-            "executing": "working",
-            "task": "working",
-            "waiting": "waiting",
-            "error": "error",
-        }.get(self.state.activity_phase, "")
-        voice_state = self.state.assistant_state
-        display_state = activity_state if self.state.activity_active and activity_state else voice_state
         if display_state in ("listening", "thinking", "speaking", "working", "waiting", "error"):
             self.orb.set_state(display_state, 1800 if display_state == "error" else 0)
             self.orb.set_activity(self.state.audio_level, self.state.voice_partial)
@@ -252,6 +268,7 @@ class NativeApp:
         self.quick.set_busy(True)
         self.quick.show_answer("Думаю…")
         self.orb.set_state("thinking")
+        self.center.chat.clear_action_trace()
         self.center.chat.append_local("Вы", clean)
 
         def done(payload: dict[str, Any]) -> None:
@@ -260,6 +277,18 @@ class NativeApp:
             self.quick.set_busy(False)
             self.quick.show_answer(reply)
             self.center.chat.append_local("Люма", reply)
+            self.center.chat.show_action_trace(
+                list(payload.get("steps") or []) if isinstance(payload.get("steps"), list) else []
+            )
+            image = payload.get("image") if isinstance(payload.get("image"), dict) else {}
+            image_url = str(image.get("url") or "")
+            if image_url:
+                image_title = str(image.get("printer_name") or image.get("printer_id") or "")
+                self.run_async(
+                    lambda url=image_url: self.backend.fetch_local_image(url),
+                    lambda data, title=image_title: self.center.chat.show_camera_image(data, title),
+                    lambda _message: None,
+                )
             pending = payload.get("pending")
             if isinstance(pending, dict) and pending.get("id"):
                 self.center.set_page_payload("tasks", {"pending": [pending]})
@@ -289,6 +318,7 @@ class NativeApp:
     def clear_chat(self) -> None:
         def done(_payload: dict[str, Any]) -> None:
             self.center.chat.set_history([])
+            self.center.chat.clear_action_trace()
             self.quick.show_answer("Диалог очищен.")
 
         self.run_async(

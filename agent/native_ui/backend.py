@@ -58,6 +58,39 @@ class BackendClient:
     def get(self, path: str) -> dict[str, Any]:
         return self._request(self.agent_url, path)
 
+    def fetch_local_image(self, url: str, limit: int = 8 * 1024 * 1024) -> bytes:
+        """Fetch a loopback JPEG referenced by a chat response."""
+        target = str(url or "").strip()
+        try:
+            parsed = urllib.parse.urlsplit(target)
+        except ValueError as exc:
+            raise BackendError("Некорректный адрес изображения") from exc
+        host = str(parsed.hostname or "").casefold()
+        if parsed.scheme not in ("http", "https") or host not in ("127.0.0.1", "localhost", "::1"):
+            raise BackendError("Изображение должно быть локальным")
+        if parsed.path not in ("/api/printer/camera.jpg", "/api/printer/shot.jpg"):
+            raise BackendError("Неподдерживаемый локальный источник изображения")
+        req = urllib.request.Request(
+            target,
+            headers={"User-Agent": "Luma-NativeUI/1", "Accept": "image/jpeg"},
+            method="GET",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=min(self.timeout, 8.0)) as res:
+                content_type = str(res.headers.get("Content-Type") or "").casefold()
+                raw = res.read(int(limit) + 1)
+        except urllib.error.HTTPError as exc:
+            raise BackendError(f"Камера ответила {int(exc.code or 0)}") from exc
+        except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            raise BackendError(f"Кадр камеры недоступен: {exc.__class__.__name__}") from exc
+        if len(raw) > int(limit):
+            raise BackendError("Кадр камеры слишком большой")
+        if not raw:
+            raise BackendError("Камера вернула пустой кадр")
+        if "image/jpeg" not in content_type and not raw.startswith(b"\xff\xd8\xff"):
+            raise BackendError("Камера вернула не JPEG")
+        return raw
+
     def post(self, path: str, body: dict[str, Any] | None = None) -> dict[str, Any]:
         return self._request(self.agent_url, path, "POST", body or {})
 

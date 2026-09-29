@@ -59,6 +59,8 @@ class PcHelpersTests(unittest.TestCase):
         self.assertEqual("notepad", pc.resolve_app("блокнот")[0])
         self.assertEqual("control", pc.resolve_app("панель управления")[0])
         self.assertEqual("orca", pc.resolve_app("открой орку")[0])
+        self.assertEqual("steam", pc.resolve_app("стим")[0])
+        self.assertEqual("apex", pc.resolve_app("apex legends")[0])
         self.assertIsNone(pc.resolve_app("format c:"))
         self.assertEqual("https://www.avito.ru/", pc.resolve_site("авито"))
         self.assertEqual("https://avito.ru/moskva", pc.resolve_site("avito.ru/moskva"))
@@ -76,6 +78,10 @@ class PcHelpersTests(unittest.TestCase):
             self.assertIn("вне разрешённых", pc.launch_plan(outside, roots=(tmp,))[1])
         self.assertEqual(["calc.exe"], pc.launch_plan("калькулятор", platform="win32")[0]["command"])
         self.assertEqual("exe", pc.launch_plan("bambu", platform="win32")[0]["kind"])
+        self.assertEqual(["uri:steam://open/main"],
+                         pc.launch_plan("steam", platform="win32")[0]["command"])
+        self.assertEqual(["uri:steam://rungameid/1172470"],
+                         pc.launch_plan("апекс", platform="win32")[0]["command"])
         self.assertIn("нет в списке", pc.launch_plan("rm -rf /")[1])
         self.assertIn("Скажите", pc.launch_plan("")[1])
 
@@ -145,6 +151,24 @@ class ModelClientTests(unittest.TestCase):
     def test_default_model_skips_embeddings_and_vision(self):
         self.assertEqual("qwen2.5:3b", model.pick_default(["nomic-embed-text", "llava:7b", "qwen2.5:3b", "llama3.2"]))
         self.assertEqual("", model.pick_default(["nomic-embed-text"]))
+
+    def test_vision_model_is_selected_separately_from_main_brain(self):
+        models = ["qwen2.5:3b", "llava:7b", "qwen2.5vl:3b", "nomic-embed-text"]
+        self.assertEqual("qwen2.5vl:3b", model.pick_vision(models))
+        self.assertEqual("", model.pick_vision(["qwen2.5:3b", "nomic-embed-text"]))
+
+    def test_relevant_skill_prompt_surfaces_functions_from_full_registry(self):
+        caps = {name: True for name in skills.CAPABILITIES}
+        screen_prompt = skills.relevant_prompt(
+            "посмотри на экран, найди кнопку сохранить и нажми её", caps
+        )
+        self.assertIn("screen.find_and_click", screen_prompt)
+        self.assertIn("screen.", screen_prompt)
+        self.assertLessEqual(len(screen_prompt), 5600)
+
+        app_prompt = skills.relevant_prompt("запусти Steam и потом открой папку загрузок", caps)
+        self.assertIn("app.open", app_prompt)
+        self.assertLessEqual(len(app_prompt), 5600)
 
     def test_visible_text_drops_reasoning(self):
         self.assertEqual("Привет!\nКак дела?", model.visible_text("<think>долго</think>\nПривет!\n\nКак дела?"))
@@ -228,6 +252,11 @@ class UnderstandTests(unittest.TestCase):
         "закрой блокнот": ("window.close", {"title": "блокнот"}),
         "нажми контрл с": ("system.hotkey", {"keys": "ctrl+c"}),
         "открой калькулятор": ("app.open", {"target": "калькулятор"}),
+        "Открой Steam": ("app.open", {"target": "steam"}),
+        "Открой стим": ("app.open", {"target": "стим"}),
+        "Открой apex": ("app.open", {"target": "apex"}),
+        "нажми кнопку сохранить": ("screen.find_and_click", {"text": "сохранить"}),
+        "найди на экране отправить и нажми": ("screen.find_and_click", {"text": "отправить"}),
         "как там компьютер": ("system.health", {}),
         "что грузит компьютер": ("system.process_list", {"limit": 8}),
         "поставь таймер на 25 минут": ("scheduler.focus_timer", {"minutes": 25, "note": ""}),
@@ -504,6 +533,61 @@ class BrainChatTests(unittest.TestCase):
         self.assertEqual(7, answer["task"]["id"])
 
 
+    def test_model_can_build_checked_multi_step_action(self):
+        sink = _TaskSink()
+        self.agent.tasks = sink
+        raw = json.dumps({
+            "skill": "",
+            "params": {},
+            "steps": [
+                {"skill": "app.open", "params": {"target": "telegram"}},
+                {"skill": "system.health", "params": {}},
+            ],
+            "reply": "",
+            "ask": "",
+        }, ensure_ascii=False)
+        captured = {}
+
+        def fake_chat(*_args, system="", **_kwargs):
+            captured["system"] = system
+            return {"ok": True, "text": raw, "reason": "", "model": "qwen2.5:3b"}
+
+        with patch.object(model, "status", return_value={
+                "ok": True, "model": "qwen2.5:3b", "reason": "",
+                "url": "http://127.0.0.1:11434", "models": ["qwen2.5:3b"],
+             }), patch.object(model, "chat", side_effect=fake_chat):
+            answer = self.brain.chat("подготовь меня к работе и проверь состояние компьютера")
+
+        self.assertEqual("task", answer["kind"], answer)
+        self.assertEqual(["app.open", "system.health"],
+                         [row["skill"] for row in sink.created[0]["steps"]])
+        self.assertIn("Релевантные доступные навыки", captured["system"])
+        self.assertIn("system.health", captured["system"])
+        self.assertEqual([], self.agent.calls, "многошаговый план исполняет Task Engine")
+
+    def test_model_multi_step_rejects_hallucinated_function(self):
+        raw = json.dumps({
+            "skill": "",
+            "params": {},
+            "steps": [
+                {"skill": "app.open", "params": {"target": "telegram"}},
+                {"skill": "format.disk", "params": {}},
+            ],
+            "reply": "",
+            "ask": "",
+        })
+        with patch.object(model, "status", return_value={
+                "ok": True, "model": "qwen2.5:3b", "reason": "",
+                "url": "http://127.0.0.1:11434", "models": ["qwen2.5:3b"],
+             }), patch.object(model, "chat", return_value={
+                "ok": True, "text": raw, "reason": "", "model": "qwen2.5:3b",
+             }):
+            answer = self.brain.chat("сделай две системные операции")
+
+        self.assertEqual("clarify", answer["kind"])
+        self.assertEqual([], self.agent.calls)
+        self.assertIn("доступной функцией", answer["reply"])
+
 class FakePanel:
     """Панель цеха без сети: заранее заданные ответы мозга панели и сводка."""
 
@@ -686,6 +770,67 @@ class BrainPanelTests(unittest.TestCase):
         self.brain.chat("запомни, что Мария любит PETG")
         self.assertEqual("memory", self.brain.chat("что ты помнишь про Марию")["source"], "своя память — первой")
 
+    def test_printer_camera_followup_uses_real_frame_and_local_vision(self):
+        self.panel.answer = {
+            "ok": True, "kind": "answer", "source": "facts",
+            "reply": "Парк сейчас: станков 1, печатают 1, прогресс 60%.",
+        }
+        self.brain.chat("Что там на принтере?")
+        frame = b"\xff\xd8\xffcamera-jpeg\xff\xd9"
+        self.panel.camera_frame = lambda: {
+            "ok": True, "image": frame, "mime": "image/jpeg",
+            "printer_id": "prn_test", "printer_name": "P1S",
+            "url": "http://127.0.0.1:8765/api/printer/camera.jpg?printer_id=prn_test",
+        }
+        with patch.object(model, "vision_ok", return_value=(True, "")), \
+                patch.object(model, "status", return_value={
+                    "ok": True, "url": "http://127.0.0.1:11434",
+                    "model": "gemma3:4b", "reason": "",
+                }), \
+                patch.object(model, "chat", return_value={
+                    "ok": True, "text": "Деталь стоит на столе, явных спагетти не вижу.",
+                    "model": "gemma3:4b", "reason": "",
+                }) as vision:
+            answer = self.brain.chat("Посмотри сам и скажи что там либо покажи картинку")
+        self.assertEqual("panel-camera", answer["source"])
+        self.assertIn("свежий кадр", answer["reply"].casefold())
+        self.assertIn("явных спагетти", answer["reply"])
+        self.assertEqual("prn_test", answer["image"]["printer_id"])
+        self.assertIn("/api/printer/camera.jpg", answer["image"]["url"])
+        self.assertEqual([frame], vision.call_args.kwargs["images"])
+
+    def test_printer_camera_is_still_shown_when_model_has_no_vision(self):
+        frame = b"\xff\xd8\xffcamera-jpeg\xff\xd9"
+        self.panel.camera_frame = lambda: {
+            "ok": True, "image": frame, "mime": "image/jpeg",
+            "printer_id": "prn_test", "printer_name": "P1S",
+            "url": "http://127.0.0.1:8765/api/printer/camera.jpg?printer_id=prn_test",
+        }
+        with patch.object(model, "vision_ok", return_value=(False, "модель не видит изображения")), \
+                patch.object(model, "chat") as vision:
+            answer = self.brain.chat("покажи картинку с принтера")
+        vision.assert_not_called()
+        self.assertEqual("panel-camera", answer["source"])
+        self.assertIn("показываю", answer["reply"])
+        self.assertIn("выдумывать не буду", answer["reply"])
+        self.assertEqual("image/jpeg", answer["image"]["mime"])
+
+    def test_visual_printer_followup_after_panel_status_does_not_fall_back_to_text_panel(self):
+        self.panel.answer = {
+            "ok": True, "kind": "answer", "source": "facts",
+            "reply": "Печать идёт, прогресс 60%.",
+        }
+        self.brain.chat("Что там на принтере?")
+        calls_before = len(self.panel.calls)
+        self.panel.camera_frame = lambda: {
+            "ok": False, "reason": "камера ещё не прислала кадр", "image": b"",
+        }
+        answer = self.brain.chat("Визуально как там всё?")
+        self.assertEqual("panel-camera", answer["source"])
+        self.assertIn("кадр сейчас недоступен", answer["reply"])
+        self.assertEqual(calls_before, len(self.panel.calls),
+                         "визуальный follow-up не должен спрашивать текстовый мозг панели")
+
     def test_follow_up_after_panel_answer_goes_to_panel_even_with_model(self):
         self.panel.answer = {"ok": True, "kind": "answer", "source": "entity", "reply": "Альфа: 40%, осталось ~1 ч."}
         self.brain.chat("что печатает альфа")
@@ -809,6 +954,63 @@ class ExecutorRefusalTests(unittest.TestCase):
         result = self.dispatch("app.open", {"target": str(pathlib.Path(self._tmp.name) / "outside.txt")})
         self.assertFalse(result["ok"])
         self.assertIn("вне разрешённых", result["reason"])
+
+    def test_screen_find_and_click_uses_grounded_rect_center(self):
+        found = {
+            "found": True, "method": "uia", "text": "Сохранить",
+            "rect": {"left": 100, "top": 200, "right": 220, "bottom": 260},
+        }
+        with patch.object(self.runner, "_screen_find", return_value={
+                "ok": True, "found": found, "method": "uia", "reason": "",
+             }), patch.object(executor.winapi, "active_window", return_value=("Редактор", "")), \
+             patch.object(executor.winapi, "click", return_value=(True, "")) as click:
+            result = self.runner._screen_find_and_click({"text": "Сохранить"})
+        self.assertTrue(result["ok"], result)
+        click.assert_called_once_with(160, 230)
+        self.assertEqual({"x": 160, "y": 230, "text": "Сохранить", "window": "Редактор"},
+                         result["clicked"])
+
+    def test_screen_find_and_click_never_guesses_missing_coordinates(self):
+        found = {"found": True, "method": "window_title", "title": "Сохранить"}
+        with patch.object(self.runner, "_screen_find", return_value={
+                "ok": True, "found": found, "method": "window_title", "reason": "",
+             }), patch.object(executor.winapi, "click") as click:
+            result = self.runner._screen_find_and_click({"text": "Сохранить"})
+        self.assertFalse(result["ok"])
+        self.assertIn("координаты", result["reason"])
+        click.assert_not_called()
+
+    def test_screen_describe_can_use_separate_installed_vision_model(self):
+        primary = {
+            "ok": True, "url": "http://127.0.0.1:11434", "model": "qwen2.5:3b",
+            "models": ["qwen2.5:3b", "qwen2.5vl:3b"], "reason": "",
+        }
+        vision = {
+            "ok": True, "url": "http://127.0.0.1:11434", "model": "qwen2.5vl:3b",
+            "models": ["qwen2.5:3b", "qwen2.5vl:3b"], "reason": "",
+        }
+
+        def status(*_args, name="", **_kwargs):
+            return dict(vision if name == "qwen2.5vl:3b" else primary)
+
+        def vision_ok(*_args, name="", **_kwargs):
+            return ((True, "") if name == "qwen2.5vl:3b"
+                    else (False, "основная модель без vision"))
+
+        with patch("agent.perception.observe", return_value={"ok": False}), \
+             patch.object(model, "status", side_effect=status), \
+             patch.object(model, "vision_ok", side_effect=vision_ok), \
+             patch.object(executor.winapi, "grab_screen", return_value=(b"PNG", "")), \
+             patch.object(model, "chat", return_value={
+                 "ok": True, "text": "На экране открыт редактор.", "model": "qwen2.5vl:3b",
+                 "reason": "",
+             }) as vision_chat:
+            result = self.runner._screen_describe({})
+
+        self.assertTrue(result["ok"], result)
+        self.assertEqual("qwen2.5vl:3b", result["model"])
+        self.assertEqual("qwen2.5vl:3b", vision_chat.call_args.kwargs["state"]["model"])
+        self.assertEqual([b"PNG"], vision_chat.call_args.kwargs["images"])
 
     def test_new_skills_are_described_for_confirmation(self):
         for name, params in (("system.hotkey", {"keys": "ctrl+s"}), ("window.close", {"title": "Блокнот"}),

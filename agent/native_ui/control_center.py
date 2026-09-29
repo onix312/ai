@@ -6,11 +6,16 @@ import json
 from typing import Any
 
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QComboBox, QDoubleSpinBox, QFrame, QHBoxLayout, QLabel, QLineEdit,
     QListWidget, QListWidgetItem, QMainWindow, QProgressBar, QPushButton,
     QScrollArea, QSpinBox, QStackedWidget, QTextBrowser, QVBoxLayout, QWidget,
 )
+
+from .components import AmbientCanvas, BrandCard, GlassCard, LumaPortrait, StatusHeader
+from .orb import LumaOrbCore
+from . import theme
 
 
 def _pretty(value: Any) -> str:
@@ -106,61 +111,333 @@ class TextPage(QWidget):
                 "</td></tr></table>")
 
 
+class SkillsPage(QWidget):
+    """Searchable capability map: what Luma can really use on this computer."""
+
+    refresh_requested = Signal()
+
+    GROUP_LABELS = {
+        "system": "Компьютер", "window": "Окна", "desktop": "Рабочий стол",
+        "screen": "Зрение", "browser": "Браузер", "app": "Программы",
+        "files": "Файлы", "panel": "PrintFlow", "voice": "Голос",
+        "memory": "Память", "reminder": "Напоминания", "scheduler": "Таймеры",
+        "list": "Списки", "goal": "Цели", "habit": "Привычки",
+        "expense": "Расходы", "diary": "Дневник", "clipboard": "Буфер",
+        "assistant": "Сценарии", "agent": "Ядро", "day": "День",
+        "knowledge": "Знания", "learn": "Обучение", "tg": "Telegram",
+        "avito": "Авито", "printer": "Печать",
+    }
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._payload: dict[str, Any] = {}
+        root = QVBoxLayout(self)
+        root.setContentsMargins(2, 2, 2, 2)
+        root.setSpacing(12)
+
+        head = QHBoxLayout()
+        title_box = QVBoxLayout()
+        title = QLabel("Навыки")
+        title.setObjectName("pageTitle")
+        title_box.addWidget(title)
+        subtitle = QLabel("Карта реальных функций Люмы на этом компьютере.")
+        subtitle.setObjectName("muted")
+        title_box.addWidget(subtitle)
+        head.addLayout(title_box, 1)
+        refresh = QPushButton("Обновить")
+        refresh.clicked.connect(self.refresh_requested)
+        head.addWidget(refresh)
+        root.addLayout(head)
+
+        metrics = QHBoxLayout()
+        self.ready_metric = QLabel("0")
+        self.ready_metric.setObjectName("skillMetricReady")
+        self.total_metric = QLabel("0")
+        self.total_metric.setObjectName("skillMetric")
+        self.off_metric = QLabel("0")
+        self.off_metric.setObjectName("skillMetric")
+        for title_text, widget in (
+            ("ГОТОВО", self.ready_metric),
+            ("ВСЕГО", self.total_metric),
+            ("НЕДОСТУПНО", self.off_metric),
+        ):
+            card = GlassCard("cyan" if title_text == "ГОТОВО" else "")
+            box = QVBoxLayout(card)
+            box.setContentsMargins(12, 9, 12, 9)
+            kicker = QLabel(title_text)
+            kicker.setObjectName("metricLabel")
+            box.addWidget(kicker)
+            box.addWidget(widget)
+            metrics.addWidget(card)
+        root.addLayout(metrics)
+
+        filter_row = QHBoxLayout()
+        self.search = QLineEdit()
+        self.search.setPlaceholderText("Найти функцию: экран, Steam, файл, принтер, память…")
+        self.search.textChanged.connect(self._render)
+        filter_row.addWidget(self.search, 1)
+        self.state_filter = QComboBox()
+        self.state_filter.addItem("Все состояния", "all")
+        self.state_filter.addItem("Только доступные", "ready")
+        self.state_filter.addItem("Что не работает", "off")
+        self.state_filter.currentIndexChanged.connect(self._render)
+        filter_row.addWidget(self.state_filter)
+        root.addLayout(filter_row)
+
+        brain_note = QLabel(
+            "LUMA TOOL ROUTER · мозг получает релевантные функции под каждую фразу, "
+            "а перед выполнением реестр повторно проверяет доступность и параметры."
+        )
+        brain_note.setObjectName("voiceChain")
+        brain_note.setWordWrap(True)
+        root.addWidget(brain_note)
+
+        self.browser = QTextBrowser()
+        self.browser.setObjectName("skillsBrowser")
+        root.addWidget(self.browser, 1)
+
+    def set_payload(self, payload: dict[str, Any]) -> None:
+        self._payload = dict(payload or {})
+        rows = [row for row in list(self._payload.get("skills") or []) if isinstance(row, dict)]
+        ready = sum(1 for row in rows if row.get("available"))
+        self.ready_metric.setText(str(ready))
+        self.total_metric.setText(str(len(rows)))
+        self.off_metric.setText(str(len(rows) - ready))
+        self._render()
+
+    def _render(self) -> None:
+        rows = [row for row in list(self._payload.get("skills") or []) if isinstance(row, dict)]
+        needle = " ".join(self.search.text().casefold().split())
+        mode = str(self.state_filter.currentData() or "all")
+        filtered = []
+        for row in rows:
+            available = bool(row.get("available"))
+            if mode == "ready" and not available:
+                continue
+            if mode == "off" and available:
+                continue
+            hay = " ".join(
+                str(row.get(key) or "") for key in ("name", "title", "description", "reason", "provider")
+            ).casefold()
+            if needle and needle not in hay:
+                continue
+            filtered.append(row)
+
+        groups: dict[str, list[dict[str, Any]]] = {}
+        for row in filtered:
+            group = str(row.get("name") or "other").split(".", 1)[0]
+            groups.setdefault(group, []).append(row)
+
+        sections = []
+        for group in sorted(groups, key=lambda value: self.GROUP_LABELS.get(value, value).casefold()):
+            items = []
+            for row in sorted(groups[group], key=lambda value: str(value.get("title") or value.get("name") or "")):
+                available = bool(row.get("available"))
+                state = "READY" if available else "OFF"
+                state_color = "#58E6B1" if available else "#F5B84C"
+                border = "#315F59" if available else "#664A2A"
+                name = html.escape(str(row.get("name") or ""))
+                title = html.escape(str(row.get("title") or name))
+                desc = html.escape(str(row.get("description") or ""))
+                risk = html.escape(str(row.get("risk") or "read"))
+                provider = html.escape(str(row.get("provider") or "local"))
+                params = dict(row.get("params") or {})
+                params_text = ", ".join(f"{key}: {value}" for key, value in params.items()) or "без параметров"
+                reason = html.escape(str(row.get("reason") or ""))
+                confirm = " · подтверждение" if row.get("confirm") else ""
+                learned = " · обучено" if row.get("learned") else ""
+                meta = html.escape(f"{risk}{confirm}{learned} · {provider} · {params_text}")
+                unavailable = (
+                    f"<br><span style='color:#F5B84C;'>Причина: {reason}</span>" if reason and not available else ""
+                )
+                items.append(
+                    "<table width='100%' cellspacing='0' cellpadding='0' "
+                    f"style='margin:7px 0;border:1px solid {border};background:#101225;'>"
+                    "<tr><td style='padding:11px 13px;'>"
+                    f"<span style='color:{state_color};font-size:10px;font-weight:700;'>{state}</span>"
+                    f"&nbsp;&nbsp;<b style='color:#F7F5FF;'>{title}</b>"
+                    f"<span style='color:#777493;'> · {name}</span><br>"
+                    f"<span style='color:#B4B0C9;'>{desc}</span><br>"
+                    f"<span style='color:#777493;font-size:11px;'>{meta}</span>{unavailable}"
+                    "</td></tr></table>"
+                )
+            group_title = html.escape(self.GROUP_LABELS.get(group, group.capitalize()))
+            sections.append(
+                f"<div style='margin:16px 0 6px;color:#A78BFA;font-size:16px;font-weight:700;'>"
+                f"{group_title} · {len(items)}</div>" + "".join(items)
+            )
+        body = "".join(sections)
+        if not body:
+            body = (
+                "<div style='margin:28px;color:#9996B7;'>"
+                "По этому фильтру функций нет. Попробуйте другое слово.</div>"
+            )
+        self.browser.setHtml("<div style='margin:8px 14px;'>" + body + "</div>")
+
+
 class ChatPage(QWidget):
     submitted = Signal(str)
     clear_requested = Signal()
 
     def __init__(self) -> None:
         super().__init__()
+        self._turns: list[dict[str, str]] = []
+        self._has_history = False
+
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(2, 2, 2, 2)
+        layout.setSpacing(12)
+
         head = QHBoxLayout()
+        title_box = QVBoxLayout()
         title = QLabel("Разговор")
         title.setObjectName("pageTitle")
-        head.addWidget(title)
-        head.addStretch(1)
+        subtitle = QLabel("Живой диалог с Люма · текст, голос и действия в одном потоке.")
+        subtitle.setObjectName("muted")
+        title_box.addWidget(title)
+        title_box.addWidget(subtitle)
+        head.addLayout(title_box, 1)
         clear = QPushButton("Очистить диалог")
         clear.clicked.connect(self.clear_requested)
         head.addWidget(clear)
         layout.addLayout(head)
+
+        live_card = GlassCard("violet")
+        live_row = QHBoxLayout(live_card)
+        live_row.setContentsMargins(12, 9, 14, 9)
+        live_row.setSpacing(10)
+        self.live_portrait = LumaPortrait(compact=True)
+        self.live_portrait.setFixedSize(42, 50)
+        live_row.addWidget(self.live_portrait, 0, Qt.AlignVCenter)
+        live_text = QVBoxLayout()
+        live_text.setSpacing(1)
+        live_label = QLabel("LUMA // LIVE")
+        live_label.setObjectName("heroKicker")
+        live_text.addWidget(live_label)
         self.live = QLabel("Люма готова")
-        self.live.setObjectName("muted")
+        self.live.setObjectName("chatLive")
         self.live.setWordWrap(True)
-        layout.addWidget(self.live)
+        live_text.addWidget(self.live)
+        live_row.addLayout(live_text, 1)
+        self.live_orb = LumaOrbCore(compact=True)
+        self.live_orb.setFixedSize(46, 46)
+        live_row.addWidget(self.live_orb, 0, Qt.AlignVCenter)
+        layout.addWidget(live_card)
+
+        self.trace_card = GlassCard()
+        trace_box = QVBoxLayout(self.trace_card)
+        trace_box.setContentsMargins(12, 9, 12, 10)
+        trace_box.setSpacing(5)
+        trace_head = QHBoxLayout()
+        trace_title = QLabel("ХОД ВЫПОЛНЕНИЯ")
+        trace_title.setObjectName("heroKicker")
+        trace_head.addWidget(trace_title)
+        trace_head.addStretch(1)
+        self.trace_badge = QLabel("LOCAL")
+        self.trace_badge.setObjectName("tracePill")
+        trace_head.addWidget(self.trace_badge)
+        trace_box.addLayout(trace_head)
+        self.trace_text = QLabel("")
+        self.trace_text.setObjectName("actionTrace")
+        self.trace_text.setWordWrap(True)
+        trace_box.addWidget(self.trace_text)
+        self.trace_card.hide()
+        layout.addWidget(self.trace_card)
+
+        self.camera_card = GlassCard("cyan")
+        camera_box = QVBoxLayout(self.camera_card)
+        camera_box.setContentsMargins(10, 9, 10, 10)
+        camera_head = QHBoxLayout()
+        self.camera_title = QLabel("КАМЕРА ПРИНТЕРА")
+        self.camera_title.setObjectName("heroKicker")
+        camera_head.addWidget(self.camera_title)
+        camera_head.addStretch(1)
+        close_camera = QPushButton("Скрыть")
+        close_camera.clicked.connect(self.camera_card.hide)
+        camera_head.addWidget(close_camera)
+        camera_box.addLayout(camera_head)
+        self.camera_frame = QLabel()
+        self.camera_frame.setObjectName("cameraFrame")
+        self.camera_frame.setAlignment(Qt.AlignCenter)
+        self.camera_frame.setMinimumHeight(180)
+        self.camera_frame.setMaximumHeight(360)
+        camera_box.addWidget(self.camera_frame, 1)
+        self.camera_card.hide()
+        layout.addWidget(self.camera_card)
 
         self.content = QStackedWidget()
-        welcome = QWidget()
-        intro = QVBoxLayout(welcome)
-        intro.setContentsMargins(56, 20, 56, 20)
-        intro.addStretch(2)
-        greeting = QLabel("Привет, я Люма")
+
+        welcome = GlassCard()
+        intro = QHBoxLayout(welcome)
+        intro.setContentsMargins(28, 22, 28, 22)
+        intro.setSpacing(26)
+
+        portrait_column = QVBoxLayout()
+        portrait_column.addStretch(1)
+        self.welcome_portrait = LumaPortrait()
+        self.welcome_portrait.setFixedSize(170, 205)
+        portrait_column.addWidget(self.welcome_portrait, 0, Qt.AlignCenter)
+        persona = QLabel("LUMA · LOCAL PERSONA")
+        persona.setObjectName("heroKicker")
+        persona.setAlignment(Qt.AlignCenter)
+        portrait_column.addWidget(persona)
+        portrait_column.addStretch(1)
+        intro.addLayout(portrait_column, 4)
+
+        copy = QVBoxLayout()
+        copy.addStretch(1)
+        greeting = QLabel("Привет. Я Люма.")
         greeting.setObjectName("welcomeTitle")
-        intro.addWidget(greeting)
-        description = QLabel("Могу помочь с делами, ответить на вопрос и выполнить действие на компьютере.")
+        copy.addWidget(greeting)
+        description = QLabel(
+            "Можешь писать обычным языком: спросить, попросить выполнить действие "
+            "или продолжить задачу. Голос и текст используют один контекст."
+        )
         description.setObjectName("welcomeText")
         description.setWordWrap(True)
-        intro.addWidget(description)
-        intro.addSpacing(24)
-        for prompt in ("Что у меня сегодня?", "Продажи за 7 дней", "Что ты умеешь?"):
+        copy.addWidget(description)
+        copy.addSpacing(16)
+
+        suggestions = (
+            "Что у меня сегодня?",
+            "Покажи активные задачи",
+            "Открой загрузки",
+        )
+        for prompt in suggestions:
             button = QPushButton(prompt)
             button.setObjectName("suggestion")
             button.clicked.connect(lambda _=False, value=prompt: self._pick_prompt(value))
-            intro.addWidget(button)
-        intro.addStretch(3)
+            copy.addWidget(button)
+        copy.addStretch(1)
+        intro.addLayout(copy, 7)
+
         self.content.addWidget(welcome)
+
+        feed_card = GlassCard()
+        feed_layout = QVBoxLayout(feed_card)
+        feed_layout.setContentsMargins(4, 4, 4, 4)
         self.feed = QTextBrowser()
-        self.content.addWidget(self.feed)
-        self._has_history = False
+        self.feed.setObjectName("chatFeed")
+        self.feed.setOpenExternalLinks(True)
+        feed_layout.addWidget(self.feed)
+        self.content.addWidget(feed_card)
+
         layout.addWidget(self.content, 1)
-        row = QHBoxLayout()
+
+        composer = GlassCard("cyan")
+        composer_row = QHBoxLayout(composer)
+        composer_row.setContentsMargins(10, 9, 10, 9)
+        composer_row.setSpacing(8)
         self.input = QLineEdit()
+        self.input.setObjectName("chatInput")
         self.input.setPlaceholderText("Спроси Люму или скажи, что сделать…")
         self.input.returnPressed.connect(self._submit)
-        row.addWidget(self.input, 1)
+        composer_row.addWidget(self.input, 1)
         send = QPushButton("Отправить")
         send.setObjectName("primary")
         send.clicked.connect(self._submit)
-        row.addWidget(send)
-        layout.addLayout(row)
+        composer_row.addWidget(send)
+        layout.addWidget(composer)
 
     def _pick_prompt(self, text: str) -> None:
         self.input.setText(text)
@@ -172,39 +449,131 @@ class ChatPage(QWidget):
             self.input.clear()
             self.submitted.emit(text)
 
-    def set_history(self, turns: list[dict[str, Any]]) -> None:
-        chunks = []
-        for turn in turns:
-            role = str(turn.get("role") or "")
-            who = "Вы" if role == "user" else "Люма"
-            text = str(turn.get("text") or "")
-            chunks.append(f"<p><b>{who}</b><br>{html.escape(text)}</p>")
-        self.feed.setHtml("".join(chunks))
-        self._has_history = bool(chunks)
-        self.content.setCurrentIndex(1 if chunks else 0)
+    @staticmethod
+    def _bubble(role: str, text: str) -> str:
+        safe = html.escape(str(text or "")).replace("\n", "<br>")
+        if role == "user":
+            return (
+                "<table width='100%' cellspacing='0' cellpadding='0' style='margin:8px 0;'>"
+                "<tr><td width='19%'></td><td align='right'>"
+                "<div style='background:#242044;border:1px solid #5E4AA3;"
+                "border-radius:14px;padding:11px 14px;color:#F5F2FF;'>"
+                "<span style='color:#BCAEFF;font-size:11px;font-weight:700;'>ВЫ</span><br>"
+                f"{safe}</div></td></tr></table>"
+            )
+        return (
+            "<table width='100%' cellspacing='0' cellpadding='0' style='margin:8px 0;'>"
+            "<tr><td>"
+            "<div style='background:#111328;border:1px solid #30345A;"
+            "border-radius:14px;padding:11px 14px;color:#ECE9F8;'>"
+            "<span style='color:#58E6B1;font-size:11px;font-weight:700;'>LUMA</span><br>"
+            f"{safe}</div></td><td width='19%'></td></tr></table>"
+        )
+
+    def _render_turns(self) -> None:
+        html_rows = [self._bubble(row.get("role", "assistant"), row.get("text", ""))
+                     for row in self._turns]
+        self.feed.setHtml(
+            "<div style='margin:12px 16px;background:#0D0F20;'>"
+            + "".join(html_rows)
+            + "</div>"
+        )
+        self._has_history = bool(self._turns)
+        self.content.setCurrentIndex(1 if self._has_history else 0)
         bar = self.feed.verticalScrollBar()
         bar.setValue(bar.maximum())
 
+    def set_history(self, turns: list[dict[str, Any]]) -> None:
+        self._turns = []
+        for turn in turns:
+            role = "user" if str(turn.get("role") or "") == "user" else "assistant"
+            self._turns.append({"role": role, "text": str(turn.get("text") or "")})
+        if not self._turns:
+            self.camera_card.hide()
+            self.camera_frame.clear()
+            self.clear_action_trace()
+        self._render_turns()
+
     def append_local(self, who: str, text: str) -> None:
-        if not self._has_history:
-            self.feed.clear()
-            self._has_history = True
-            self.content.setCurrentIndex(1)
-        self.feed.append(f"<p><b>{html.escape(who)}</b><br>{html.escape(text)}</p>")
+        role = "user" if str(who or "").casefold() in {"вы", "user"} else "assistant"
+        self._turns.append({"role": role, "text": str(text or "")})
+        self._render_turns()
+
+    def clear_action_trace(self) -> None:
+        self.trace_text.clear()
+        self.trace_card.hide()
+
+    def show_action_trace(self, steps: list[dict[str, Any]] | None) -> None:
+        """Show explicit operational stages returned by the agent, never hidden model reasoning."""
+        rows = [row for row in list(steps or []) if isinstance(row, dict)]
+        if not rows:
+            self.clear_action_trace()
+            return
+        icons = {
+            "rule": "◆", "context": "◇", "model": "◉", "check": "✓",
+            "skill": "→", "task": "▰", "panel": "⌁", "learned": "✦",
+            "plan": "≋",
+        }
+        lines = []
+        for row in rows[-6:]:
+            kind = str(row.get("kind") or "").casefold()
+            title = " ".join(str(row.get("title") or "").split())
+            detail = " ".join(str(row.get("detail") or "").split())
+            if not title:
+                continue
+            line = f"{icons.get(kind, '·')} {title}"
+            if detail:
+                line += f"  ·  {detail[:150]}"
+            lines.append(line)
+        if not lines:
+            self.clear_action_trace()
+            return
+        self.trace_text.setText("\n".join(lines))
+        self.trace_badge.setText("LOCAL · " + str(len(lines)) + " ШАГ.")
+        self.trace_card.show()
+
+    def show_camera_image(self, data: bytes, title: str = "") -> bool:
+        pixmap = QPixmap()
+        if not data or not pixmap.loadFromData(bytes(data), "JPEG"):
+            self.camera_card.hide()
+            return False
+        scaled = pixmap.scaled(720, 360, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        self.camera_frame.setPixmap(scaled)
+        self.camera_title.setText(
+            "КАМЕРА ПРИНТЕРА" + (f" · {str(title)[:72]}" if str(title or "").strip() else "")
+        )
+        self.camera_card.show()
+        return True
 
     def set_live_activity(self, phase: str = "idle", heard: str = "", reply: str = "",
-                          skill: str = "", detail: str = "", task_id: int = 0) -> None:
+                          skill: str = "", detail: str = "", task_id: int = 0,
+                          audio_level: int = 0) -> None:
+        clean_phase = str(phase or "idle").casefold()
+        orb_state = {
+            "executing": "working",
+            "task": "working",
+            "done": "idle",
+        }.get(clean_phase, clean_phase)
+        if orb_state not in {"idle", "listening", "thinking", "speaking", "working",
+                             "waiting", "error", "stopped"}:
+            orb_state = "idle"
+        self.live_orb.set_state(orb_state)
+        self.live_orb.set_activity(audio_level)
+        self.live_portrait.set_state(orb_state)
+        self.welcome_portrait.set_state(orb_state)
+
         labels = {
-            "thinking": "🧠 Люма думает",
-            "speaking": "🔊 Люма отвечает",
-            "executing": "⚡ Люма выполняет",
-            "task": "✓ Люма ведёт задачу",
-            "waiting": "⏳ Люма ждёт",
-            "error": "⚠ Люме нужна помощь",
-            "done": "✓ Готово",
+            "thinking": "Люма думает",
+            "speaking": "Люма отвечает",
+            "executing": "Люма выполняет",
+            "task": "Люма ведёт задачу",
+            "waiting": "Люма ждёт",
+            "error": "Люме нужна помощь",
+            "done": "Готово",
             "idle": "Люма готова",
+            "listening": "Люма слушает",
         }
-        parts = [labels.get(str(phase or "idle"), "Люма работает")]
+        parts = [labels.get(clean_phase, "Люма работает")]
         if skill:
             parts.append(str(skill))
         if task_id:
@@ -216,6 +585,498 @@ class ChatPage(QWidget):
         elif heard:
             parts.append("услышала: «" + " ".join(str(heard).split())[:120] + "»")
         self.live.setText(" · ".join(parts))
+
+
+class HomePage(QWidget):
+    submitted = Signal(str)
+
+    STATE_LABELS = {
+        "idle": "Готова",
+        "listening": "Слушаю",
+        "thinking": "Думаю",
+        "speaking": "Отвечаю",
+        "executing": "Выполняю",
+        "working": "Выполняю",
+        "task": "Веду задачу",
+        "waiting": "Жду",
+        "error": "Нужна помощь",
+        "stopped": "STOP ALL",
+    }
+
+    def __init__(self) -> None:
+        super().__init__()
+        root = QVBoxLayout(self)
+        root.setContentsMargins(2, 2, 2, 2)
+        root.setSpacing(14)
+
+        hero = GlassCard("violet")
+        hero_layout = QHBoxLayout(hero)
+        hero_layout.setContentsMargins(22, 20, 22, 20)
+        hero_layout.setSpacing(20)
+
+        persona = QVBoxLayout()
+        persona.setSpacing(6)
+        kicker = QLabel("LUMA // LOCAL CORE")
+        kicker.setObjectName("heroKicker")
+        persona.addWidget(kicker)
+
+        title = QLabel("Люма")
+        title.setObjectName("heroTitle")
+        persona.addWidget(title)
+
+        description = QLabel(
+            "Персональный AI-ассистент на твоём компьютере. "
+            "Слушает, думает и действует локально."
+        )
+        description.setObjectName("heroDescription")
+        description.setWordWrap(True)
+        description.setMaximumWidth(300)
+        persona.addWidget(description)
+
+        self.persona_badge = QLabel("●  PERSONA ONLINE")
+        self.persona_badge.setObjectName("localPill")
+        self.persona_badge.setMaximumWidth(150)
+        persona.addSpacing(8)
+        persona.addWidget(self.persona_badge, 0, Qt.AlignLeft)
+
+        self.portrait = LumaPortrait()
+        self.portrait.setFixedSize(132, 156)
+
+        persona_row = QHBoxLayout()
+        persona_row.addLayout(persona, 1)
+        persona_row.addWidget(self.portrait, 0, Qt.AlignBottom)
+        hero_layout.addLayout(persona_row, 7)
+
+        orb_column = QVBoxLayout()
+        orb_column.setSpacing(2)
+        self.orb = LumaOrbCore()
+        self.orb.setMinimumSize(250, 250)
+        self.orb.setMaximumSize(310, 310)
+        orb_column.addWidget(self.orb, 1, Qt.AlignCenter)
+        self.state_title = QLabel("Готова")
+        self.state_title.setObjectName("orbStateTitle")
+        self.state_title.setAlignment(Qt.AlignCenter)
+        orb_column.addWidget(self.state_title)
+        self.state_detail = QLabel("Ожидаю команду")
+        self.state_detail.setObjectName("muted")
+        self.state_detail.setAlignment(Qt.AlignCenter)
+        self.state_detail.setWordWrap(True)
+        self.state_detail.setMaximumWidth(360)
+        orb_column.addWidget(self.state_detail)
+        hero_layout.addLayout(orb_column, 8)
+
+        telemetry = QVBoxLayout()
+        telemetry.setSpacing(10)
+
+        voice_card = GlassCard("cyan")
+        voice_box = QVBoxLayout(voice_card)
+        voice_box.setContentsMargins(14, 12, 14, 12)
+        voice_label = QLabel("ГОЛОС")
+        voice_label.setObjectName("metricLabel")
+        voice_box.addWidget(voice_label)
+        self.voice_value = QLabel("Baya")
+        self.voice_value.setObjectName("metricValue")
+        voice_box.addWidget(self.voice_value)
+        self.voice_meta = QLabel("Silero v5_5_ru · 48 kHz")
+        self.voice_meta.setObjectName("muted")
+        self.voice_meta.setWordWrap(True)
+        voice_box.addWidget(self.voice_meta)
+        telemetry.addWidget(voice_card)
+
+        activity_card = GlassCard()
+        activity_box = QVBoxLayout(activity_card)
+        activity_box.setContentsMargins(14, 12, 14, 12)
+        activity_label = QLabel("СЕЙЧАС")
+        activity_label.setObjectName("metricLabel")
+        activity_box.addWidget(activity_label)
+        self.activity_value = QLabel("Ожидаю")
+        self.activity_value.setObjectName("metricValueSmall")
+        self.activity_value.setWordWrap(True)
+        activity_box.addWidget(self.activity_value)
+        self.heard_value = QLabel("")
+        self.heard_value.setObjectName("muted")
+        self.heard_value.setWordWrap(True)
+        self.heard_value.hide()
+        activity_box.addWidget(self.heard_value)
+        telemetry.addWidget(activity_card)
+
+        self.local_badge = QLabel("LOCAL · OFFLINE READY")
+        self.local_badge.setObjectName("localPill")
+        self.local_badge.setAlignment(Qt.AlignCenter)
+        telemetry.addWidget(self.local_badge)
+        telemetry.addStretch(1)
+
+        hero_layout.addLayout(telemetry, 5)
+        root.addWidget(hero, 1)
+
+        action_card = GlassCard()
+        action_box = QVBoxLayout(action_card)
+        action_box.setContentsMargins(16, 13, 16, 13)
+        action_box.setSpacing(10)
+        action_title = QLabel("Быстрые действия")
+        action_title.setObjectName("sectionTitle")
+        action_box.addWidget(action_title)
+        actions = QHBoxLayout()
+        for text in (
+            "Что у меня сегодня?",
+            "Открой загрузки",
+            "Что ты умеешь?",
+            "Покажи активные задачи",
+        ):
+            button = QPushButton(text)
+            button.setObjectName("suggestion")
+            button.clicked.connect(lambda _=False, value=text: self.submitted.emit(value))
+            actions.addWidget(button)
+        action_box.addLayout(actions)
+        root.addWidget(action_card)
+
+    def set_runtime(self, *, connected: bool, state: str, audio_level: int = 0,
+                    heard: str = "", reply: str = "", skill: str = "",
+                    detail: str = "", task_id: int = 0,
+                    safety_stopped: bool = False) -> None:
+        clean_state = "stopped" if safety_stopped else str(state or "idle").casefold()
+        orb_state = {
+            "executing": "working",
+            "task": "working",
+        }.get(clean_state, clean_state)
+        if orb_state not in self.orb_state_names():
+            orb_state = "idle"
+
+        self.orb.set_state(orb_state)
+        self.orb.set_activity(audio_level)
+        self.portrait.set_state(orb_state)
+        self.state_title.setText(self.STATE_LABELS.get(clean_state, "Работаю"))
+
+        heard_clean = " ".join(str(heard or "").split())[:130]
+        reply_clean = " ".join(str(reply or "").split())[:180]
+        detail_clean = " ".join(str(detail or "").split())[:150]
+        skill_clean = str(skill or "").strip()
+
+        if not connected:
+            self.state_title.setText("Offline")
+            self.state_detail.setText("Локальный backend недоступен")
+            self.activity_value.setText("Нет соединения")
+            self.persona_badge.setText("●  PERSONA OFFLINE")
+        elif safety_stopped:
+            self.state_detail.setText("STOP ALL активен")
+            self.activity_value.setText("Все действия остановлены")
+            self.persona_badge.setText("●  PERSONA PAUSED")
+        else:
+            self.persona_badge.setText("●  PERSONA ONLINE")
+            self.state_detail.setText(
+                reply_clean or detail_clean or
+                (f"Слышу: {heard_clean}" if heard_clean else "Ожидаю команду")
+            )
+            if skill_clean:
+                suffix = f" · задача #{int(task_id)}" if task_id else ""
+                self.activity_value.setText(f"{skill_clean}{suffix}")
+            elif clean_state == "thinking":
+                self.activity_value.setText("Формирую ответ")
+            elif clean_state == "speaking":
+                self.activity_value.setText("Отвечаю голосом")
+            elif clean_state == "listening":
+                self.activity_value.setText("Слушаю микрофон")
+            else:
+                self.activity_value.setText("Ожидаю")
+
+        self.heard_value.setText(f"Вы: {heard_clean}" if heard_clean else "")
+        self.heard_value.setVisible(bool(heard_clean))
+
+    @staticmethod
+    def orb_state_names() -> set[str]:
+        return {"idle", "listening", "thinking", "speaking", "working", "waiting", "error", "stopped"}
+
+    def set_voice(self, *, engine: str, speaker: str, sample_rate: int,
+                  model: str = "", ready: bool = False) -> None:
+        engine_clean = str(engine or "system")
+        speaker_clean = str(speaker or "системный")
+        self.voice_value.setText(speaker_clean.capitalize() if speaker_clean else engine_clean)
+        bits = [engine_clean]
+        if model:
+            bits.append(str(model))
+        if sample_rate:
+            bits.append(f"{int(sample_rate) // 1000} kHz")
+        bits.append("готов" if ready else "fallback")
+        self.voice_meta.setText(" · ".join(bits))
+
+
+class VoicePage(QWidget):
+    tts_save = Signal(str, str, str)
+    tts_reset = Signal()
+    tts_test = Signal()
+    pronunciation_add = Signal(str, str)
+    pronunciation_delete = Signal(str)
+    voice_tune = Signal(int, float, int, float)
+    voice_diag_reset = Signal()
+
+    def __init__(self) -> None:
+        super().__init__()
+        root = QVBoxLayout(self)
+        root.setContentsMargins(2, 2, 2, 2)
+        root.setSpacing(14)
+
+        header = QHBoxLayout()
+        title_box = QVBoxLayout()
+        title = QLabel("Голос Люмы")
+        title.setObjectName("pageTitle")
+        subtitle = QLabel("Локальный голос Baya, произношение и диагностика микрофона.")
+        subtitle.setObjectName("muted")
+        title_box.addWidget(title)
+        title_box.addWidget(subtitle)
+        header.addLayout(title_box, 1)
+        root.addLayout(header)
+
+        hero = GlassCard("cyan")
+        hero_box = QHBoxLayout(hero)
+        hero_box.setContentsMargins(20, 16, 20, 16)
+        hero_box.setSpacing(18)
+
+        self.portrait = LumaPortrait(compact=True)
+        self.portrait.set_state("speaking")
+        hero_box.addWidget(self.portrait, 0, Qt.AlignVCenter)
+
+        voice_identity = QVBoxLayout()
+        voice_identity.setSpacing(4)
+        label = QLabel("PRIMARY LOCAL VOICE")
+        label.setObjectName("heroKicker")
+        voice_identity.addWidget(label)
+        self.voice_name = QLabel("Baya")
+        self.voice_name.setObjectName("metricValue")
+        voice_identity.addWidget(self.voice_name)
+        self.voice_profile = QLabel("Silero v5_5_ru · 48 kHz · CPU local")
+        self.voice_profile.setObjectName("muted")
+        voice_profile_text = (
+            "Мягкий женский профиль для Люмы. "
+            "Piper и системный TTS остаются резервной цепочкой."
+        )
+        profile_note = QLabel(voice_profile_text)
+        profile_note.setObjectName("muted")
+        profile_note.setWordWrap(True)
+        voice_identity.addWidget(self.voice_profile)
+        voice_identity.addWidget(profile_note)
+        hero_box.addLayout(voice_identity, 1)
+
+        self.preview_orb = LumaOrbCore(compact=True)
+        self.preview_orb.set_state("speaking")
+        hero_box.addWidget(self.preview_orb, 0, Qt.AlignVCenter)
+
+        preview = QPushButton("▶  Прослушать Baya")
+        preview.setObjectName("primary")
+        preview.clicked.connect(lambda: self.tts_test.emit())
+        hero_box.addWidget(preview)
+        root.addWidget(hero)
+
+        content = QHBoxLayout()
+        content.setSpacing(14)
+
+        left = QVBoxLayout()
+        left.setSpacing(14)
+
+        engine_card = GlassCard("violet")
+        engine = QVBoxLayout(engine_card)
+        engine.setContentsMargins(16, 14, 16, 14)
+        engine.setSpacing(9)
+        engine_title = QLabel("Движок и fallback")
+        engine_title.setObjectName("sectionTitle")
+        engine.addWidget(engine_title)
+
+        self.tts_meta = QLabel("TTS: …")
+        self.tts_meta.setObjectName("muted")
+        self.tts_meta.setWordWrap(True)
+        engine.addWidget(self.tts_meta)
+
+        chain = QLabel("SILERO BAYA  →  PIPER  →  SYSTEM")
+        chain.setObjectName("voiceChain")
+        chain.setAlignment(Qt.AlignCenter)
+        engine.addWidget(chain)
+
+        self.tts_piper = QLineEdit()
+        self.tts_piper.setPlaceholderText("Piper executable · fallback")
+        engine.addWidget(self.tts_piper)
+        self.tts_model = QLineEdit()
+        self.tts_model.setPlaceholderText("Piper model .onnx · fallback")
+        engine.addWidget(self.tts_model)
+        self.tts_speaker = QLineEdit()
+        self.tts_speaker.setPlaceholderText("Piper speaker id")
+        engine.addWidget(self.tts_speaker)
+
+        tts_buttons = QHBoxLayout()
+        apply_tts = QPushButton("Сохранить fallback")
+        apply_tts.clicked.connect(
+            lambda: self.tts_save.emit(
+                self.tts_piper.text().strip(),
+                self.tts_model.text().strip(),
+                self.tts_speaker.text().strip(),
+            )
+        )
+        reset_tts = QPushButton("Сбросить")
+        reset_tts.clicked.connect(lambda: self.tts_reset.emit())
+        tts_buttons.addWidget(apply_tts)
+        tts_buttons.addWidget(reset_tts)
+        tts_buttons.addStretch(1)
+        engine.addLayout(tts_buttons)
+
+        self.tts_status = QLabel(
+            "Основной профиль: Silero v5_5_ru · Baya · 48 kHz."
+        )
+        self.tts_status.setObjectName("muted")
+        self.tts_status.setWordWrap(True)
+        engine.addWidget(self.tts_status)
+        left.addWidget(engine_card)
+
+        pronunciation_card = GlassCard()
+        pronunciation = QVBoxLayout(pronunciation_card)
+        pronunciation.setContentsMargins(16, 14, 16, 14)
+        pronunciation.setSpacing(9)
+        pronunciation_title = QLabel("Произношение")
+        pronunciation_title.setObjectName("sectionTitle")
+        pronunciation.addWidget(pronunciation_title)
+        hint = QLabel(
+            "Правила применяются к подготовленному тексту перед локальным TTS. "
+            "Например: Bambu → бэмбу."
+        )
+        hint.setObjectName("muted")
+        hint.setWordWrap(True)
+        pronunciation.addWidget(hint)
+
+        pronunciation_row = QHBoxLayout()
+        self.pronunciation_source = QLineEdit()
+        self.pronunciation_source.setPlaceholderText("Как написано")
+        self.pronunciation_target = QLineEdit()
+        self.pronunciation_target.setPlaceholderText("Как произносить")
+        add_pronunciation = QPushButton("Добавить")
+        add_pronunciation.clicked.connect(
+            lambda: self.pronunciation_add.emit(
+                self.pronunciation_source.text().strip(),
+                self.pronunciation_target.text().strip(),
+            )
+        )
+        pronunciation_row.addWidget(self.pronunciation_source, 1)
+        pronunciation_row.addWidget(self.pronunciation_target, 1)
+        pronunciation_row.addWidget(add_pronunciation)
+        pronunciation.addLayout(pronunciation_row)
+
+        self.pronunciation_list = QListWidget()
+        self.pronunciation_list.setMaximumHeight(150)
+        pronunciation.addWidget(self.pronunciation_list)
+        pronunciation_buttons = QHBoxLayout()
+        delete_pronunciation = QPushButton("Удалить выбранное")
+        delete_pronunciation.clicked.connect(
+            lambda: self.pronunciation_delete.emit(
+                str((self.pronunciation_list.currentItem().data(Qt.UserRole)
+                     if self.pronunciation_list.currentItem() else "") or "")
+            )
+        )
+        pronunciation_buttons.addWidget(delete_pronunciation)
+        pronunciation_buttons.addStretch(1)
+        pronunciation.addLayout(pronunciation_buttons)
+
+        self.pronunciation_status = QLabel("Пользовательских правил: 0")
+        self.pronunciation_status.setObjectName("muted")
+        self.pronunciation_status.setWordWrap(True)
+        pronunciation.addWidget(self.pronunciation_status)
+        left.addWidget(pronunciation_card)
+        left.addStretch(1)
+
+        diagnostics_card = GlassCard()
+        diagnostics = QVBoxLayout(diagnostics_card)
+        diagnostics.setContentsMargins(16, 14, 16, 14)
+        diagnostics.setSpacing(10)
+        diagnostics_title = QLabel("Voice Diagnostics")
+        diagnostics_title.setObjectName("sectionTitle")
+        diagnostics.addWidget(diagnostics_title)
+        self.voice_diag_meta = QLabel("ASR: … · vocabulary: 0")
+        self.voice_diag_meta.setObjectName("muted")
+        self.voice_diag_meta.setWordWrap(True)
+        diagnostics.addWidget(self.voice_diag_meta)
+
+        self.voice_level = QProgressBar()
+        self.voice_level.setRange(0, 4000)
+        self.voice_level.setFormat("Mic level: %v")
+        diagnostics.addWidget(self.voice_level)
+        self.voice_threshold = QProgressBar()
+        self.voice_threshold.setRange(0, 4000)
+        self.voice_threshold.setFormat("Echo/VAD threshold: %v")
+        diagnostics.addWidget(self.voice_threshold)
+        self.voice_floor = QProgressBar()
+        self.voice_floor.setRange(0, 4000)
+        self.voice_floor.setFormat("Echo floor: %v")
+        diagnostics.addWidget(self.voice_floor)
+
+        self.voice_vad = QSpinBox()
+        self.voice_vad.setRange(40, 12000)
+        self.voice_vad.setSingleStep(20)
+        self.voice_vad.setPrefix("VAD ")
+        diagnostics.addWidget(self.voice_vad)
+
+        self.voice_multiplier = QDoubleSpinBox()
+        self.voice_multiplier.setRange(1.0, 4.0)
+        self.voice_multiplier.setSingleStep(0.05)
+        self.voice_multiplier.setDecimals(2)
+        self.voice_multiplier.setPrefix("Echo gate × ")
+        diagnostics.addWidget(self.voice_multiplier)
+
+        self.voice_margin = QSpinBox()
+        self.voice_margin.setRange(0, 4000)
+        self.voice_margin.setSingleStep(20)
+        self.voice_margin.setPrefix("Margin ")
+        diagnostics.addWidget(self.voice_margin)
+
+        self.voice_alpha = QDoubleSpinBox()
+        self.voice_alpha.setRange(0.05, 0.95)
+        self.voice_alpha.setSingleStep(0.05)
+        self.voice_alpha.setDecimals(2)
+        self.voice_alpha.setPrefix("Adapt ")
+        diagnostics.addWidget(self.voice_alpha)
+
+        diag_buttons = QHBoxLayout()
+        apply_voice = QPushButton("Применить калибровку")
+        apply_voice.setObjectName("primary")
+        apply_voice.clicked.connect(
+            lambda: self.voice_tune.emit(
+                int(self.voice_vad.value()),
+                float(self.voice_multiplier.value()),
+                int(self.voice_margin.value()),
+                float(self.voice_alpha.value()),
+            )
+        )
+        reset_voice = QPushButton("Сбросить")
+        reset_voice.clicked.connect(lambda: self.voice_diag_reset.emit())
+        diag_buttons.addWidget(apply_voice)
+        diag_buttons.addWidget(reset_voice)
+        diagnostics.addLayout(diag_buttons)
+
+        self.voice_diag_status = QLabel("Калибровка хранится только в RAM.")
+        self.voice_diag_status.setObjectName("muted")
+        self.voice_diag_status.setWordWrap(True)
+        diagnostics.addWidget(self.voice_diag_status)
+        diagnostics.addStretch(1)
+
+        content.addLayout(left, 7)
+        content.addWidget(diagnostics_card, 5)
+        root.addLayout(content, 1)
+
+    def set_runtime_state(self, state: str, audio_level: int = 0) -> None:
+        clean = str(state or "idle").casefold()
+        clean = {"executing": "working", "task": "working"}.get(clean, clean)
+        if clean not in {"idle", "listening", "thinking", "speaking", "working",
+                          "waiting", "error", "stopped"}:
+            clean = "idle"
+        self.portrait.set_state(clean)
+        self.preview_orb.set_state(clean)
+        self.preview_orb.set_activity(audio_level)
+
+    def set_voice_profile(self, *, engine: str, speaker: str, sample_rate: int,
+                          model: str, ready: bool) -> None:
+        speaker_clean = str(speaker or "system")
+        self.voice_name.setText(speaker_clean.capitalize())
+        bits = [str(engine or "system")]
+        if model:
+            bits.append(str(model))
+        if sample_rate:
+            bits.append(f"{int(sample_rate) // 1000} kHz")
+        bits.append("LOCAL READY" if ready else "FALLBACK")
+        self.voice_profile.setText(" · ".join(bits))
 
 
 class ActivityPage(QWidget):
@@ -556,7 +1417,8 @@ class TasksPage(QWidget):
             return
         for plan in plans:
             card = QFrame()
-            card.setStyleSheet("QFrame { background:#172033; border:1px solid #3b82f6; border-radius:12px; }")
+            card.setObjectName("glassCard")
+            card.setProperty("accent", "violet")
             box = QVBoxLayout(card)
             title = str(plan.get("title") or "План")
             summary = str(plan.get("summary") or "")
@@ -595,7 +1457,8 @@ class TasksPage(QWidget):
 
         for replan in replans:
             card = QFrame()
-            card.setStyleSheet("QFrame { background:#172033; border:1px solid #f59e0b; border-radius:12px; }")
+            card.setObjectName("glassCard")
+            card.setProperty("accent", "amber")
             box = QVBoxLayout(card)
             heading = QLabel(f"Новый маршрут для задачи #{replan.get('task_id')}")
             heading.setObjectName("pageTitle")
@@ -636,13 +1499,35 @@ class TasksPage(QWidget):
 
         for task in tasks:
             card = QFrame()
-            card.setStyleSheet("QFrame { background:#111827; border:1px solid #334155; border-radius:12px; }")
-            box = QVBoxLayout(card)
-            title = str(task.get("title") or f"Задача {task.get('id')}")
+            card.setObjectName("glassCard")
             status = str(task.get("status") or "planned")
+            card.setProperty("accent", "cyan" if status in ("running", "waiting") else "violet")
+            box = QVBoxLayout(card)
+            box.setSpacing(8)
+            title = str(task.get("title") or f"Задача {task.get('id')}")
             progress = int(task.get("progress") or 0)
             total = int(task.get("total_steps") or 0)
-            box.addWidget(QLabel(f"{title}  ·  {status}  ·  {progress}/{total}"))
+
+            task_head = QHBoxLayout()
+            title_label = QLabel(title)
+            title_label.setObjectName("taskTitle")
+            title_label.setWordWrap(True)
+            task_head.addWidget(title_label, 1)
+            status_label = QLabel(status.upper())
+            status_label.setObjectName("taskStatus")
+            task_head.addWidget(status_label, 0, Qt.AlignTop)
+            box.addLayout(task_head)
+
+            progress_bar = QProgressBar()
+            progress_bar.setObjectName("taskProgress")
+            progress_bar.setTextVisible(False)
+            progress_bar.setRange(0, max(1, total))
+            progress_bar.setValue(max(0, min(progress, max(1, total))))
+            box.addWidget(progress_bar)
+            progress_meta = QLabel(f"{progress}/{total} шагов")
+            progress_meta.setObjectName("muted")
+            box.addWidget(progress_meta)
+
             steps = list(task.get("steps") or [])
             checks = [
                 str((step.get("verification") or {}).get("status") or "")
@@ -659,15 +1544,47 @@ class TasksPage(QWidget):
                 check_label = QLabel("Проверка: " + " · ".join(parts))
                 check_label.setObjectName("muted")
                 box.addWidget(check_label)
-            current_index = int(task.get("current_step") or 0)
+
+            current_raw = task.get("current_step")
+            current_index = int(current_raw if current_raw is not None else progress)
+            for step in steps:
+                seq = int(step.get("seq") or 0)
+                step_status = str(step.get("status") or "")
+                if not step_status:
+                    if seq < progress:
+                        step_status = "done"
+                    elif seq == current_index and status not in ("done", "cancelled"):
+                        step_status = "running"
+                    else:
+                        step_status = "pending"
+                verification = str((step.get("verification") or {}).get("status") or "")
+                symbol = {
+                    "done": "✓", "running": "●", "waiting": "◌",
+                    "failed": "×", "cancelled": "−", "pending": "○",
+                }.get(step_status, "○")
+                text_line = f"{symbol}  {seq + 1:02d}  {step.get('title') or step.get('skill') or 'Шаг'}"
+                text_line += f"  ·  {step_status}"
+                if verification:
+                    text_line += f"  ·  {verification}"
+                params = dict(step.get("params") or {})
+                if params:
+                    compact = ", ".join(f"{key}={value}" for key, value in list(params.items())[:3])
+                    text_line += f"\n      {compact}"
+                step_label = QLabel(text_line)
+                step_label.setWordWrap(True)
+                step_label.setObjectName("taskStepCurrent" if seq == current_index and status not in ("done", "cancelled")
+                                         else "taskStep")
+                box.addWidget(step_label)
+
             current = next((step for step in steps if int(step.get("seq") or 0) == current_index), None)
             if current and status not in ("done", "cancelled"):
-                detail = QLabel(f"Сейчас: {current.get('skill') or 'шаг'}")
-                detail.setObjectName("muted")
+                detail = QLabel(f"Сейчас выполняю: {current.get('title') or current.get('skill') or 'шаг'}")
+                detail.setObjectName("taskNow")
+                detail.setWordWrap(True)
                 box.addWidget(detail)
             if task.get("error"):
                 error = QLabel(str(task.get("error")))
-                error.setObjectName("muted")
+                error.setObjectName("taskError")
                 error.setWordWrap(True)
                 box.addWidget(error)
             buttons = QHBoxLayout()
@@ -696,7 +1613,7 @@ class TasksPage(QWidget):
 
         for row in pending:
             card = QFrame()
-            card.setStyleSheet("QFrame { background:#111827; border:1px solid #334155; border-radius:12px; }")
+            card.setObjectName("glassCard")
             box = QVBoxLayout(card)
             box.addWidget(QLabel(str(row.get("text") or row.get("skill") or "Действие требует решения")))
             buttons = QHBoxLayout()
@@ -745,15 +1662,17 @@ class ControlCenter(QMainWindow):
     pronunciation_delete = Signal(str)
 
     NAV = [
-        ("chat", "Разговор"),
-        ("today", "Сегодня"),
-        ("tasks", "Задачи"),
-        ("activity", "Активность"),
-        ("memory", "Память"),
-        ("learning", "Обучение"),
-        ("skills", "Навыки"),
-        ("journal", "Журнал"),
-        ("settings", "Настройки"),
+        ("home", "✦  Главная"),
+        ("chat", "◈  Разговор"),
+        ("voice", "◉  Голос"),
+        ("today", "◇  Сегодня"),
+        ("tasks", "✓  Задачи"),
+        ("activity", "⌁  Активность"),
+        ("memory", "◌  Память"),
+        ("learning", "✦  Обучение"),
+        ("skills", "⬡  Навыки"),
+        ("journal", "≋  Журнал"),
+        ("settings", "⚙  Настройки"),
     ]
 
     def __init__(self) -> None:
@@ -761,22 +1680,27 @@ class ControlCenter(QMainWindow):
         self.setWindowTitle("Люма")
         self.setMinimumSize(980, 680)
         self.resize(1180, 780)
-        root = QWidget()
+        root = AmbientCanvas()
+        root.setObjectName("shellRoot")
         self.setCentralWidget(root)
         outer = QVBoxLayout(root)
         outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
 
         body = QHBoxLayout()
         body.setContentsMargins(0, 0, 0, 0)
+        body.setSpacing(0)
+
         sidebar = QWidget()
         sidebar.setObjectName("sidebar")
-        sidebar.setFixedWidth(220)
+        sidebar.setFixedWidth(236)
         side = QVBoxLayout(sidebar)
-        side.setContentsMargins(12, 22, 12, 14)
-        side.setSpacing(18)
-        brand = QLabel("Люма")
-        brand.setObjectName("brand")
-        side.addWidget(brand)
+        side.setContentsMargins(14, 18, 14, 14)
+        side.setSpacing(14)
+
+        self.brand_card = BrandCard()
+        side.addWidget(self.brand_card)
+
         self.nav = QListWidget()
         self.nav.setObjectName("nav")
         for key, label in self.NAV:
@@ -786,13 +1710,48 @@ class ControlCenter(QMainWindow):
         side.addWidget(self.nav, 1)
         body.addWidget(sidebar)
 
+        main = QWidget()
+        main.setObjectName("mainContent")
+        main_layout = QVBoxLayout(main)
+        main_layout.setContentsMargins(18, 16, 18, 12)
+        main_layout.setSpacing(14)
+
+        self.status_header = StatusHeader()
+        main_layout.addWidget(self.status_header)
+
         self.stack = QStackedWidget()
         self.pages: dict[str, QWidget] = {}
+
+        self.home = HomePage()
+        self.home.submitted.connect(self.chat_submitted)
+        self.pages["home"] = self.home
+        self.stack.addWidget(self.home)
+
         self.chat = ChatPage()
         self.chat.submitted.connect(self.chat_submitted)
         self.chat.clear_requested.connect(self.clear_chat)
         self.pages["chat"] = self.chat
         self.stack.addWidget(self.chat)
+
+        self.voice_page = VoicePage()
+        self.voice_page.tts_save.connect(self.tts_save.emit)
+        self.voice_page.tts_reset.connect(self.tts_reset.emit)
+        self.voice_page.tts_test.connect(self.tts_test.emit)
+        self.voice_page.pronunciation_add.connect(self.pronunciation_add.emit)
+        self.voice_page.pronunciation_delete.connect(self.pronunciation_delete.emit)
+        self.voice_page.voice_tune.connect(self.voice_tune.emit)
+        self.voice_page.voice_diag_reset.connect(self.voice_diag_reset.emit)
+        self.pages["voice"] = self.voice_page
+        self.stack.addWidget(self.voice_page)
+
+        for name in (
+            "tts_meta", "tts_piper", "tts_model", "tts_speaker", "tts_status",
+            "pronunciation_source", "pronunciation_target", "pronunciation_list",
+            "pronunciation_status", "voice_diag_meta", "voice_level",
+            "voice_threshold", "voice_floor", "voice_vad", "voice_multiplier",
+            "voice_margin", "voice_alpha", "voice_diag_status",
+        ):
+            setattr(self, name, getattr(self.voice_page, name))
 
         today = TextPage("Сегодня", "Личные дела и краткий контекст дня.")
         today.refresh_requested.connect(lambda: self.refresh_page.emit("today"))
@@ -818,7 +1777,6 @@ class ControlCenter(QMainWindow):
         defs = {
             "memory": ("Память", "Факты, предпочтения и то, что вы просили запомнить."),
             "learning": ("Обучение", "Чему Люма научилась и что пока не понимает."),
-            "skills": ("Навыки", "Доступные способности и их состояние."),
             "journal": ("Журнал", "Фактические действия ассистента на компьютере."),
         }
         for key, (title, subtitle) in defs.items():
@@ -826,6 +1784,11 @@ class ControlCenter(QMainWindow):
             page.refresh_requested.connect(lambda k=key: self.refresh_page.emit(k))
             self.pages[key] = page
             self.stack.addWidget(page)
+
+        skills_page = SkillsPage()
+        skills_page.refresh_requested.connect(lambda: self.refresh_page.emit("skills"))
+        self.pages["skills"] = skills_page
+        self.stack.addWidget(skills_page)
 
         settings = QWidget()
         sl = QVBoxLayout(settings)
@@ -849,165 +1812,10 @@ class ControlCenter(QMainWindow):
         controls.addWidget(self.stop_all_button)
         sl.addLayout(controls)
 
-        tts_title = QLabel("Голос Люмы · HQ Local TTS")
-        tts_title.setStyleSheet("font-size:16px; font-weight:700; margin-top:12px;")
-        sl.addWidget(tts_title)
-        self.tts_meta = QLabel("TTS: …")
-        self.tts_meta.setObjectName("muted")
-        self.tts_meta.setWordWrap(True)
-        sl.addWidget(self.tts_meta)
-
-        self.tts_piper = QLineEdit()
-        self.tts_piper.setPlaceholderText("Piper executable · пусто = искать piper в PATH")
-        sl.addWidget(self.tts_piper)
-        self.tts_model = QLineEdit()
-        self.tts_model.setPlaceholderText("Путь к .onnx · рекомендовано ru_RU-irina-medium")
-        sl.addWidget(self.tts_model)
-        self.tts_speaker = QLineEdit()
-        self.tts_speaker.setPlaceholderText("Speaker id · обычно пусто для Irina")
-        sl.addWidget(self.tts_speaker)
-
-        tts_buttons = QHBoxLayout()
-        apply_tts = QPushButton("Применить голос")
-        apply_tts.clicked.connect(
-            lambda: self.tts_save.emit(
-                self.tts_piper.text().strip(),
-                self.tts_model.text().strip(),
-                self.tts_speaker.text().strip(),
-            )
-        )
-        tts_buttons.addWidget(apply_tts)
-        preview_tts = QPushButton("🔊 Прослушать голос")
-        preview_tts.clicked.connect(self.tts_test)
-        tts_buttons.addWidget(preview_tts)
-        reset_tts = QPushButton("Сбросить TTS")
-        reset_tts.clicked.connect(self.tts_reset)
-        tts_buttons.addWidget(reset_tts)
-        tts_buttons.addStretch(1)
-        sl.addLayout(tts_buttons)
-
-        self.tts_status = QLabel(
-            "Рекомендуемый профиль: ru_RU-irina-medium. "
-            "Если HQ-модель недоступна, Люма автоматически использует системный голос."
-        )
-        self.tts_status.setObjectName("muted")
-        self.tts_status.setWordWrap(True)
-        sl.addWidget(self.tts_status)
-
-        pronunciation_title = QLabel("Произношение")
-        pronunciation_title.setStyleSheet("font-size:16px; font-weight:700; margin-top:12px;")
-        sl.addWidget(pronunciation_title)
-        pronunciation_hint = QLabel(
-            "Свои правила применяются сразу к следующей фразе Piper. "
-            "Пример: Bambu → бэмбу."
-        )
-        pronunciation_hint.setObjectName("muted")
-        pronunciation_hint.setWordWrap(True)
-        sl.addWidget(pronunciation_hint)
-
-        pronunciation_row = QHBoxLayout()
-        self.pronunciation_source = QLineEdit()
-        self.pronunciation_source.setPlaceholderText("Как написано")
-        pronunciation_row.addWidget(self.pronunciation_source, 1)
-        self.pronunciation_target = QLineEdit()
-        self.pronunciation_target.setPlaceholderText("Как произносить")
-        pronunciation_row.addWidget(self.pronunciation_target, 1)
-        add_pronunciation = QPushButton("Добавить")
-        add_pronunciation.clicked.connect(
-            lambda: self.pronunciation_add.emit(
-                self.pronunciation_source.text().strip(),
-                self.pronunciation_target.text().strip(),
-            )
-        )
-        pronunciation_row.addWidget(add_pronunciation)
-        sl.addLayout(pronunciation_row)
-
-        self.pronunciation_list = QListWidget()
-        self.pronunciation_list.setMaximumHeight(150)
-        sl.addWidget(self.pronunciation_list)
-        pronunciation_buttons = QHBoxLayout()
-        delete_pronunciation = QPushButton("Удалить выбранное")
-        delete_pronunciation.clicked.connect(
-            lambda: self.pronunciation_delete.emit(
-                str((self.pronunciation_list.currentItem().data(Qt.UserRole)
-                     if self.pronunciation_list.currentItem() else "") or "")
-            )
-        )
-        pronunciation_buttons.addWidget(delete_pronunciation)
-        pronunciation_buttons.addStretch(1)
-        sl.addLayout(pronunciation_buttons)
-
-        self.pronunciation_status = QLabel("Пользовательских правил: 0")
-        self.pronunciation_status.setObjectName("muted")
-        self.pronunciation_status.setWordWrap(True)
-        sl.addWidget(self.pronunciation_status)
-
-        voice_title = QLabel("Voice Diagnostics")
-        voice_title.setStyleSheet("font-size:16px; font-weight:700; margin-top:12px;")
-        sl.addWidget(voice_title)
-        self.voice_diag_meta = QLabel("ASR: … · vocabulary: 0")
-        self.voice_diag_meta.setObjectName("muted")
-        sl.addWidget(self.voice_diag_meta)
-
-        self.voice_level = QProgressBar()
-        self.voice_level.setRange(0, 4000)
-        self.voice_level.setFormat("Mic level: %v")
-        sl.addWidget(self.voice_level)
-        self.voice_threshold = QProgressBar()
-        self.voice_threshold.setRange(0, 4000)
-        self.voice_threshold.setFormat("Echo/VAD threshold: %v")
-        sl.addWidget(self.voice_threshold)
-        self.voice_floor = QProgressBar()
-        self.voice_floor.setRange(0, 4000)
-        self.voice_floor.setFormat("Echo floor: %v")
-        sl.addWidget(self.voice_floor)
-
-        diag_row = QHBoxLayout()
-        self.voice_vad = QSpinBox()
-        self.voice_vad.setRange(40, 12000)
-        self.voice_vad.setSingleStep(20)
-        self.voice_vad.setPrefix("VAD ")
-        diag_row.addWidget(self.voice_vad)
-        self.voice_multiplier = QDoubleSpinBox()
-        self.voice_multiplier.setRange(1.0, 4.0)
-        self.voice_multiplier.setSingleStep(0.05)
-        self.voice_multiplier.setDecimals(2)
-        self.voice_multiplier.setPrefix("Gate × ")
-        diag_row.addWidget(self.voice_multiplier)
-        self.voice_margin = QSpinBox()
-        self.voice_margin.setRange(0, 4000)
-        self.voice_margin.setSingleStep(20)
-        self.voice_margin.setPrefix("Margin ")
-        diag_row.addWidget(self.voice_margin)
-        self.voice_alpha = QDoubleSpinBox()
-        self.voice_alpha.setRange(0.05, 0.95)
-        self.voice_alpha.setSingleStep(0.05)
-        self.voice_alpha.setDecimals(2)
-        self.voice_alpha.setPrefix("Adapt ")
-        diag_row.addWidget(self.voice_alpha)
-        sl.addLayout(diag_row)
-
-        diag_buttons = QHBoxLayout()
-        apply_voice = QPushButton("Применить калибровку")
-        apply_voice.clicked.connect(
-            lambda: self.voice_tune.emit(
-                int(self.voice_vad.value()),
-                float(self.voice_multiplier.value()),
-                int(self.voice_margin.value()),
-                float(self.voice_alpha.value()),
-            )
-        )
-        diag_buttons.addWidget(apply_voice)
-        reset_voice = QPushButton("Сбросить Voice Diagnostics")
-        reset_voice.clicked.connect(self.voice_diag_reset)
-        diag_buttons.addWidget(reset_voice)
-        diag_buttons.addStretch(1)
-        sl.addLayout(diag_buttons)
-
-        self.voice_diag_status = QLabel("Калибровка хранится только в RAM.")
-        self.voice_diag_status.setObjectName("muted")
-        self.voice_diag_status.setWordWrap(True)
-        sl.addWidget(self.voice_diag_status)
+        voice_link = QLabel("Голос, Baya, произношение и диагностика вынесены в отдельный раздел «Голос».")
+        voice_link.setObjectName("muted")
+        voice_link.setWordWrap(True)
+        sl.addWidget(voice_link)
 
         persona_title = QLabel("Persona Люмы")
         persona_title.setStyleSheet("font-size:16px; font-weight:700; margin-top:12px;")
@@ -1188,7 +1996,8 @@ class ControlCenter(QMainWindow):
         self.pages["settings"] = settings_scroll
         self.stack.addWidget(settings_scroll)
 
-        body.addWidget(self.stack, 1)
+        main_layout.addWidget(self.stack, 1)
+        body.addWidget(main, 1)
         outer.addLayout(body, 1)
 
         self.footer = QLabel("● подключение…")
@@ -1197,36 +2006,14 @@ class ControlCenter(QMainWindow):
 
         self.nav.currentRowChanged.connect(self._change)
         self.nav.setCurrentRow(0)
-        self.setStyleSheet("""
-        QMainWindow, QWidget { background:#0b1120; color:#e5e7eb; font-size:14px; }
-        QWidget#sidebar { background:#101a2c; border-right:1px solid #253149; }
-        QLabel#brand { background:transparent; color:#f8fafc; font-size:24px; font-weight:700; padding:0 12px; }
-        QListWidget#nav { background:transparent; border:0; outline:0; }
-        QListWidget#nav::item { padding:11px 14px; border-radius:10px; margin:2px 0; color:#b4c2d7; }
-        QListWidget#nav::item:hover { background:#1b2c45; color:white; }
-        QListWidget#nav::item:selected { background:#243d68; color:white; }
-        QLabel#pageTitle { font-size:24px; font-weight:700; }
-        QLabel#welcomeTitle { color:#f8fafc; font-size:32px; font-weight:700; }
-        QLabel#welcomeText { color:#9fb0c9; font-size:15px; }
-        QLabel#muted { color:#94a3b8; }
-        QLabel#footer { background:#111827; color:#94a3b8; padding:8px 14px; }
-        QTextBrowser, QLineEdit { background:#121c2f; color:#e5e7eb; border:1px solid #2c3a52; border-radius:10px; padding:10px; selection-background-color:#335991; }
-        QPushButton { background:#1e293b; color:#e5e7eb; border:0; border-radius:9px; padding:9px 13px; }
-        QPushButton:hover { background:#334155; }
-        QPushButton#primary { background:#2563eb; }
-        QPushButton#primary:hover { background:#1d4ed8; }
-        QPushButton#suggestion { background:#16243a; border:1px solid #32435e; border-radius:12px; padding:15px 18px; text-align:left; }
-        QPushButton#suggestion:hover { background:#223858; border-color:#4f6f9e; }
-        QPushButton#danger { background:#991b1b; color:white; font-weight:700; }
-        QPushButton#danger:hover { background:#b91c1c; }
-        """)
+        self.setStyleSheet(theme.stylesheet())
 
     def _change(self, row: int) -> None:
         if row < 0:
             return
         self.stack.setCurrentIndex(row)
         key = self.nav.item(row).data(Qt.UserRole)
-        if key != "chat":
+        if key not in ("home", "chat", "voice"):
             self.refresh_page.emit(str(key))
 
     def set_pronunciation_payload(self, payload: dict[str, Any]) -> None:
@@ -1256,15 +2043,33 @@ class ControlCenter(QMainWindow):
         synth_ms = int(payload.get("last_synth_ms") or 0)
         last_chars = int(payload.get("last_chars") or 0)
         latency = f" · synth {synth_ms} ms/{last_chars} chars" if synth_ms and last_chars else ""
+        speaker = str(payload.get("speaker") or "")
+        sample_rate = int(payload.get("sample_rate") or 0)
+        voice = f" · {speaker}" if speaker else ""
+        rate = f" · {sample_rate // 1000} kHz" if sample_rate else ""
         self.tts_meta.setText(
             f"TTS: {engine} · HQ {'✓' if hq else '–'} · "
-            f"model {'✓' if ready else '–'}" + (f" · {model}" if model else "") + latency
+            f"model {'✓' if ready else '–'}" + (f" · {model}" if model else "") + voice + rate + latency
         )
         editing = any(widget.hasFocus() for widget in (self.tts_piper, self.tts_model, self.tts_speaker))
         if not editing:
             self.tts_piper.setText(str(payload.get("piper_path") or ""))
-            self.tts_model.setText(str(payload.get("model_path") or ""))
-            self.tts_speaker.setText(str(payload.get("speaker") or ""))
+            self.tts_model.setText(str(payload.get("piper_model_path") or payload.get("model_path") or ""))
+            self.tts_speaker.setText(str(payload.get("piper_speaker") or ""))
+        self.home.set_voice(
+            engine=engine,
+            speaker=speaker,
+            sample_rate=sample_rate,
+            model=model,
+            ready=ready,
+        )
+        self.voice_page.set_voice_profile(
+            engine=engine,
+            speaker=speaker,
+            sample_rate=sample_rate,
+            model=model,
+            ready=ready,
+        )
 
     def set_tts_message(self, text: str) -> None:
         self.tts_status.setText(str(text or ""))
@@ -1306,8 +2111,36 @@ class ControlCenter(QMainWindow):
     def set_voice_diagnostics_message(self, text: str) -> None:
         self.voice_diag_status.setText(str(text or ""))
 
+    def set_home_runtime(self, *, connected: bool, state: str, audio_level: int = 0,
+                         heard: str = "", reply: str = "", skill: str = "",
+                         detail: str = "", task_id: int = 0,
+                         safety_stopped: bool = False) -> None:
+        self.home.set_runtime(
+            connected=connected,
+            state=state,
+            audio_level=audio_level,
+            heard=heard,
+            reply=reply,
+            skill=skill,
+            detail=detail,
+            task_id=task_id,
+            safety_stopped=safety_stopped,
+        )
+        self.voice_page.set_runtime_state("stopped" if safety_stopped else state, audio_level)
+
     def update_status(self, connected: bool, armed: bool, model_ok: bool,
-                      panel_ok: bool, error: str = "", safety_stopped: bool = False) -> None:
+                      panel_ok: bool, error: str = "", safety_stopped: bool = False,
+                      assistant_state: str = "idle") -> None:
+        self.brand_card.set_online(connected)
+        self.status_header.set_status(
+            connected=connected,
+            armed=armed,
+            model_ok=model_ok,
+            panel_ok=panel_ok,
+            safety_stopped=safety_stopped,
+            error=error,
+            assistant_state=assistant_state,
+        )
         if connected:
             bits = ["Люма ✓", "модель ✓" if model_ok else "модель –",
                     "PrintFlow ✓" if panel_ok else "PrintFlow –",
@@ -1474,6 +2307,8 @@ class ControlCenter(QMainWindow):
         elif isinstance(page, TasksPage) and isinstance(payload, dict):
             page.set_payload(payload)
         elif isinstance(page, ActivityPage) and isinstance(payload, dict):
+            page.set_payload(payload)
+        elif isinstance(page, SkillsPage) and isinstance(payload, dict):
             page.set_payload(payload)
 
     def closeEvent(self, event) -> None:

@@ -32,7 +32,10 @@ class UiState:
     tts_model: str = ""
     tts_model_path: str = ""
     tts_piper_path: str = ""
+    tts_piper_model_path: str = ""
+    tts_piper_speaker: str = ""
     tts_speaker: str = ""
+    tts_sample_rate: int = 0
     tts_model_ready: bool = False
     tts_last_synth_ms: int = 0
     tts_last_chars: int = 0
@@ -70,7 +73,10 @@ class UiState:
         self.tts_model = str(tts.get("model") or "")
         self.tts_model_path = str(tts.get("model_path") or "")
         self.tts_piper_path = str(tts.get("piper_path") or "")
+        self.tts_piper_model_path = str(tts.get("piper_model_path") or "")
+        self.tts_piper_speaker = str(tts.get("piper_speaker") or "")
         self.tts_speaker = str(tts.get("speaker") or "")
+        self.tts_sample_rate = max(0, int(tts.get("sample_rate") or 0))
         self.tts_model_ready = bool(tts.get("model_ready"))
         self.tts_last_synth_ms = max(0, int(tts.get("last_synth_ms") or 0))
         self.tts_last_chars = max(0, int(tts.get("last_chars") or 0))

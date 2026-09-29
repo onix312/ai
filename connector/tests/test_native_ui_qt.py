@@ -8,11 +8,14 @@ from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtWidgets import QApplication, QLabel
+from PySide6.QtCore import QBuffer, QByteArray, QIODevice
+from PySide6.QtGui import QColor, QImage
+from PySide6.QtWidgets import QApplication, QLabel, QProgressBar
 
 from agent.native_ui.app import NativeApp
-from agent.native_ui.control_center import ActivityPage, ChatPage, ControlCenter, TasksPage, TextPage
-from agent.native_ui.orb import VoiceOrb
+from agent.native_ui.components import LumaPortrait
+from agent.native_ui.control_center import ActivityPage, ChatPage, ControlCenter, HomePage, SkillsPage, TasksPage, TextPage, VoicePage
+from agent.native_ui.orb import LumaOrbCore, VoiceOrb
 from agent.native_ui.quick_panel import QuickPanel
 
 
@@ -27,6 +30,10 @@ class NativeQtSmokeTests(unittest.TestCase):
         chat.set_history([{"role": "user", "text": "<b>привет</b>"}])
         self.assertEqual(chat.content.currentIndex(), 1)
         self.assertIn("<b>привет</b>", chat.feed.toPlainText())
+        self.assertIn("ВЫ", chat.feed.toPlainText())
+        chat.append_local("Люма", "Готово")
+        self.assertIn("LUMA", chat.feed.toPlainText())
+        self.assertIn("Готово", chat.feed.toPlainText())
         chat.set_history([])
         self.assertEqual(chat.content.currentIndex(), 0)
 
@@ -53,6 +60,120 @@ class NativeQtSmokeTests(unittest.TestCase):
         orb.set_live()
         self.assertEqual(orb.height(), 72)
         orb.deleteLater()
+
+    def test_home_hero_and_orb_accept_live_runtime(self):
+        center = ControlCenter()
+        self.assertIsInstance(center.pages["home"], HomePage)
+        self.assertIsInstance(center.pages["voice"], VoicePage)
+        self.assertIsInstance(center.home.orb, LumaOrbCore)
+        self.assertIsInstance(center.home.portrait, LumaPortrait)
+
+        center.set_home_runtime(
+            connected=True,
+            state="thinking",
+            audio_level=1700,
+            heard="люма открой загрузки",
+            reply="",
+            skill="app.open",
+            detail="Открываю папку",
+            task_id=3,
+            safety_stopped=False,
+        )
+        center.set_tts_payload({
+            "engine": "silero",
+            "hq_local": True,
+            "model": "silero_v5_5_ru.pt",
+            "model_path": "C:/voices/silero_v5_5_ru.pt",
+            "piper_path": "",
+            "piper_model_path": "",
+            "piper_speaker": "",
+            "speaker": "baya",
+            "sample_rate": 48000,
+            "model_ready": True,
+            "last_synth_ms": 120,
+            "last_chars": 24,
+        })
+        self.assertEqual("thinking", center.home.orb.state())
+        self.assertIn("app.open", center.home.activity_value.text())
+        self.assertIn("baya", center.home.voice_value.text().casefold())
+        self.assertIn("48 kHz", center.home.voice_meta.text())
+        self.assertIn("baya", center.voice_page.voice_name.text().casefold())
+        self.assertIn("48 kHz", center.voice_page.voice_profile.text())
+        center.deleteLater()
+        self.app.processEvents()
+
+    def test_chat_can_render_printer_camera_jpeg(self):
+        center = ControlCenter()
+        image = QImage(32, 24, QImage.Format_RGB32)
+        image.fill(QColor("#8B5CF6"))
+        payload = QByteArray()
+        buffer = QBuffer(payload)
+        self.assertTrue(buffer.open(QIODevice.WriteOnly))
+        self.assertTrue(image.save(buffer, "JPEG"))
+        buffer.close()
+
+        self.assertTrue(center.chat.show_camera_image(bytes(payload), "P1S"))
+        self.assertFalse(center.chat.camera_card.isHidden())
+        self.assertIn("P1S", center.chat.camera_title.text())
+        self.assertIsNotNone(center.chat.camera_frame.pixmap())
+        center.deleteLater()
+        self.app.processEvents()
+
+    def test_chat_shows_explicit_execution_trace(self):
+        center = ControlCenter()
+        center.chat.show_action_trace([
+            {"kind": "rule", "title": "Понял без модели", "detail": "открыть программу"},
+            {"kind": "check", "title": "Проверка реестром", "detail": "навык и параметры в порядке"},
+            {"kind": "task", "title": "Task Engine", "detail": "задача 7: 2 шагов"},
+        ])
+        self.assertFalse(center.chat.trace_card.isHidden())
+        trace = center.chat.trace_text.text()
+        self.assertIn("Понял без модели", trace)
+        self.assertIn("Проверка реестром", trace)
+        self.assertIn("Task Engine", trace)
+        self.assertNotIn("<think", trace.casefold())
+        center.chat.clear_action_trace()
+        self.assertTrue(center.chat.trace_card.isHidden())
+        center.deleteLater()
+        self.app.processEvents()
+
+    def test_skills_page_is_searchable_capability_map(self):
+        center = ControlCenter()
+        self.assertIsInstance(center.pages["skills"], SkillsPage)
+        center.set_page_payload("skills", {
+            "ok": True,
+            "skills": [
+                {
+                    "name": "app.open", "title": "Открыть программу",
+                    "description": "Открывает локальную программу.", "available": True,
+                    "reason": "", "risk": "soft", "confirm": False,
+                    "provider": "core", "params": {"target": "text"},
+                },
+                {
+                    "name": "screen.describe", "title": "Описать экран",
+                    "description": "Видит экран локально.", "available": False,
+                    "reason": "vision-модель не установлена", "risk": "read", "confirm": False,
+                    "provider": "desktop", "params": {"question": "text"},
+                },
+            ],
+            "ready": 1,
+        })
+        page = center.pages["skills"]
+        self.assertEqual("1", page.ready_metric.text())
+        self.assertEqual("2", page.total_metric.text())
+        self.assertEqual("1", page.off_metric.text())
+        visible = page.browser.toPlainText()
+        self.assertIn("Открыть программу", visible)
+        self.assertIn("Описать экран", visible)
+        self.assertIn("vision-модель не установлена", visible)
+
+        page.search.setText("экран")
+        self.app.processEvents()
+        filtered = page.browser.toPlainText()
+        self.assertIn("Описать экран", filtered)
+        self.assertNotIn("Открыть программу", filtered)
+        center.deleteLater()
+        self.app.processEvents()
 
     def test_windows_construct_and_accept_state(self):
         orb = VoiceOrb()
@@ -304,6 +425,16 @@ class NativeQtSmokeTests(unittest.TestCase):
         self.assertTrue(any("verified 1" in text and "assumed 1" in text for text in labels))
         self.assertTrue(any("Новый маршрут" in text for text in labels))
         self.assertTrue(any("Здоровье ПК" in text for text in labels))
+        progress_bars = [w for w in task_page.findChildren(QProgressBar)
+                         if w.objectName() == "taskProgress"]
+        self.assertTrue(progress_bars)
+        self.assertEqual((1, 3), (progress_bars[0].value(), progress_bars[0].maximum()))
+        current_steps = [w.text() for w in task_page.findChildren(QLabel)
+                         if w.objectName() == "taskStepCurrent"]
+        self.assertTrue(any("system.media" in text for text in current_steps))
+        self.assertTrue(any("Сейчас выполняю" in w.text()
+                            for w in task_page.findChildren(QLabel)
+                            if w.objectName() == "taskNow"))
 
         center.deleteLater()
         quick.deleteLater()

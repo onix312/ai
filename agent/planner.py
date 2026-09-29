@@ -90,20 +90,18 @@ class Planner:
             return {"ok": False, "reason": str(state.get("reason") or "Локальная модель недоступна")}
 
         learned = self.agent.runner.learned()
-        catalog = [
-            row for row in self.agent.runner.catalog()
-            if row.get("available") and str(row.get("name") or "") not in _DENY
-        ]
-        if not catalog:
+        skill_text = skills.relevant_prompt(
+            clean,
+            self.agent.runner.caps,
+            learned,
+            max_items=36,
+            max_chars=5900,
+            exclude=_DENY,
+        )
+        if not skill_text:
             return {"ok": False, "reason": "На этом компьютере нет доступных навыков для планирования"}
 
-        skill_text = "\n".join(
-            f"- {row['name']}: {row['title']}; params={row.get('params') or {}}; "
-            f"risk={row.get('risk')}; confirm={bool(row.get('confirm'))}; "
-            f"{row.get('description') or ''}"
-            for row in catalog
-        )
-        system = _RULES + "\n\nДоступные навыки:\n" + skill_text
+        system = _RULES + "\n\nРелевантные доступные навыки:\n" + skill_text
         reply = model.chat(
             [{"role": "user", "content": clean}],
             system=system,

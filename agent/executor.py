@@ -1301,10 +1301,33 @@ class Runner:
                 return {"ok": True, "description": f"Окно «{title}»: " + "; ".join(labels[:12]),
                         "sources": state["sources"], "reason": ""}
         max_side = max(320, min(1600, int(params.get("max_side") or 1024)))
-        seeing, why = model.vision_ok()
+        primary = model.status()
+        vision_state = dict(primary)
+        seeing = False
+        why = str(primary.get("reason") or "")
+        if primary.get("ok"):
+            seeing, why = model.vision_ok(
+                url=str(primary.get("url") or ""), name=str(primary.get("model") or "")
+            )
+            if not seeing:
+                alternate = model.pick_vision(list(primary.get("models") or []))
+                if alternate and alternate != str(primary.get("model") or ""):
+                    alternate_ok, alternate_why = model.vision_ok(
+                        url=str(primary.get("url") or ""), name=alternate
+                    )
+                    if alternate_ok:
+                        candidate = model.status(
+                            url=str(primary.get("url") or ""), name=alternate
+                        )
+                        if candidate.get("ok"):
+                            vision_state = candidate
+                            seeing = True
+                            why = ""
+                    elif alternate_why:
+                        why = alternate_why
         if not seeing:
             window, _reason = winapi.active_window()
-            return {"ok": False, "reason": why, "window": window,
+            return {"ok": False, "reason": why or "Локальная vision-модель недоступна", "window": window,
                     "hint": f"Активное окно: {window}" if window else ""}
         try:
             data, reason = winapi.grab_screen(max_side)
@@ -1318,9 +1341,10 @@ class Runner:
                                           "главное содержимое и то, что требует внимания.")}],
             system=("Ты описываешь снимок экрана владельца мастерской. Отвечай по-русски, "
                     "два-четыре предложения, только то, что видно на снимке. Не выдумывай."),
-            images=[data], temperature=0.1)
+            images=[data], temperature=0.1, state=vision_state)
         return {"ok": bool(reply.get("ok")), "description": reply.get("text") or "", "size": len(data),
-                "model": reply.get("model") or "", "reason": reply.get("reason") or ""}
+                "model": reply.get("model") or vision_state.get("model") or "",
+                "reason": reply.get("reason") or ""}
 
     def _screen_find(self, params: dict) -> dict:
         txt = str(params.get("text") or "").strip()
@@ -1341,23 +1365,55 @@ class Runner:
         txt = str(params.get("text") or "").strip()
         if not txt:
             return {"ok": False, "reason": "Пустой запрос"}
-        # сначала найдём
         find_res = self._screen_find(params)
         if not find_res.get("ok"):
             return find_res
-        # проверка whitelist
+        found = find_res.get("found") if isinstance(find_res.get("found"), dict) else {}
+        method = str(found.get("method") or find_res.get("method") or "unknown")
+        rect = found.get("rect") if isinstance(found.get("rect"), dict) else {}
         try:
-            from .winapi import active_window
-            title, _ = active_window()
+            left = int(rect.get("left"))
+            top = int(rect.get("top"))
+            right = int(rect.get("right"))
+            bottom = int(rect.get("bottom"))
+        except (TypeError, ValueError):
+            return {"ok": False,
+                    "reason": "Элемент найден, но источник не дал его координаты — кликать наугад не буду",
+                    "found": found, "method": method}
+        if right <= left or bottom <= top or any(abs(value) > 100000 for value in (left, top, right, bottom)):
+            return {"ok": False, "reason": "Элемент найден, но его прямоугольник некорректен",
+                    "found": found, "method": method}
+
+        # Whitelist относится к активному приложению. Если он настроен,
+        # распознанная цель в чужом окне не получает ввод от ассистента.
+        title = ""
+        try:
+            title, _ = winapi.active_window()
             if title:
-                wl = self.store.list_whitelist(100)
-                if wl:
-                    allowed = any(w.get("app_name","").lower() in title.lower() and w.get("allowed") for w in wl)
+                whitelist = self.store.list_whitelist(100)
+                if whitelist:
+                    allowed = any(
+                        str(row.get("app_name") or "").casefold() in title.casefold()
+                        and bool(row.get("allowed"))
+                        for row in whitelist
+                    )
                     if not allowed:
-                        return {"ok": False, "reason": f"Окно «{title}» не в белом списке"}
+                        return {"ok": False, "reason": f"Окно «{title}» не в белом списке",
+                                "found": found, "method": method}
         except Exception:
             pass
-        return {"ok": False, "reason": "Клик по распознанному тексту пока недоступен: цель может быть неверной", "found": find_res.get("found")}
+
+        x = left + (right - left) // 2
+        y = top + (bottom - top) // 2
+        ok, reason = winapi.click(x, y)
+        return {
+            "ok": bool(ok),
+            "found": found,
+            "method": method,
+            "clicked": {"x": x, "y": y, "text": txt, "window": title} if ok else None,
+            "reason": reason,
+            "hint": f"Кликнула по «{txt}» ({method})" if ok else reason,
+        }
 
     def _screen_archive(self, params: dict) -> dict:
         title = str(params.get("title") or "").strip()[:300]
