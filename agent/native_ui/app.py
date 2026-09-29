@@ -64,6 +64,8 @@ class NativeApp:
         self.center.proactivity_reset.connect(self.reset_proactivity)
         self.center.voice_tune.connect(self.tune_voice)
         self.center.voice_diag_reset.connect(self.reset_voice_diagnostics)
+        self.center.tts_save.connect(self.save_tts)
+        self.center.tts_reset.connect(self.reset_tts)
         self.center.task_command.connect(self.task_command)
         self.center.plan_preview.connect(self.plan_preview)
         self.center.plan_command.connect(self.plan_command)
@@ -156,6 +158,15 @@ class NativeApp:
             if self.orb.isVisible():
                 self.orb.set_state("error", 1800)
             return
+        self.center.set_tts_payload({
+            "engine": self.state.tts_engine,
+            "hq_local": self.state.tts_hq_local,
+            "model": self.state.tts_model,
+            "model_path": self.state.tts_model_path,
+            "piper_path": self.state.tts_piper_path,
+            "speaker": self.state.tts_speaker,
+            "model_ready": self.state.tts_model_ready,
+        })
         self.center.set_voice_diagnostics(
             audio_level=self.state.audio_level,
             echo_floor=self.state.echo_floor,
@@ -442,6 +453,34 @@ class NativeApp:
         self.run_async(self.backend.persona_reset, done)
 
     # --------------------------------------------------------------- mic
+    def save_tts(self, piper: str, model: str, speaker: str) -> None:
+        def done(payload: dict[str, Any]) -> None:
+            if payload.get("ok"):
+                engine = str(payload.get("engine") or "system")
+                model_name = str(payload.get("model") or "")
+                label = f"✓ Голос сохранён: {engine}" + (f" · {model_name}" if model_name else "")
+                self.center.set_tts_message(label)
+                self.refresh_status()
+            else:
+                self.center.set_tts_message(str(payload.get("reason") or "Не удалось сохранить голос."))
+
+        self.run_async(
+            lambda: self.backend.tts_update(str(piper or ""), str(model or ""), str(speaker or "")),
+            done,
+        )
+
+    def reset_tts(self) -> None:
+        def done(payload: dict[str, Any]) -> None:
+            if payload.get("ok"):
+                self.center.set_tts_message(
+                    "TTS сброшен к автоопределению. HQ Piper включится автоматически, если модель доступна."
+                )
+                self.refresh_status()
+            else:
+                self.center.set_tts_message(str(payload.get("reason") or "Не удалось сбросить TTS."))
+
+        self.run_async(self.backend.tts_reset, done)
+
     def tune_voice(self, vad_threshold: int, multiplier: float, margin: int, alpha: float) -> None:
         def done(payload: dict[str, Any]) -> None:
             if payload.get("ok"):
