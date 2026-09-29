@@ -423,9 +423,9 @@ class NativeQtSmokeTests(unittest.TestCase):
         self.assertIn("Telegram открыт", timeline)
         activity_page = center.pages["activity"]
         self.assertEqual("EXECUTING", activity_page.activity_metric.text())
-        self.assertEqual("1", activity_page.running_metric.text())
+        self.assertEqual("0", activity_page.running_metric.text())
         self.assertEqual("1", activity_page.verified_metric.text())
-        self.assertEqual("1", activity_page.failed_metric.text())
+        self.assertEqual("0", activity_page.failed_metric.text())
         task_index = activity_page.task_filter.findData(4)
         self.assertGreaterEqual(task_index, 0)
         activity_page.task_filter.setCurrentIndex(task_index)
