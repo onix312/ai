@@ -25,7 +25,7 @@ class NativeApp:
                  backend: BackendClient | None = None) -> None:
         self.qt = qt or QApplication.instance() or QApplication(sys.argv)
         self.qt.setApplicationName("Люма")
-        self.qt.setOrganizationName("Luma")
+        self.qt.setOrganizationName("NOZZA")  # legacy QSettings namespace: preserves existing UI preferences
         self.qt.setQuitOnLastWindowClosed(False)
         self.backend = backend or BackendClient()
         self.state = UiState()
