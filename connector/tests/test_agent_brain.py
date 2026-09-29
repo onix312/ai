@@ -540,6 +540,228 @@ class BrainChatTests(unittest.TestCase):
         self.assertLessEqual(len(bounded["target"]), 10)
         self.assertLessEqual(len(bounded["target"]["name"]), 320)
 
+    def test_adaptive_loop_observes_then_opens_steam_when_missing(self):
+        planner = {
+            "ok": True,
+            "text": json.dumps({
+                "skill": "", "params": {}, "steps": [], "adaptive": True,
+                "reply": "", "ask": "",
+            }, ensure_ascii=False),
+            "reason": "", "model": "qwen2.5:3b",
+        }
+        observe = {
+            "ok": True,
+            "text": json.dumps({
+                "done": False, "skill": "window.list", "params": {"limit": 15}, "reply": "",
+            }, ensure_ascii=False),
+            "reason": "", "model": "qwen2.5:3b",
+        }
+        open_steam = {
+            "ok": True,
+            "text": json.dumps({
+                "done": False, "skill": "app.open", "params": {"target": "steam"}, "reply": "",
+            }, ensure_ascii=False),
+            "reason": "", "model": "qwen2.5:3b",
+        }
+        done = {
+            "ok": True,
+            "text": json.dumps({
+                "done": True, "skill": "", "params": {},
+                "reply": "Steam не был запущен, поэтому я его открыла.",
+            }, ensure_ascii=False),
+            "reason": "", "model": "qwen2.5:3b",
+        }
+
+        executed = []
+        def run_skill(name, params, **_kwargs):
+            executed.append((name, dict(params)))
+            if name == "window.list":
+                return {"ok": True, "windows": [{"title": "Telegram", "process": "Telegram"}]}
+            if name == "app.open":
+                return {"ok": True, "title": "Steam", "target": "steam"}
+            return {"ok": False, "reason": "unexpected"}
+
+        with patch.dict(self.agent.runner._caps, {"windows": True}, clear=False), \
+             patch.object(model, "status", return_value={
+                 "ok": True, "model": "qwen2.5:3b", "reason": "",
+                 "url": "http://127.0.0.1:11434", "models": ["qwen2.5:3b"],
+             }), \
+             patch.object(model, "chat", side_effect=[planner, observe, open_steam, done]), \
+             patch.object(self.agent, "run_skill", side_effect=run_skill):
+            answer = self.brain.chat("проверь, запущен ли Steam, и если нет — открой его")
+
+        self.assertEqual(
+            [("window.list", {"limit": 15}), ("app.open", {"target": "steam"})],
+            executed,
+        )
+        self.assertEqual("agent-loop", answer["source"])
+        self.assertEqual("action", answer["kind"])
+        self.assertTrue(answer["agent_loop"]["completed"])
+        self.assertEqual(2, answer["agent_loop"]["iterations"])
+        self.assertIn("Steam", answer["reply"])
+        self.assertTrue(any(step.get("title") == "Agent Loop · завершён" for step in answer["steps"]))
+
+    def test_adaptive_loop_does_not_open_steam_when_already_running(self):
+        responses = [
+            {
+                "ok": True,
+                "text": json.dumps({
+                    "skill": "", "params": {}, "steps": [], "adaptive": True,
+                    "reply": "", "ask": "",
+                }, ensure_ascii=False),
+                "reason": "", "model": "qwen",
+            },
+            {
+                "ok": True,
+                "text": json.dumps({
+                    "done": False, "skill": "window.list", "params": {"limit": 15}, "reply": "",
+                }, ensure_ascii=False),
+                "reason": "", "model": "qwen",
+            },
+            {
+                "ok": True,
+                "text": json.dumps({
+                    "done": True, "skill": "", "params": {},
+                    "reply": "Steam уже запущен, ничего открывать не нужно.",
+                }, ensure_ascii=False),
+                "reason": "", "model": "qwen",
+            },
+        ]
+        executed = []
+        def run_skill(name, params, **_kwargs):
+            executed.append((name, dict(params)))
+            return {
+                "ok": True,
+                "windows": [{"title": "Steam", "process": "steam"}],
+            }
+
+        with patch.dict(self.agent.runner._caps, {"windows": True}, clear=False), \
+             patch.object(model, "status", return_value={
+                 "ok": True, "model": "qwen", "reason": "",
+                 "url": "http://127.0.0.1:11434", "models": ["qwen"],
+             }), \
+             patch.object(model, "chat", side_effect=responses), \
+             patch.object(self.agent, "run_skill", side_effect=run_skill):
+            answer = self.brain.chat("если Steam не запущен, открой его")
+
+        self.assertEqual([("window.list", {"limit": 15})], executed)
+        self.assertIn("уже запущен", answer["reply"])
+        self.assertEqual(1, answer["agent_loop"]["iterations"])
+
+    def test_adaptive_loop_blocks_repeating_same_action(self):
+        responses = [
+            {
+                "ok": True,
+                "text": json.dumps({
+                    "skill": "", "params": {}, "steps": [], "adaptive": True,
+                    "reply": "", "ask": "",
+                }), "reason": "", "model": "qwen",
+            },
+            {
+                "ok": True,
+                "text": json.dumps({
+                    "done": False, "skill": "window.list", "params": {"limit": 15}, "reply": "",
+                }), "reason": "", "model": "qwen",
+            },
+            {
+                "ok": True,
+                "text": json.dumps({
+                    "done": False, "skill": "window.list", "params": {"limit": 15}, "reply": "",
+                }), "reason": "", "model": "qwen",
+            },
+        ]
+        with patch.dict(self.agent.runner._caps, {"windows": True}, clear=False), \
+             patch.object(model, "status", return_value={
+                 "ok": True, "model": "qwen", "reason": "",
+                 "url": "http://127.0.0.1:11434", "models": ["qwen"],
+             }), \
+             patch.object(model, "chat", side_effect=responses), \
+             patch.object(self.agent, "run_skill", return_value={"ok": True, "windows": []}) as run:
+            answer = self.brain.chat("проверь окна и действуй по результату")
+
+        run.assert_called_once()
+        self.assertEqual("clarify", answer["kind"])
+        self.assertIn("по кругу", answer["reply"])
+        self.assertTrue(any("защита от цикла" in str(step.get("title")) for step in answer["steps"]))
+
+    def test_adaptive_loop_stops_at_normal_confirmation_gate(self):
+        responses = [
+            {
+                "ok": True,
+                "text": json.dumps({
+                    "skill": "", "params": {}, "steps": [], "adaptive": True,
+                    "reply": "", "ask": "",
+                }), "reason": "", "model": "qwen",
+            },
+            {
+                "ok": True,
+                "text": json.dumps({
+                    "done": False, "skill": "system.health", "params": {}, "reply": "",
+                }), "reason": "", "model": "qwen",
+            },
+            {
+                "ok": True,
+                "text": json.dumps({
+                    "done": False, "skill": "system.power",
+                    "params": {"action": "restart"}, "reply": "",
+                }), "reason": "", "model": "qwen",
+            },
+        ]
+        executed = []
+        def run_skill(name, params, **_kwargs):
+            executed.append((name, dict(params)))
+            if name == "system.health":
+                return {"ok": True, "cpu_percent": 10, "memory": {"load": 30}}
+            return {"ok": True, "queued": True, "id": "confirm-power",
+                    "text": "Перезагрузить компьютер", "ttl": 60}
+
+        with patch.dict(self.agent.runner._caps, {"system": True}, clear=False), \
+             patch.object(model, "status", return_value={
+                 "ok": True, "model": "qwen", "reason": "",
+                 "url": "http://127.0.0.1:11434", "models": ["qwen"],
+             }), \
+             patch.object(model, "chat", side_effect=responses), \
+             patch.object(self.agent, "run_skill", side_effect=run_skill):
+            answer = self.brain.chat("проверь компьютер и перезагрузи только если решишь, что это нужно")
+
+        self.assertEqual("pending", answer["kind"])
+        self.assertEqual("confirm-power", answer["pending"]["id"])
+        self.assertEqual("system.power", executed[-1][0])
+        self.assertFalse(answer["agent_loop"]["completed"])
+
+    def test_adaptive_loop_rejects_non_read_first_action(self):
+        responses = [
+            {
+                "ok": True,
+                "text": json.dumps({
+                    "skill": "", "params": {}, "steps": [], "adaptive": True,
+                    "reply": "", "ask": "",
+                }), "reason": "", "model": "qwen",
+            },
+        ]
+        responses.extend([
+            {
+                "ok": True,
+                "text": json.dumps({
+                    "done": False, "skill": "app.open", "params": {"target": "steam"}, "reply": "",
+                }), "reason": "", "model": "qwen",
+            }
+            for _ in range(brain.MAX_ADAPTIVE_STEPS)
+        ])
+
+        with patch.object(model, "status", return_value={
+                 "ok": True, "model": "qwen", "reason": "",
+                 "url": "http://127.0.0.1:11434", "models": ["qwen"],
+             }), \
+             patch.object(model, "chat", side_effect=responses), \
+             patch.object(self.agent, "run_skill") as run:
+            answer = self.brain.chat("если Steam не запущен, открой его")
+
+        run.assert_not_called()
+        self.assertEqual("clarify", answer["kind"])
+        rejected = [step for step in answer["steps"] if "отклонено" in str(step.get("detail") or "")]
+        self.assertEqual(brain.MAX_ADAPTIVE_STEPS, len(rejected))
+
     def test_model_plan_validator_reports_missing_function_before_execution(self):
         problem = brain.model_plan_problem(
             {"skill": "imaginary.launch", "params": {}, "steps": [], "reply": "", "ask": ""},

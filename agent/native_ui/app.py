@@ -41,6 +41,7 @@ class NativeApp:
         self._brain_total = 0
         self._brain_route = "ready"
         self._brain_repaired = False
+        self._brain_agent_iterations = 0
         self._hotkey_filter: HotkeyFilter | None = None
         self._stop_hotkey_filter: HotkeyFilter | None = None
         self._hotkey_registered = False
@@ -147,6 +148,7 @@ class NativeApp:
                 total=self._brain_total,
                 route=self._brain_route,
                 repaired=self._brain_repaired,
+                agent_iterations=self._brain_agent_iterations,
             )
 
         self.run_async(self.backend.skills, skills_done, lambda _message: None)
@@ -219,6 +221,7 @@ class NativeApp:
             total=self._brain_total,
             route=self._brain_route,
             repaired=self._brain_repaired,
+            agent_iterations=self._brain_agent_iterations,
         )
         if not self.state.connected:
             if self.orb.isVisible():
@@ -308,6 +311,8 @@ class NativeApp:
             trace_steps = list(payload.get("steps") or []) if isinstance(payload.get("steps"), list) else []
             self.center.chat.show_action_trace(trace_steps)
             self._brain_route = str(payload.get("source") or payload.get("kind") or "ready")
+            agent_loop = payload.get("agent_loop") if isinstance(payload.get("agent_loop"), dict) else {}
+            self._brain_agent_iterations = int(agent_loop.get("iterations") or 0)
             self._brain_repaired = any(
                 str(step.get("title") or "") == "Самокоррекция плана"
                 for step in trace_steps if isinstance(step, dict)
@@ -318,6 +323,7 @@ class NativeApp:
                 total=self._brain_total,
                 route=self._brain_route,
                 repaired=self._brain_repaired,
+                agent_iterations=self._brain_agent_iterations,
             )
             image = payload.get("image") if isinstance(payload.get("image"), dict) else {}
             image_url = str(image.get("url") or "")
