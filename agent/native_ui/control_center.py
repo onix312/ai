@@ -644,6 +644,8 @@ class ControlCenter(QMainWindow):
     proactivity_reset = Signal()
     voice_tune = Signal(int, float, int, float)
     voice_diag_reset = Signal()
+    tts_save = Signal(str, str, str)
+    tts_reset = Signal()
 
     NAV = [
         ("chat", "💬  Разговор"),
@@ -740,6 +742,48 @@ class ControlCenter(QMainWindow):
         self.stop_all_button.clicked.connect(self.safety_toggle)
         controls.addWidget(self.stop_all_button)
         sl.addLayout(controls)
+
+        tts_title = QLabel("Голос Люмы · HQ Local TTS")
+        tts_title.setStyleSheet("font-size:16px; font-weight:700; margin-top:12px;")
+        sl.addWidget(tts_title)
+        self.tts_meta = QLabel("TTS: …")
+        self.tts_meta.setObjectName("muted")
+        self.tts_meta.setWordWrap(True)
+        sl.addWidget(self.tts_meta)
+
+        self.tts_piper = QLineEdit()
+        self.tts_piper.setPlaceholderText("Piper executable · пусто = искать piper в PATH")
+        sl.addWidget(self.tts_piper)
+        self.tts_model = QLineEdit()
+        self.tts_model.setPlaceholderText("Путь к .onnx · рекомендовано ru_RU-irina-medium")
+        sl.addWidget(self.tts_model)
+        self.tts_speaker = QLineEdit()
+        self.tts_speaker.setPlaceholderText("Speaker id · обычно пусто для Irina")
+        sl.addWidget(self.tts_speaker)
+
+        tts_buttons = QHBoxLayout()
+        apply_tts = QPushButton("Применить голос")
+        apply_tts.clicked.connect(
+            lambda: self.tts_save.emit(
+                self.tts_piper.text().strip(),
+                self.tts_model.text().strip(),
+                self.tts_speaker.text().strip(),
+            )
+        )
+        tts_buttons.addWidget(apply_tts)
+        reset_tts = QPushButton("Сбросить TTS")
+        reset_tts.clicked.connect(self.tts_reset)
+        tts_buttons.addWidget(reset_tts)
+        tts_buttons.addStretch(1)
+        sl.addLayout(tts_buttons)
+
+        self.tts_status = QLabel(
+            "Рекомендуемый профиль: ru_RU-irina-medium. "
+            "Если HQ-модель недоступна, Люма автоматически использует системный голос."
+        )
+        self.tts_status.setObjectName("muted")
+        self.tts_status.setWordWrap(True)
+        sl.addWidget(self.tts_status)
 
         voice_title = QLabel("Voice Diagnostics")
         voice_title.setStyleSheet("font-size:16px; font-weight:700; margin-top:12px;")
@@ -1020,6 +1064,24 @@ class ControlCenter(QMainWindow):
         key = self.nav.item(row).data(Qt.UserRole)
         if key != "chat":
             self.refresh_page.emit(str(key))
+
+    def set_tts_payload(self, payload: dict[str, Any]) -> None:
+        engine = str(payload.get("engine") or "не найден")
+        hq = bool(payload.get("hq_local"))
+        model = str(payload.get("model") or "")
+        ready = bool(payload.get("model_ready"))
+        self.tts_meta.setText(
+            f"TTS: {engine} · HQ {'✓' if hq else '–'} · "
+            f"model {'✓' if ready else '–'}" + (f" · {model}" if model else "")
+        )
+        editing = any(widget.hasFocus() for widget in (self.tts_piper, self.tts_model, self.tts_speaker))
+        if not editing:
+            self.tts_piper.setText(str(payload.get("piper_path") or ""))
+            self.tts_model.setText(str(payload.get("model_path") or ""))
+            self.tts_speaker.setText(str(payload.get("speaker") or ""))
+
+    def set_tts_message(self, text: str) -> None:
+        self.tts_status.setText(str(text or ""))
 
     def set_voice_diagnostics(self, *, audio_level: int, echo_floor: int,
                               echo_threshold: int, echo_suppressed: int,
