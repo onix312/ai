@@ -140,6 +140,9 @@ class BackendClient:
     def personal(self) -> dict[str, Any]:
         return self.get("/personal")
 
+    def personal_op(self, op: str, item_id: int = 0, **payload: Any) -> dict[str, Any]:
+        return self.post("/personal", {"op": str(op), "id": int(item_id or 0), **payload})
+
     def learning(self) -> dict[str, Any]:
         return self.get("/learning")
 
