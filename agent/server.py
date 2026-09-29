@@ -76,10 +76,58 @@ class Agent:
         self._events: event_mod.EventEngine | None = None
         self._stop = threading.Event()
         self._emergency_stop = threading.Event()
+        self._activity_lock = threading.RLock()
+        self._activity: dict[str, Any] = {
+            "phase": "idle", "session": "", "heard": "", "reply": "",
+            "skill": "", "task_id": 0, "detail": "", "active": False,
+            "updated_at": time.time(),
+        }
+        self._activity_recent: list[dict[str, Any]] = []
         # Голос: фраза после стоп-слова идёт мозгу, ответ звучит вслух.
         self.microphone.handler = self.voice_phrase
         self.microphone.cancel_handler = lambda: self.brain.cancel_session("voice")
         self.microphone.vocabulary_provider = self.voice_vocabulary
+
+    def set_activity(self, phase: str, *, session: str = "", heard: str = "",
+                     reply: str = "", skill: str = "", task_id: int = 0,
+                     detail: str = "", active: bool = True) -> None:
+        """Ephemeral UI activity. Never persisted to conversation or memory."""
+        with self._activity_lock:
+            current = dict(self._activity)
+            next_item = {
+                "phase": str(phase or "idle"),
+                "session": str(session or current.get("session") or ""),
+                "heard": str(heard if heard != "" else current.get("heard") or "")[:500],
+                "reply": str(reply if reply != "" else current.get("reply") or "")[:1200],
+                "skill": str(skill if skill != "" else current.get("skill") or "")[:120],
+                "task_id": int(task_id or current.get("task_id") or 0),
+                "detail": str(detail if detail != "" else current.get("detail") or "")[:300],
+                "active": bool(active),
+                "updated_at": time.time(),
+            }
+            self._activity = next_item
+            if not next_item["active"] and (next_item["heard"] or next_item["reply"] or next_item["skill"]):
+                summary = dict(next_item)
+                self._activity_recent = [summary] + self._activity_recent[:3]
+
+    def append_activity_reply(self, text: str, session: str = "") -> bool:
+        clean = " ".join(str(text or "").split())
+        if not clean:
+            return False
+        with self._activity_lock:
+            current = dict(self._activity)
+            reply = " ".join(part for part in (str(current.get("reply") or ""), clean) if part).strip()
+        self.set_activity("speaking" if session == "voice" else "thinking",
+                          session=session, reply=reply, active=True)
+        return True
+
+    def activity_payload(self) -> dict[str, Any]:
+        with self._activity_lock:
+            current = dict(self._activity)
+            recent = [dict(item) for item in self._activity_recent[:4]]
+        if not current.get("active") and time.time() - float(current.get("updated_at") or 0) > 12:
+            current = {**current, "phase": "idle", "detail": ""}
+        return {"current": current, "recent": recent}
 
     def voice_vocabulary(self) -> list[str]:
         """Dynamic local terms that ASR should prefer without hard grammar."""
@@ -196,9 +244,21 @@ class Agent:
     def chat(self, text: str, session: str = "main", mode: str = "full",
              plan: dict[str, Any] | None = None) -> dict[str, Any]:
         """Фраза человека → ответ мозга. Способности обновляются перед разговором."""
+        self.set_activity("thinking", session=session, heard=str(text or ""), reply="",
+                          skill="", task_id=0, detail="Разбираю запрос", active=True)
         if mode != "pc" or plan:
             self.runner.refresh_capabilities()
-        return self.brain.chat(text, session=session, mode=mode, plan=plan)
+        answer = self.brain.chat(text, session=session, mode=mode, plan=plan)
+        skill_name = str(answer.get("skill") or "")
+        task = answer.get("task") if isinstance(answer.get("task"), dict) else (
+            (answer.get("result") or {}).get("task") if isinstance(answer.get("result"), dict) else None)
+        task_id = int((task or {}).get("id") or 0) if isinstance(task, dict) else 0
+        kind = str(answer.get("kind") or "")
+        phase = "error" if kind == "error" else "waiting" if kind in ("pending", "clarify") else "done"
+        self.set_activity(phase, session=session, reply=str(answer.get("reply") or ""),
+                          skill=skill_name, task_id=task_id,
+                          detail=str(answer.get("status") or kind), active=False)
+        return answer
 
     # --- планировщик личного (18.22) ---------------------------------------
     def tick(self, now: Any = None) -> list[dict[str, Any]]:
@@ -864,6 +924,7 @@ class AgentHandler(BaseHTTPRequestHandler):
             payload = agent.health()
             payload["pending"] = agent.pending()
             payload["safety"] = agent.safety_status()
+            payload["activity"] = agent.activity_payload()
             return self._json(200, payload)
         if path == "/safety/status":
             return self._json(200, agent.safety_status())
