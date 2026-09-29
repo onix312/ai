@@ -728,11 +728,11 @@ SKILLS: dict[str, dict[str, Any]] = {
     },
     "screen.find_and_click": {
         "title": "Найти и кликнуть",
-        "description": "Поиск текста; клик пока недоступен даже после подтверждения.",
+        "description": "Найти видимый текст в активном окне и кликнуть по центру фактически найденного элемента.",
         "host": "agent", "risk": "write",
         "params": {"text": "text"},
         "requires": ("screen", "windows"), "ideas": ("И213",),
-        "doc": "Только поиск и явный отказ от клика: координаты распознанного текста нельзя считать безопасной целью.",
+        "doc": "Кликает только когда UIA/OCR/Win32 вернули реальный прямоугольник цели; заголовок окна и догаданные координаты не используются.",
     },
     "screen.archive": {
         "title": "Архив экрана",
@@ -1407,7 +1407,8 @@ def _prompt_line(row: dict[str, Any]) -> str:
 
 def relevant_prompt(query: str, caps: dict[str, Any],
                     learned: dict[str, dict[str, Any]] | None = None,
-                    *, max_items: int = 28, max_chars: int = 5600) -> str:
+                    *, max_items: int = 28, max_chars: int = 5600,
+                    exclude: frozenset[str] | set[str] = frozenset()) -> str:
     """Компактный каталог навыков, релевантных текущей реплике.
 
     Полный реестр уже слишком велик для системного промпта: простое обрезание
@@ -1417,7 +1418,11 @@ def relevant_prompt(query: str, caps: dict[str, Any],
     покрытие разных групп. Это retrieval для tools, а не permission-механизм:
     перед исполнением Brain всё равно повторно проверяет реестр и параметры.
     """
-    rows = [row for row in catalog(caps, learned) if row["available"]]
+    blocked = {str(name).strip().casefold() for name in exclude}
+    rows = [
+        row for row in catalog(caps, learned)
+        if row["available"] and str(row.get("name") or "").casefold() not in blocked
+    ]
     if not rows:
         return ""
     low = " ".join(str(query or "").casefold().replace("ё", "е").split())
