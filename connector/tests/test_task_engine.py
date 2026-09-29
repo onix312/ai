@@ -234,11 +234,14 @@ class TaskEngineTests(unittest.TestCase):
             {"skill": "system.media", "params": {"action": "play_pause"}},
         ])
         self.engine._set_task(task_id, status="paused", current_step=0)
+        before = self.engine.get(task_id)
+        expected_tail = self.engine.tail_fingerprint(before, 0)
         result = self.engine.replace_remaining(
             task_id,
             0,
             [{"skill": "system.volume", "params": {"level": 55}}],
             "Проверка не прошла",
+            expected_tail=expected_tail,
         )
         self.assertTrue(result["ok"], result)
         task = self.engine.get(task_id)
