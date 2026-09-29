@@ -1083,8 +1083,30 @@ def memory_statement(row: dict[str, Any]) -> str:
     return f"со слов владельца: {text}"
 
 
+def _compact_context_value(value: Any, depth: int = 0) -> Any:
+    if isinstance(value, bool) or isinstance(value, (int, float)):
+        return value
+    if isinstance(value, str):
+        return " ".join(value.split())[:320]
+    if depth >= 2:
+        return str(value)[:180]
+    if isinstance(value, dict):
+        out: dict[str, Any] = {}
+        for key, child in list(value.items())[:10]:
+            compact = _compact_context_value(child, depth + 1)
+            if compact not in (None, "", [], {}):
+                out[str(key)[:80]] = compact
+        return out
+    if isinstance(value, (list, tuple)):
+        return [
+            _compact_context_value(child, depth + 1)
+            for child in list(value)[:5]
+        ]
+    return str(value)[:180] if value is not None else None
+
+
 def compact_result_context(result: dict[str, Any] | None) -> dict[str, Any]:
-    """Small factual residue from a tool result for the next conversational turn."""
+    """Small bounded factual residue from a tool result for the next turn."""
     if not isinstance(result, dict):
         return {}
     out: dict[str, Any] = {}
@@ -1093,7 +1115,9 @@ def compact_result_context(result: dict[str, Any] | None) -> dict[str, Any]:
                 "cpu_percent", "memory", "battery", "uptime_hours"):
         value = result.get(key)
         if value not in (None, "", [], {}):
-            out[key] = value
+            compact = _compact_context_value(value)
+            if compact not in (None, "", [], {}):
+                out[key] = compact
     files = result.get("files")
     if isinstance(files, list) and files:
         out["files"] = [
