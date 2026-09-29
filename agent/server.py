@@ -40,7 +40,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
 from . import brain as brain_mod
-from . import autonomy as autonomy_mod, capabilities, config, event_engine as event_mod, executor, pc, persona as persona_mod, planner, replanner, skills, speech, task_engine, ui, voice_runtime, window, winapi
+from . import autonomy as autonomy_mod, capabilities, config, event_engine as event_mod, executor, pc, persona as persona_mod, planner, replanner, skills, speech, task_engine, tts_quality, ui, voice_runtime, window, winapi
 from .providers import registry as provider_registry
 
 # Ожидающее действие живёт недолго: неподтверждённый клик не должен висеть
