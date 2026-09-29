@@ -8,8 +8,10 @@ on:
       - "agent/server.py"
       - "agent/config.py"
       - "agent/pc.py"
+      - "agent/tts_quality.py"
       - "agent/native_ui/**"
       - "connector/tests/test_voice_runtime.py"
+      - "connector/tests/test_tts_quality.py"
       - ".github/workflows/voice-engine.yml"
   push:
     branches:
@@ -20,8 +22,10 @@ on:
       - "agent/server.py"
       - "agent/config.py"
       - "agent/pc.py"
+      - "agent/tts_quality.py"
       - "agent/native_ui/**"
       - "connector/tests/test_voice_runtime.py"
+      - "connector/tests/test_tts_quality.py"
 
 jobs:
   core:
@@ -32,9 +36,9 @@ jobs:
         with:
           python-version: "3.12"
       - name: Compile voice engine
-        run: python -m compileall -q agent/voice_runtime.py agent/speech.py agent/server.py agent/config.py agent/pc.py agent/native_ui
+        run: python -m compileall -q agent/voice_runtime.py agent/speech.py agent/server.py agent/config.py agent/pc.py agent/tts_quality.py agent/native_ui
       - name: Voice state machine tests
-        run: python -m unittest connector.tests.test_voice_runtime connector.tests.test_agent_os.SpeechRuntimeTests connector.tests.test_native_ui
+        run: python -m unittest connector.tests.test_voice_runtime connector.tests.test_tts_quality connector.tests.test_agent_os.SpeechRuntimeTests connector.tests.test_native_ui
 
   windows-native:
     runs-on: windows-latest
