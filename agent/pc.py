@@ -32,6 +32,7 @@ import subprocess
 import sys
 import threading
 import time
+import tempfile
 import uuid
 import webbrowser
 from typing import Any
@@ -1155,8 +1156,8 @@ def _spawn(command: list[str]) -> None:
 # Голос: озвучка средствами системы
 # ---------------------------------------------------------------------------
 
-def speech_engine() -> str:
-    """Чем озвучивать на этой системе: SAPI в Windows, say в macOS, espeak в Linux."""
+def _system_speech_engine() -> str:
+    """System fallback used when the local HQ voice is unavailable."""
     if IS_WINDOWS:
         return "sapi" if shutil.which("powershell") or shutil.which("powershell.exe") else ""
     if IS_MAC and shutil.which("say"):
@@ -1165,6 +1166,59 @@ def speech_engine() -> str:
         if shutil.which(name):
             return name
     return ""
+
+
+def _piper_settings() -> tuple[str, str, str]:
+    """Return Piper executable, model and optional speaker id.
+
+    The model is intentionally external to git: voice checkpoints are large and
+    machine-specific. LUMA_* is canonical; NOZZA_* remains a compatibility alias.
+    """
+    executable = (
+        os.environ.get("LUMA_TTS_PIPER")
+        or os.environ.get("NOZZA_TTS_PIPER")
+        or shutil.which("piper")
+        or ""
+    )
+    configured_model = (
+        os.environ.get("LUMA_TTS_MODEL_PATH")
+        or os.environ.get("NOZZA_TTS_MODEL_PATH")
+        or ""
+    ).strip()
+    default_model = pathlib.Path(__file__).resolve().parents[1] / "models" / "tts" / "luma.onnx"
+    model = pathlib.Path(configured_model).expanduser() if configured_model else default_model
+    speaker = (
+        os.environ.get("LUMA_TTS_SPEAKER")
+        or os.environ.get("NOZZA_TTS_SPEAKER")
+        or ""
+    ).strip()
+    return str(executable), str(model), speaker
+
+
+def _piper_available() -> bool:
+    executable, model, _speaker = _piper_settings()
+    return bool(executable and pathlib.Path(model).is_file())
+
+
+def speech_engine() -> str:
+    """Prefer Luma's local Piper voice, with the previous system TTS as fallback."""
+    if _piper_available():
+        return "piper"
+    return _system_speech_engine()
+
+
+def tts_status() -> dict[str, Any]:
+    """Small diagnostics payload for UI/status pages without loading a model."""
+    engine = speech_engine()
+    executable, model, speaker = _piper_settings()
+    return {
+        "engine": engine,
+        "hq_local": engine == "piper",
+        "model": pathlib.Path(model).name if engine == "piper" else "",
+        "speaker": speaker if engine == "piper" else "",
+        "piper": bool(executable),
+        "model_ready": pathlib.Path(model).is_file(),
+    }
 
 
 _SAPI_SCRIPT = (
@@ -1178,6 +1232,7 @@ _SAPI_SCRIPT = (
 
 _TTS_LOCK = threading.RLock()
 _TTS_PROCESS: subprocess.Popen | None = None
+_TTS_TEMP_FILE = ""
 _LAST_TTS_TEXT = ""
 _LAST_TTS_AT = 0.0
 
@@ -1204,9 +1259,19 @@ def recent_tts_echo(text: str, max_age: float = 6.0) -> bool:
     return overlap >= 0.72 or (len(heard) >= 2 and joined_heard in joined_spoken)
 
 
+def _cleanup_tts_file(path: str) -> None:
+    if not path:
+        return
+    try:
+        pathlib.Path(path).unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
 def is_speaking() -> bool:
-    """Идёт ли сейчас системная озвучка NOZZA."""
-    global _TTS_PROCESS
+    """Идёт ли сейчас синтез или воспроизведение голоса Люмы."""
+    global _TTS_PROCESS, _TTS_TEMP_FILE
+    stale_file = ""
     with _TTS_LOCK:
         process = _TTS_PROCESS
         if process is None:
@@ -1214,16 +1279,20 @@ def is_speaking() -> bool:
         if process.poll() is None:
             return True
         _TTS_PROCESS = None
-        return False
+        stale_file, _TTS_TEMP_FILE = _TTS_TEMP_FILE, ""
+    _cleanup_tts_file(stale_file)
+    return False
 
 
 def stop_speaking() -> bool:
-    """Немедленно остановить текущий TTS. Используется для barge-in."""
-    global _TTS_PROCESS
+    """Немедленно остановить синтез/воспроизведение. Используется для barge-in."""
+    global _TTS_PROCESS, _TTS_TEMP_FILE
     with _TTS_LOCK:
         process = _TTS_PROCESS
+        temp_file, _TTS_TEMP_FILE = _TTS_TEMP_FILE, ""
         _TTS_PROCESS = None
     if process is None or process.poll() is not None:
+        _cleanup_tts_file(temp_file)
         return False
     try:
         process.terminate()
@@ -1234,6 +1303,8 @@ def stop_speaking() -> bool:
         return True
     except (OSError, ValueError):
         return False
+    finally:
+        _cleanup_tts_file(temp_file)
 
 
 class SpeechQueue:
@@ -1290,22 +1361,11 @@ class SpeechQueue:
             stop_speaking()
 
 
-def speak(text: str, rate: int = 0, volume: int = 100) -> tuple[dict[str, Any], str]:
-    """Сказать вслух. Текст — данные (stdin или переменная окружения), не команда.
-
-    В Windows текст передаётся переменной окружения: PowerShell читает stdin в
-    кодировке консоли (cp866), и кириллица превращалась бы в «кракозябры», а
-    окружение Windows — Unicode. В строку команды текст не попадает нигде.
-    """
-    clean = " ".join(str(text or "").split())[:1500]
-    if not clean:
-        return {}, "Пустой текст для озвучки"
-    engine = speech_engine()
+def _system_speak(clean: str, rate: int, volume: int) -> tuple[dict[str, Any], str]:
+    engine = _system_speech_engine()
     if not engine:
         return {}, ("Нет движка озвучки: в Windows нужен PowerShell (есть по умолчанию), "
                     "в Linux — espeak-ng")
-    rate = max(-10, min(10, int(rate)))
-    volume = max(0, min(100, int(volume)))
     env = os.environ.copy()
     if engine == "sapi":
         command = ["powershell", "-NoProfile", "-NonInteractive", "-Command", _SAPI_SCRIPT]
@@ -1333,3 +1393,124 @@ def speak(text: str, rate: int = 0, volume: int = 100) -> tuple[dict[str, Any], 
         _LAST_TTS_TEXT = clean
         _LAST_TTS_AT = time.time()
     return {"engine": engine, "chars": len(clean), "pid": process.pid}, ""
+
+
+def _wav_player(path: str) -> tuple[list[str], dict[str, str]]:
+    env = os.environ.copy()
+    if IS_WINDOWS:
+        powershell = shutil.which("powershell") or shutil.which("powershell.exe")
+        if not powershell:
+            return [], env
+        env["LUMA_TTS_WAV"] = path
+        script = (
+            "$p = New-Object System.Media.SoundPlayer;"
+            "$p.SoundLocation = $env:LUMA_TTS_WAV;"
+            "$p.Load(); $p.PlaySync()"
+        )
+        return [powershell, "-NoProfile", "-NonInteractive", "-Command", script], env
+    if IS_MAC and shutil.which("afplay"):
+        return [str(shutil.which("afplay")), path], env
+    for player, args in (("paplay", []), ("aplay", []), ("ffplay", ["-nodisp", "-autoexit", "-loglevel", "quiet"])):
+        found = shutil.which(player)
+        if found:
+            return [found, *args, path], env
+    return [], env
+
+
+def _piper_speak(clean: str, rate: int, volume: int) -> tuple[dict[str, Any], str]:
+    executable, model, speaker = _piper_settings()
+    if not executable or not pathlib.Path(model).is_file():
+        return {}, "Локальная модель Piper не настроена"
+
+    handle, wav_path = tempfile.mkstemp(prefix="luma-tts-", suffix=".wav")
+    os.close(handle)
+    length_scale = max(0.65, min(1.45, 1.0 - rate * 0.04))
+    command = [
+        executable, "--model", model,
+        "--output_file", wav_path,
+        "--length_scale", f"{length_scale:.2f}",
+    ]
+    if speaker:
+        command.extend(["--speaker", speaker])
+
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if IS_WINDOWS else 0
+    stop_speaking()
+    try:
+        synth = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
+                                 stderr=subprocess.PIPE, creationflags=flags)
+    except (OSError, ValueError) as exc:
+        _cleanup_tts_file(wav_path)
+        return {}, f"Piper не запустился: {exc}"
+
+    global _TTS_PROCESS, _TTS_TEMP_FILE, _LAST_TTS_TEXT, _LAST_TTS_AT
+    with _TTS_LOCK:
+        _TTS_PROCESS = synth
+        _TTS_TEMP_FILE = wav_path
+        _LAST_TTS_TEXT = clean
+        _LAST_TTS_AT = time.time()
+
+    try:
+        _stdout, stderr = synth.communicate(clean.encode("utf-8"))
+    except (OSError, ValueError) as exc:
+        stop_speaking()
+        return {}, f"Piper остановлен: {exc}"
+
+    with _TTS_LOCK:
+        if _TTS_PROCESS is not synth:
+            _cleanup_tts_file(wav_path)
+            return {}, "Озвучка остановлена"
+        _TTS_PROCESS = None
+
+    if synth.returncode:
+        _cleanup_tts_file(wav_path)
+        detail = bytes(stderr or b"").decode("utf-8", "replace").strip().splitlines()
+        reason = detail[-1][:180] if detail else f"код {synth.returncode}"
+        return {}, f"Piper не синтезировал речь: {reason}"
+    try:
+        if pathlib.Path(wav_path).stat().st_size < 44:
+            _cleanup_tts_file(wav_path)
+            return {}, "Piper вернул пустой WAV"
+    except OSError:
+        return {}, "Piper не создал WAV"
+
+    play_command, env = _wav_player(wav_path)
+    if not play_command:
+        _cleanup_tts_file(wav_path)
+        return {}, "Нет локального проигрывателя WAV"
+
+    try:
+        playback = subprocess.Popen(play_command, stdin=subprocess.DEVNULL,
+                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                    env=env, creationflags=flags)
+    except (OSError, ValueError) as exc:
+        _cleanup_tts_file(wav_path)
+        return {}, f"Не удалось воспроизвести голос: {exc}"
+
+    with _TTS_LOCK:
+        _TTS_PROCESS = playback
+        _TTS_TEMP_FILE = wav_path
+    return {
+        "engine": "piper",
+        "chars": len(clean),
+        "pid": playback.pid,
+        "model": pathlib.Path(model).name,
+        "speaker": speaker,
+        "rate": rate,
+        "volume": volume,
+    }, ""
+
+
+def speak(text: str, rate: int = 0, volume: int = 100) -> tuple[dict[str, Any], str]:
+    """Сказать вслух: локальный Piper HQ, затем прозрачный системный fallback."""
+    clean = " ".join(str(text or "").split())[:1500]
+    if not clean:
+        return {}, "Пустой текст для озвучки"
+    rate = max(-10, min(10, int(rate)))
+    volume = max(0, min(100, int(volume)))
+
+    if _piper_available():
+        state, reason = _piper_speak(clean, rate, volume)
+        if state or reason == "Озвучка остановлена":
+            return state, reason
+
+    return _system_speak(clean, rate, volume)
