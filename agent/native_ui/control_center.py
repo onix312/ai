@@ -273,6 +273,9 @@ class ActivityPage(QWidget):
                 )
                 if verify:
                     line += f" · проверка: {self._e(verify)}"
+                    reason = str(verification.get("reason") or "")
+                    if reason:
+                        line += f" ({self._e(reason)})"
                 chunks.append(f"<div style='margin-left:14px'>{line}</div>")
 
         replans = list(task.get("replans") or [])
