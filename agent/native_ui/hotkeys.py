@@ -13,6 +13,8 @@ MOD_ALT = 0x0001
 MOD_CONTROL = 0x0002
 MOD_SHIFT = 0x0004
 MOD_WIN = 0x0008
+QUICK_HOTKEY_ID = 0x4E5A
+STOP_HOTKEY_ID = 0x4E5B
 
 
 class HotkeyFilter(QAbstractNativeEventFilter):
@@ -34,7 +36,7 @@ class HotkeyFilter(QAbstractNativeEventFilter):
         return False, 0
 
 
-def register_default(window_handle: int, hotkey_id: int = 0x4E5A) -> bool:
+def register_default(window_handle: int, hotkey_id: int = QUICK_HOTKEY_ID) -> bool:
     if sys.platform != "win32":
         return False
     user32 = ctypes.windll.user32
@@ -42,6 +44,16 @@ def register_default(window_handle: int, hotkey_id: int = 0x4E5A) -> bool:
     return bool(user32.RegisterHotKey(window_handle, hotkey_id, MOD_CONTROL | MOD_SHIFT, 0x20))
 
 
-def unregister(window_handle: int, hotkey_id: int = 0x4E5A) -> None:
+def register_stop(window_handle: int, hotkey_id: int = STOP_HOTKEY_ID) -> bool:
+    if sys.platform != "win32":
+        return False
+    user32 = ctypes.windll.user32
+    # Ctrl+Alt+Shift+Space: intentionally separate from the quick panel.
+    return bool(user32.RegisterHotKey(
+        window_handle, hotkey_id, MOD_CONTROL | MOD_ALT | MOD_SHIFT, 0x20
+    ))
+
+
+def unregister(window_handle: int, hotkey_id: int = QUICK_HOTKEY_ID) -> None:
     if sys.platform == "win32":
         ctypes.windll.user32.UnregisterHotKey(window_handle, hotkey_id)
