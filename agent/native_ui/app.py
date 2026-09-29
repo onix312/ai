@@ -276,6 +276,15 @@ class NativeApp:
             self.quick.set_busy(False)
             self.quick.show_answer(reply)
             self.center.chat.append_local("Люма", reply)
+            image = payload.get("image") if isinstance(payload.get("image"), dict) else {}
+            image_url = str(image.get("url") or "")
+            if image_url:
+                image_title = str(image.get("printer_name") or image.get("printer_id") or "")
+                self.run_async(
+                    lambda url=image_url: self.backend.fetch_local_image(url),
+                    lambda data, title=image_title: self.center.chat.show_camera_image(data, title),
+                    lambda _message: None,
+                )
             pending = payload.get("pending")
             if isinstance(pending, dict) and pending.get("id"):
                 self.center.set_page_payload("tasks", {"pending": [pending]})
