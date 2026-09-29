@@ -325,9 +325,6 @@ class NativeApp:
                 skill=str(payload.get("skill") or ""),
             )
             self.center.chat.show_action_trace(trace_steps)
-                str(step.get("title") or "") == "Самокоррекция плана"
-                for step in trace_steps if isinstance(step, dict)
-            )
             self.center.home.set_brain(
                 model_ok=self.state.model_ok,
                 ready=self._brain_ready,
