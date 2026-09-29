@@ -31,9 +31,18 @@ class NativeQtSmokeTests(unittest.TestCase):
         self.assertEqual(chat.content.currentIndex(), 1)
         self.assertIn("<b>привет</b>", chat.feed.toPlainText())
         self.assertIn("ВЫ", chat.feed.toPlainText())
-        chat.append_local("Люма", "Готово")
-        self.assertIn("LUMA", chat.feed.toPlainText())
-        self.assertIn("Готово", chat.feed.toPlainText())
+        chat.append_local("Люма", "Готово", source="model", skill="system.health")
+        visible = chat.feed.toPlainText()
+        self.assertIn("LUMA", visible)
+        self.assertIn("Готово", visible)
+        self.assertIn("MODEL", visible)
+        self.assertIn("system.health", visible)
+        chat.set_history([
+            {"role": "assistant", "text": "Открыла.", "meta": {"source": "rules", "skill": "app.open"}},
+        ])
+        restored = chat.feed.toPlainText()
+        self.assertIn("RULES", restored)
+        self.assertIn("app.open", restored)
         chat.set_history([])
         self.assertEqual(chat.content.currentIndex(), 0)
 
