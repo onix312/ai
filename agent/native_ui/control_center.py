@@ -435,6 +435,275 @@ class HomePage(QWidget):
         self.voice_meta.setText(" · ".join(bits))
 
 
+class VoicePage(QWidget):
+    tts_save = Signal(str, str, str)
+    tts_reset = Signal()
+    tts_test = Signal()
+    pronunciation_add = Signal(str, str)
+    pronunciation_delete = Signal(str)
+    voice_tune = Signal(int, float, int, float)
+    voice_diag_reset = Signal()
+
+    def __init__(self) -> None:
+        super().__init__()
+        root = QVBoxLayout(self)
+        root.setContentsMargins(2, 2, 2, 2)
+        root.setSpacing(14)
+
+        header = QHBoxLayout()
+        title_box = QVBoxLayout()
+        title = QLabel("Голос Люмы")
+        title.setObjectName("pageTitle")
+        subtitle = QLabel("Локальный голос Baya, произношение и диагностика микрофона.")
+        subtitle.setObjectName("muted")
+        title_box.addWidget(title)
+        title_box.addWidget(subtitle)
+        header.addLayout(title_box, 1)
+        root.addLayout(header)
+
+        hero = GlassCard("cyan")
+        hero_box = QHBoxLayout(hero)
+        hero_box.setContentsMargins(20, 16, 20, 16)
+        hero_box.setSpacing(18)
+
+        self.portrait = LumaPortrait(compact=True)
+        self.portrait.set_state("speaking")
+        hero_box.addWidget(self.portrait, 0, Qt.AlignVCenter)
+
+        voice_identity = QVBoxLayout()
+        voice_identity.setSpacing(4)
+        label = QLabel("PRIMARY LOCAL VOICE")
+        label.setObjectName("heroKicker")
+        voice_identity.addWidget(label)
+        self.voice_name = QLabel("Baya")
+        self.voice_name.setObjectName("metricValue")
+        voice_identity.addWidget(self.voice_name)
+        self.voice_profile = QLabel("Silero v5_5_ru · 48 kHz · CPU local")
+        self.voice_profile.setObjectName("muted")
+        voice_profile_text = (
+            "Мягкий женский профиль для Люмы. "
+            "Piper и системный TTS остаются резервной цепочкой."
+        )
+        profile_note = QLabel(voice_profile_text)
+        profile_note.setObjectName("muted")
+        profile_note.setWordWrap(True)
+        voice_identity.addWidget(self.voice_profile)
+        voice_identity.addWidget(profile_note)
+        hero_box.addLayout(voice_identity, 1)
+
+        self.preview_orb = LumaOrbCore(compact=True)
+        self.preview_orb.set_state("speaking")
+        hero_box.addWidget(self.preview_orb, 0, Qt.AlignVCenter)
+
+        preview = QPushButton("▶  Прослушать Baya")
+        preview.setObjectName("primary")
+        preview.clicked.connect(self.tts_test)
+        hero_box.addWidget(preview)
+        root.addWidget(hero)
+
+        content = QHBoxLayout()
+        content.setSpacing(14)
+
+        left = QVBoxLayout()
+        left.setSpacing(14)
+
+        engine_card = GlassCard("violet")
+        engine = QVBoxLayout(engine_card)
+        engine.setContentsMargins(16, 14, 16, 14)
+        engine.setSpacing(9)
+        engine_title = QLabel("Движок и fallback")
+        engine_title.setObjectName("sectionTitle")
+        engine.addWidget(engine_title)
+
+        self.tts_meta = QLabel("TTS: …")
+        self.tts_meta.setObjectName("muted")
+        self.tts_meta.setWordWrap(True)
+        engine.addWidget(self.tts_meta)
+
+        chain = QLabel("SILERO BAYA  →  PIPER  →  SYSTEM")
+        chain.setObjectName("voiceChain")
+        chain.setAlignment(Qt.AlignCenter)
+        engine.addWidget(chain)
+
+        self.tts_piper = QLineEdit()
+        self.tts_piper.setPlaceholderText("Piper executable · fallback")
+        engine.addWidget(self.tts_piper)
+        self.tts_model = QLineEdit()
+        self.tts_model.setPlaceholderText("Piper model .onnx · fallback")
+        engine.addWidget(self.tts_model)
+        self.tts_speaker = QLineEdit()
+        self.tts_speaker.setPlaceholderText("Piper speaker id")
+        engine.addWidget(self.tts_speaker)
+
+        tts_buttons = QHBoxLayout()
+        apply_tts = QPushButton("Сохранить fallback")
+        apply_tts.clicked.connect(
+            lambda: self.tts_save.emit(
+                self.tts_piper.text().strip(),
+                self.tts_model.text().strip(),
+                self.tts_speaker.text().strip(),
+            )
+        )
+        reset_tts = QPushButton("Сбросить")
+        reset_tts.clicked.connect(self.tts_reset)
+        tts_buttons.addWidget(apply_tts)
+        tts_buttons.addWidget(reset_tts)
+        tts_buttons.addStretch(1)
+        engine.addLayout(tts_buttons)
+
+        self.tts_status = QLabel(
+            "Основной профиль: Silero v5_5_ru · Baya · 48 kHz."
+        )
+        self.tts_status.setObjectName("muted")
+        self.tts_status.setWordWrap(True)
+        engine.addWidget(self.tts_status)
+        left.addWidget(engine_card)
+
+        pronunciation_card = GlassCard()
+        pronunciation = QVBoxLayout(pronunciation_card)
+        pronunciation.setContentsMargins(16, 14, 16, 14)
+        pronunciation.setSpacing(9)
+        pronunciation_title = QLabel("Произношение")
+        pronunciation_title.setObjectName("sectionTitle")
+        pronunciation.addWidget(pronunciation_title)
+        hint = QLabel(
+            "Правила применяются к подготовленному тексту перед локальным TTS. "
+            "Например: Bambu → бэмбу."
+        )
+        hint.setObjectName("muted")
+        hint.setWordWrap(True)
+        pronunciation.addWidget(hint)
+
+        pronunciation_row = QHBoxLayout()
+        self.pronunciation_source = QLineEdit()
+        self.pronunciation_source.setPlaceholderText("Как написано")
+        self.pronunciation_target = QLineEdit()
+        self.pronunciation_target.setPlaceholderText("Как произносить")
+        add_pronunciation = QPushButton("Добавить")
+        add_pronunciation.clicked.connect(
+            lambda: self.pronunciation_add.emit(
+                self.pronunciation_source.text().strip(),
+                self.pronunciation_target.text().strip(),
+            )
+        )
+        pronunciation_row.addWidget(self.pronunciation_source, 1)
+        pronunciation_row.addWidget(self.pronunciation_target, 1)
+        pronunciation_row.addWidget(add_pronunciation)
+        pronunciation.addLayout(pronunciation_row)
+
+        self.pronunciation_list = QListWidget()
+        self.pronunciation_list.setMaximumHeight(150)
+        pronunciation.addWidget(self.pronunciation_list)
+        pronunciation_buttons = QHBoxLayout()
+        delete_pronunciation = QPushButton("Удалить выбранное")
+        delete_pronunciation.clicked.connect(
+            lambda: self.pronunciation_delete.emit(
+                str((self.pronunciation_list.currentItem().data(Qt.UserRole)
+                     if self.pronunciation_list.currentItem() else "") or "")
+            )
+        )
+        pronunciation_buttons.addWidget(delete_pronunciation)
+        pronunciation_buttons.addStretch(1)
+        pronunciation.addLayout(pronunciation_buttons)
+
+        self.pronunciation_status = QLabel("Пользовательских правил: 0")
+        self.pronunciation_status.setObjectName("muted")
+        self.pronunciation_status.setWordWrap(True)
+        pronunciation.addWidget(self.pronunciation_status)
+        left.addWidget(pronunciation_card)
+        left.addStretch(1)
+
+        diagnostics_card = GlassCard()
+        diagnostics = QVBoxLayout(diagnostics_card)
+        diagnostics.setContentsMargins(16, 14, 16, 14)
+        diagnostics.setSpacing(10)
+        diagnostics_title = QLabel("Voice Diagnostics")
+        diagnostics_title.setObjectName("sectionTitle")
+        diagnostics.addWidget(diagnostics_title)
+        self.voice_diag_meta = QLabel("ASR: … · vocabulary: 0")
+        self.voice_diag_meta.setObjectName("muted")
+        self.voice_diag_meta.setWordWrap(True)
+        diagnostics.addWidget(self.voice_diag_meta)
+
+        self.voice_level = QProgressBar()
+        self.voice_level.setRange(0, 4000)
+        self.voice_level.setFormat("Mic level: %v")
+        diagnostics.addWidget(self.voice_level)
+        self.voice_threshold = QProgressBar()
+        self.voice_threshold.setRange(0, 4000)
+        self.voice_threshold.setFormat("Echo/VAD threshold: %v")
+        diagnostics.addWidget(self.voice_threshold)
+        self.voice_floor = QProgressBar()
+        self.voice_floor.setRange(0, 4000)
+        self.voice_floor.setFormat("Echo floor: %v")
+        diagnostics.addWidget(self.voice_floor)
+
+        self.voice_vad = QSpinBox()
+        self.voice_vad.setRange(40, 12000)
+        self.voice_vad.setSingleStep(20)
+        self.voice_vad.setPrefix("VAD ")
+        diagnostics.addWidget(self.voice_vad)
+
+        self.voice_multiplier = QDoubleSpinBox()
+        self.voice_multiplier.setRange(1.0, 4.0)
+        self.voice_multiplier.setSingleStep(0.05)
+        self.voice_multiplier.setDecimals(2)
+        self.voice_multiplier.setPrefix("Echo gate × ")
+        diagnostics.addWidget(self.voice_multiplier)
+
+        self.voice_margin = QSpinBox()
+        self.voice_margin.setRange(0, 4000)
+        self.voice_margin.setSingleStep(20)
+        self.voice_margin.setPrefix("Margin ")
+        diagnostics.addWidget(self.voice_margin)
+
+        self.voice_alpha = QDoubleSpinBox()
+        self.voice_alpha.setRange(0.05, 0.95)
+        self.voice_alpha.setSingleStep(0.05)
+        self.voice_alpha.setDecimals(2)
+        self.voice_alpha.setPrefix("Adapt ")
+        diagnostics.addWidget(self.voice_alpha)
+
+        diag_buttons = QHBoxLayout()
+        apply_voice = QPushButton("Применить калибровку")
+        apply_voice.setObjectName("primary")
+        apply_voice.clicked.connect(
+            lambda: self.voice_tune.emit(
+                int(self.voice_vad.value()),
+                float(self.voice_multiplier.value()),
+                int(self.voice_margin.value()),
+                float(self.voice_alpha.value()),
+            )
+        )
+        reset_voice = QPushButton("Сбросить")
+        reset_voice.clicked.connect(self.voice_diag_reset)
+        diag_buttons.addWidget(apply_voice)
+        diag_buttons.addWidget(reset_voice)
+        diagnostics.addLayout(diag_buttons)
+
+        self.voice_diag_status = QLabel("Калибровка хранится только в RAM.")
+        self.voice_diag_status.setObjectName("muted")
+        self.voice_diag_status.setWordWrap(True)
+        diagnostics.addWidget(self.voice_diag_status)
+        diagnostics.addStretch(1)
+
+        content.addLayout(left, 7)
+        content.addWidget(diagnostics_card, 5)
+        root.addLayout(content, 1)
+
+    def set_voice_profile(self, *, engine: str, speaker: str, sample_rate: int,
+                          model: str, ready: bool) -> None:
+        speaker_clean = str(speaker or "system")
+        self.voice_name.setText(speaker_clean.capitalize())
+        bits = [str(engine or "system")]
+        if model:
+            bits.append(str(model))
+        if sample_rate:
+            bits.append(f"{int(sample_rate) // 1000} kHz")
+        bits.append("LOCAL READY" if ready else "FALLBACK")
+        self.voice_profile.setText(" · ".join(bits))
+
+
 class ActivityPage(QWidget):
     refresh_requested = Signal()
 
@@ -966,6 +1235,7 @@ class ControlCenter(QMainWindow):
     NAV = [
         ("home", "✦  Главная"),
         ("chat", "◈  Разговор"),
+        ("voice", "◉  Голос"),
         ("today", "◇  Сегодня"),
         ("tasks", "✓  Задачи"),
         ("activity", "⌁  Активность"),
@@ -1034,6 +1304,26 @@ class ControlCenter(QMainWindow):
         self.pages["chat"] = self.chat
         self.stack.addWidget(self.chat)
 
+        self.voice_page = VoicePage()
+        self.voice_page.tts_save.connect(self.tts_save)
+        self.voice_page.tts_reset.connect(self.tts_reset)
+        self.voice_page.tts_test.connect(self.tts_test)
+        self.voice_page.pronunciation_add.connect(self.pronunciation_add)
+        self.voice_page.pronunciation_delete.connect(self.pronunciation_delete)
+        self.voice_page.voice_tune.connect(self.voice_tune)
+        self.voice_page.voice_diag_reset.connect(self.voice_diag_reset)
+        self.pages["voice"] = self.voice_page
+        self.stack.addWidget(self.voice_page)
+
+        for name in (
+            "tts_meta", "tts_piper", "tts_model", "tts_speaker", "tts_status",
+            "pronunciation_source", "pronunciation_target", "pronunciation_list",
+            "pronunciation_status", "voice_diag_meta", "voice_level",
+            "voice_threshold", "voice_floor", "voice_vad", "voice_multiplier",
+            "voice_margin", "voice_alpha", "voice_diag_status",
+        ):
+            setattr(self, name, getattr(self.voice_page, name))
+
         today = TextPage("Сегодня", "Личные дела и краткий контекст дня.")
         today.refresh_requested.connect(lambda: self.refresh_page.emit("today"))
         self.pages["today"] = today
@@ -1089,165 +1379,10 @@ class ControlCenter(QMainWindow):
         controls.addWidget(self.stop_all_button)
         sl.addLayout(controls)
 
-        tts_title = QLabel("Голос Люмы · HQ Local TTS")
-        tts_title.setStyleSheet("font-size:16px; font-weight:700; margin-top:12px;")
-        sl.addWidget(tts_title)
-        self.tts_meta = QLabel("TTS: …")
-        self.tts_meta.setObjectName("muted")
-        self.tts_meta.setWordWrap(True)
-        sl.addWidget(self.tts_meta)
-
-        self.tts_piper = QLineEdit()
-        self.tts_piper.setPlaceholderText("Piper executable · пусто = искать piper в PATH")
-        sl.addWidget(self.tts_piper)
-        self.tts_model = QLineEdit()
-        self.tts_model.setPlaceholderText("Piper fallback · путь к .onnx (необязательно)")
-        sl.addWidget(self.tts_model)
-        self.tts_speaker = QLineEdit()
-        self.tts_speaker.setPlaceholderText("Piper fallback · speaker id")
-        sl.addWidget(self.tts_speaker)
-
-        tts_buttons = QHBoxLayout()
-        apply_tts = QPushButton("Применить голос")
-        apply_tts.clicked.connect(
-            lambda: self.tts_save.emit(
-                self.tts_piper.text().strip(),
-                self.tts_model.text().strip(),
-                self.tts_speaker.text().strip(),
-            )
-        )
-        tts_buttons.addWidget(apply_tts)
-        preview_tts = QPushButton("🔊 Прослушать голос")
-        preview_tts.clicked.connect(self.tts_test)
-        tts_buttons.addWidget(preview_tts)
-        reset_tts = QPushButton("Сбросить TTS")
-        reset_tts.clicked.connect(self.tts_reset)
-        tts_buttons.addWidget(reset_tts)
-        tts_buttons.addStretch(1)
-        sl.addLayout(tts_buttons)
-
-        self.tts_status = QLabel(
-            "Основной голос: Silero v5_5_ru · Baya · 48 kHz. "
-            "Piper и системный TTS остаются автоматическим fallback."
-        )
-        self.tts_status.setObjectName("muted")
-        self.tts_status.setWordWrap(True)
-        sl.addWidget(self.tts_status)
-
-        pronunciation_title = QLabel("Произношение")
-        pronunciation_title.setStyleSheet("font-size:16px; font-weight:700; margin-top:12px;")
-        sl.addWidget(pronunciation_title)
-        pronunciation_hint = QLabel(
-            "Свои правила применяются сразу к следующей фразе Piper. "
-            "Пример: Bambu → бэмбу."
-        )
-        pronunciation_hint.setObjectName("muted")
-        pronunciation_hint.setWordWrap(True)
-        sl.addWidget(pronunciation_hint)
-
-        pronunciation_row = QHBoxLayout()
-        self.pronunciation_source = QLineEdit()
-        self.pronunciation_source.setPlaceholderText("Как написано")
-        pronunciation_row.addWidget(self.pronunciation_source, 1)
-        self.pronunciation_target = QLineEdit()
-        self.pronunciation_target.setPlaceholderText("Как произносить")
-        pronunciation_row.addWidget(self.pronunciation_target, 1)
-        add_pronunciation = QPushButton("Добавить")
-        add_pronunciation.clicked.connect(
-            lambda: self.pronunciation_add.emit(
-                self.pronunciation_source.text().strip(),
-                self.pronunciation_target.text().strip(),
-            )
-        )
-        pronunciation_row.addWidget(add_pronunciation)
-        sl.addLayout(pronunciation_row)
-
-        self.pronunciation_list = QListWidget()
-        self.pronunciation_list.setMaximumHeight(150)
-        sl.addWidget(self.pronunciation_list)
-        pronunciation_buttons = QHBoxLayout()
-        delete_pronunciation = QPushButton("Удалить выбранное")
-        delete_pronunciation.clicked.connect(
-            lambda: self.pronunciation_delete.emit(
-                str((self.pronunciation_list.currentItem().data(Qt.UserRole)
-                     if self.pronunciation_list.currentItem() else "") or "")
-            )
-        )
-        pronunciation_buttons.addWidget(delete_pronunciation)
-        pronunciation_buttons.addStretch(1)
-        sl.addLayout(pronunciation_buttons)
-
-        self.pronunciation_status = QLabel("Пользовательских правил: 0")
-        self.pronunciation_status.setObjectName("muted")
-        self.pronunciation_status.setWordWrap(True)
-        sl.addWidget(self.pronunciation_status)
-
-        voice_title = QLabel("Voice Diagnostics")
-        voice_title.setStyleSheet("font-size:16px; font-weight:700; margin-top:12px;")
-        sl.addWidget(voice_title)
-        self.voice_diag_meta = QLabel("ASR: … · vocabulary: 0")
-        self.voice_diag_meta.setObjectName("muted")
-        sl.addWidget(self.voice_diag_meta)
-
-        self.voice_level = QProgressBar()
-        self.voice_level.setRange(0, 4000)
-        self.voice_level.setFormat("Mic level: %v")
-        sl.addWidget(self.voice_level)
-        self.voice_threshold = QProgressBar()
-        self.voice_threshold.setRange(0, 4000)
-        self.voice_threshold.setFormat("Echo/VAD threshold: %v")
-        sl.addWidget(self.voice_threshold)
-        self.voice_floor = QProgressBar()
-        self.voice_floor.setRange(0, 4000)
-        self.voice_floor.setFormat("Echo floor: %v")
-        sl.addWidget(self.voice_floor)
-
-        diag_row = QHBoxLayout()
-        self.voice_vad = QSpinBox()
-        self.voice_vad.setRange(40, 12000)
-        self.voice_vad.setSingleStep(20)
-        self.voice_vad.setPrefix("VAD ")
-        diag_row.addWidget(self.voice_vad)
-        self.voice_multiplier = QDoubleSpinBox()
-        self.voice_multiplier.setRange(1.0, 4.0)
-        self.voice_multiplier.setSingleStep(0.05)
-        self.voice_multiplier.setDecimals(2)
-        self.voice_multiplier.setPrefix("Gate × ")
-        diag_row.addWidget(self.voice_multiplier)
-        self.voice_margin = QSpinBox()
-        self.voice_margin.setRange(0, 4000)
-        self.voice_margin.setSingleStep(20)
-        self.voice_margin.setPrefix("Margin ")
-        diag_row.addWidget(self.voice_margin)
-        self.voice_alpha = QDoubleSpinBox()
-        self.voice_alpha.setRange(0.05, 0.95)
-        self.voice_alpha.setSingleStep(0.05)
-        self.voice_alpha.setDecimals(2)
-        self.voice_alpha.setPrefix("Adapt ")
-        diag_row.addWidget(self.voice_alpha)
-        sl.addLayout(diag_row)
-
-        diag_buttons = QHBoxLayout()
-        apply_voice = QPushButton("Применить калибровку")
-        apply_voice.clicked.connect(
-            lambda: self.voice_tune.emit(
-                int(self.voice_vad.value()),
-                float(self.voice_multiplier.value()),
-                int(self.voice_margin.value()),
-                float(self.voice_alpha.value()),
-            )
-        )
-        diag_buttons.addWidget(apply_voice)
-        reset_voice = QPushButton("Сбросить Voice Diagnostics")
-        reset_voice.clicked.connect(self.voice_diag_reset)
-        diag_buttons.addWidget(reset_voice)
-        diag_buttons.addStretch(1)
-        sl.addLayout(diag_buttons)
-
-        self.voice_diag_status = QLabel("Калибровка хранится только в RAM.")
-        self.voice_diag_status.setObjectName("muted")
-        self.voice_diag_status.setWordWrap(True)
-        sl.addWidget(self.voice_diag_status)
+        voice_link = QLabel("Голос, Baya, произношение и диагностика вынесены в отдельный раздел «Голос».")
+        voice_link.setObjectName("muted")
+        voice_link.setWordWrap(True)
+        sl.addWidget(voice_link)
 
         persona_title = QLabel("Persona Люмы")
         persona_title.setStyleSheet("font-size:16px; font-weight:700; margin-top:12px;")
@@ -1445,7 +1580,7 @@ class ControlCenter(QMainWindow):
             return
         self.stack.setCurrentIndex(row)
         key = self.nav.item(row).data(Qt.UserRole)
-        if key not in ("home", "chat"):
+        if key not in ("home", "chat", "voice"):
             self.refresh_page.emit(str(key))
 
     def set_pronunciation_payload(self, payload: dict[str, Any]) -> None:
@@ -1489,6 +1624,13 @@ class ControlCenter(QMainWindow):
             self.tts_model.setText(str(payload.get("piper_model_path") or payload.get("model_path") or ""))
             self.tts_speaker.setText(str(payload.get("piper_speaker") or ""))
         self.home.set_voice(
+            engine=engine,
+            speaker=speaker,
+            sample_rate=sample_rate,
+            model=model,
+            ready=ready,
+        )
+        self.voice_page.set_voice_profile(
             engine=engine,
             speaker=speaker,
             sample_rate=sample_rate,
