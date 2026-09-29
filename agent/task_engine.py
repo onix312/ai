@@ -179,12 +179,26 @@ class TaskEngine:
             )
         return rows
 
+    def replan_history(self, task_id: int) -> list[dict[str, Any]]:
+        rows = self.store._rows(
+            "SELECT * FROM assistant_task_replans WHERE task_id=? ORDER BY id DESC",
+            (int(task_id),),
+        )
+        for row in rows:
+            for field, target in (("old_tail_json", "old_tail"), ("new_tail_json", "new_tail")):
+                try:
+                    row[target] = json.loads(row.pop(field) or "[]")
+                except (ValueError, TypeError):
+                    row[target] = []
+        return rows
+
     def get(self, task_id: int) -> dict[str, Any] | None:
         rows = self.store._rows("SELECT * FROM assistant_tasks WHERE id=?", (int(task_id),))
         if not rows:
             return None
         task = rows[0]
         task["steps"] = self._rows(task_id)
+        task["replans"] = self.replan_history(task_id)
         task["progress"] = sum(1 for step in task["steps"] if step["status"] == "done")
         task["total_steps"] = len(task["steps"])
         return task
