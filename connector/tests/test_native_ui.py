@@ -66,7 +66,7 @@ class BackendClientTests(unittest.TestCase):
             client.voice_status()
             client.enable_voice()
             client.stop_voice()
-            client.tune_voice(1.8, 220, 0.3)
+            client.tune_voice(420, 1.8, 220, 0.3)
             client.reset_voice_diagnostics()
             client.disable_voice()
         self.assertEqual([
