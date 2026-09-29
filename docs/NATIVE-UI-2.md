@@ -159,8 +159,46 @@ into historical fact.
 
 The existing raw **Журнал** page is intentionally kept as a low-level fallback.
 
+## Phase 4 — Voice Diagnostics
+
+Phase 4 exposes Voice Engine 3 telemetry directly in Control Center settings.
+
+Live metrics:
+
+- microphone peak level;
+- VAD threshold;
+- learned echo floor;
+- effective echo threshold;
+- suppressed echo frame count;
+- ASR engine;
+- dynamic vocabulary size.
+
+Runtime controls:
+
+- echo-gate multiplier;
+- absolute echo margin;
+- echo-floor adaptation alpha;
+- reset learned acoustic floor and counters.
+
+Tuning is deliberately RAM-only. Applying calibration does not rewrite env
+files, user config or model settings. A restart returns to the configured
+defaults.
+
+Values are bounded server-side:
+
+- multiplier: 1.0..4.0;
+- margin: 0..4000;
+- alpha: 0.05..0.95.
+
+Status polling keeps telemetry live, but does not overwrite a tuning field while
+the user is actively editing that field group.
+
+The reset action clears only runtime acoustic learning and restores configured
+defaults. It does not delete vocabulary, memory, dialogue or audio because
+Voice Engine does not persist microphone audio.
+
 ## Next
 
-- Native UI 2.0 Phase 4: Voice 3 diagnostics / microphone tuning surface;
-- richer timeline filters and task drill-down when the activity volume warrants it;
-- optional HQ local TTS provider.
+- Native UI 2.0 Phase 5: richer timeline filters / task drill-down;
+- optional HQ local TTS provider behind SpeechQueue;
+- first-run voice calibration wizard if real-world testing shows it is useful.
