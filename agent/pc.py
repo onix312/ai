@@ -967,7 +967,7 @@ APPS: dict[str, dict[str, Any]] = {
                  "win_paths": ("Telegram Desktop\\Telegram.exe",), "appdata": True,
                  "linux": ["telegram-desktop"], "mac": ["open", "-a", "Telegram"]},
     "steam": {"title": "Steam", "words": ("steam", "стим", "стима", "стиме"),
-              "win_paths": ("Steam\\steam.exe",), "linux": ["steam"],
+              "win": ["uri:steam://open/main"], "linux": ["steam"],
               "mac": ["open", "-a", "Steam"]},
     "apex": {"title": "Apex Legends",
              "words": ("apex", "apex legends", "апекс", "апекс легендс", "апекс легенд"),
