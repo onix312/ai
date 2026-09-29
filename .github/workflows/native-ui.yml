@@ -37,7 +37,7 @@ jobs:
         run: >-
           python -m unittest
           connector.tests.test_native_ui
-          connector.tests.test_agent_brain.AgentHttpTests
+          connector.tests.test_agent_brain.ServerSecurityTests
 
 
   windows-ui-smoke:
