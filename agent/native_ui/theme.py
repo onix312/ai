@@ -251,6 +251,28 @@ def stylesheet() -> str:
         padding: 3px 0;
     }
 
+    QLabel#learningMeaning {
+        background: #0F1124;
+        color: #C9C4E3;
+        border-left: 2px solid #5E4AA3;
+        border-radius: 7px;
+        padding: 7px 9px;
+    }
+
+    QLabel#learningAlias {
+        background: transparent;
+        color: #EDE9FF;
+        font-size: 13px;
+        font-weight: 650;
+    }
+
+    QLabel#learningInsight {
+        background: transparent;
+        color: #F5F2FF;
+        font-size: 13px;
+        font-weight: 650;
+    }
+
     QPushButton#memoryPin {
         background: #151C31;
         color: #9DE9D0;
