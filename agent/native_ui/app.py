@@ -99,7 +99,7 @@ class NativeApp:
         def done(status: dict[str, Any]) -> None:
             self._busy_status = False
             self.state.apply_status(status)
-            if self._busy_chat:
+            if self._busy_chat and not self.state.activity_active:
                 self.state.assistant_state = "thinking"
             self._render_status()
 
@@ -154,14 +154,40 @@ class NativeApp:
             if self.orb.isVisible():
                 self.orb.set_state("error", 1800)
             return
+        self.center.chat.set_live_activity(
+            self.state.activity_phase,
+            self.state.activity_heard,
+            self.state.activity_reply,
+            self.state.activity_skill,
+            self.state.activity_detail,
+            self.state.activity_task_id,
+        )
         if self.state.safety_stopped:
             self.orb.set_state("stopped")
             self.orb.set_activity(0, "")
+            self.orb.set_live(detail="STOP ALL активен", recent=self.state.activity_recent)
             return
+        activity_state = {
+            "thinking": "thinking",
+            "speaking": "speaking",
+            "executing": "working",
+            "task": "working",
+            "waiting": "waiting",
+            "error": "error",
+        }.get(self.state.activity_phase, "")
         voice_state = self.state.assistant_state
-        if voice_state in ("listening", "thinking", "speaking", "error"):
-            self.orb.set_state(voice_state, 1800 if voice_state == "error" else 0)
+        display_state = activity_state if self.state.activity_active and activity_state else voice_state
+        if display_state in ("listening", "thinking", "speaking", "working", "waiting", "error"):
+            self.orb.set_state(display_state, 1800 if display_state == "error" else 0)
             self.orb.set_activity(self.state.audio_level, self.state.voice_partial)
+            self.orb.set_live(
+                heard=self.state.activity_heard,
+                reply=self.state.activity_reply,
+                skill=self.state.activity_skill,
+                detail=self.state.activity_detail,
+                task_id=self.state.activity_task_id,
+                recent=self.state.activity_recent,
+            )
         elif self.orb.isVisible() and not self._busy_chat:
             self.orb.hide()
 
