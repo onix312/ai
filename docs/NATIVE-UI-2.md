@@ -199,8 +199,56 @@ The reset action clears only runtime acoustic learning and restores configured
 defaults. It does not delete vocabulary, memory, dialogue or audio because
 Voice Engine does not persist microphone audio.
 
+## Phase 5 — Timeline filters and task drill-down
+
+The Activity page now supports local filtering by:
+
+- task;
+- task status;
+- free text across skill, result, outcome and detail.
+
+Selecting a specific task switches the timeline into drill-down mode.
+
+For every matching step the UI can show:
+
+- skill and step status;
+- started/finished timestamp;
+- verification status and reason;
+- verification evidence;
+- provider result stored by Task Engine;
+- pending confirmation id when present.
+
+### Durable replan linkage
+
+Task Engine already persisted applied replans in `assistant_task_replans`, but
+the task payload did not expose them.
+
+Phase 5 adds `task.replans` with:
+
+- timestamp;
+- replacement start step;
+- reason;
+- old tail;
+- new tail.
+
+The UI therefore shows the real applied route change rather than trying to
+infer it from journal text.
+
+Active, not-yet-applied Replanner drafts are loaded separately and displayed as
+drafts for the selected task.
+
+### Historical boundaries
+
+Verification evidence and provider results come from Task Engine durable step
+state. Executor journal remains the factual list of actions that reached
+Runner/Provider.
+
+The UI does not manufacture links between journal rows and tasks when the
+underlying journal schema has no task id.
+
 ## Next
 
-- Native UI 2.0 Phase 5: richer timeline filters / task drill-down;
 - optional HQ local TTS provider behind SpeechQueue;
-- first-run voice calibration wizard if real-world testing shows it is useful.
+- first-run voice calibration wizard if real-world testing shows it is useful;
+- add task/journal correlation ids only if future workflows need exact
+  cross-log joins.
