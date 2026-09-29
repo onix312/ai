@@ -83,6 +83,7 @@ class Agent:
             "updated_at": time.time(),
         }
         self._activity_recent: list[dict[str, Any]] = []
+        self._tts_preferences_loaded = False
         # Голос: фраза после стоп-слова идёт мозгу, ответ звучит вслух.
         self.microphone.handler = self.voice_phrase
         self.microphone.cancel_handler = lambda: self.brain.cancel_session("voice")
@@ -197,7 +198,53 @@ class Agent:
         """Исполнитель навыков: реестр, способности, своя база, клиент панели."""
         if self._runner is None:
             self._runner = executor.Runner()
+        if not self._tts_preferences_loaded:
+            self._restore_tts_preferences()
         return self._runner
+
+    def _restore_tts_preferences(self) -> None:
+        if self._runner is None or self._tts_preferences_loaded:
+            return
+        self._tts_preferences_loaded = True
+        try:
+            values = {}
+            for field in ("piper", "model", "speaker"):
+                row = self._runner.store.get_preference(f"tts.{field}")
+                values[field] = str((row or {}).get("value") or "")
+            pc.configure_tts(**values)
+        except Exception:
+            # TTS preferences must never prevent the local agent from starting.
+            pass
+
+    def tts_settings(self) -> dict[str, Any]:
+        _ = self.runner
+        return {"ok": True, **pc.tts_status()}
+
+    def update_tts_settings(self, payload: dict[str, Any]) -> dict[str, Any]:
+        op = str(payload.get("op") or "update").strip().casefold()
+        if op == "reset":
+            result = pc.reset_tts_config()
+            for field in ("piper", "model", "speaker"):
+                try:
+                    self.runner.store.delete_preference(f"tts.{field}")
+                except Exception:
+                    pass
+            return result
+
+        values = {
+            "piper": str(payload.get("piper") or "").strip(),
+            "model": str(payload.get("model") or "").strip(),
+            "speaker": str(payload.get("speaker") or "").strip(),
+        }
+        result = pc.configure_tts(**values)
+        if not result.get("ok"):
+            return result
+        for field, value in values.items():
+            if value:
+                self.runner.store.set_preference(f"tts.{field}", value)
+            else:
+                self.runner.store.delete_preference(f"tts.{field}")
+        return result
 
     @property
     def brain(self) -> brain_mod.Brain:
@@ -422,6 +469,7 @@ class Agent:
         self.state.voice_state = str(voice.get("state") or "idle")
         payload = self.state.payload(self.capabilities)
         payload["voice"] = voice
+        payload["tts"] = pc.tts_status()
         payload["model"] = (self.recognizer.name if self.recognizer.loaded
                             else self.capabilities.get("speech_model", ""))
         return payload
@@ -928,7 +976,9 @@ class AgentHandler(BaseHTTPRequestHandler):
         if path == "/health":
             return self._json(200, agent.health())
         if self.role == "speech" and path == "/voice/status":
-            return self._json(200, {"ok": True, **agent.microphone.status()})
+            return self._json(200, {"ok": True, **agent.microphone.status(), "tts": pc.tts_status()})
+        if self.role == "speech" and path == "/voice/tts":
+            return self._json(200, agent.tts_settings())
         if path == "/capabilities":
             caps = dict(agent.refresh_capabilities())
             # Живые связи: PrintFlow, модель и локальный Chromium DevTools.
@@ -1053,6 +1103,8 @@ class AgentHandler(BaseHTTPRequestHandler):
             return self._json(200, agent.disable_voice())
         if self.role == "speech" and path == "/voice/stop":
             return self._json(200, agent.stop_voice_output())
+        if self.role == "speech" and path == "/voice/tts":
+            return self._json(200, agent.update_tts_settings(body))
         if self.role == "speech" and path == "/voice/tune":
             return self._json(200, agent.microphone.tune(self._read_json()))
         if self.role == "speech" and path == "/voice/diagnostics/reset":
