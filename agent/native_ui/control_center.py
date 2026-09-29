@@ -606,7 +606,7 @@ class VoicePage(QWidget):
 
         preview = QPushButton("▶  Прослушать Baya")
         preview.setObjectName("primary")
-        preview.clicked.connect(self.tts_test)
+        preview.clicked.connect(lambda: self.tts_test.emit())
         hero_box.addWidget(preview)
         root.addWidget(hero)
 
@@ -654,7 +654,7 @@ class VoicePage(QWidget):
             )
         )
         reset_tts = QPushButton("Сбросить")
-        reset_tts.clicked.connect(self.tts_reset)
+        reset_tts.clicked.connect(lambda: self.tts_reset.emit())
         tts_buttons.addWidget(apply_tts)
         tts_buttons.addWidget(reset_tts)
         tts_buttons.addStretch(1)
@@ -785,7 +785,7 @@ class VoicePage(QWidget):
             )
         )
         reset_voice = QPushButton("Сбросить")
-        reset_voice.clicked.connect(self.voice_diag_reset)
+        reset_voice.clicked.connect(lambda: self.voice_diag_reset.emit())
         diag_buttons.addWidget(apply_voice)
         diag_buttons.addWidget(reset_voice)
         diagnostics.addLayout(diag_buttons)
