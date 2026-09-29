@@ -148,6 +148,25 @@ class BackendClientTests(unittest.TestCase):
              {"op": "approve", "id": "abc"}),
         ], calls)
 
+    def test_memory_api_uses_exact_agent_record_operations(self):
+        client = BackendClient()
+        calls = []
+
+        def fake(req, timeout=0):
+            body = json.loads(req.data.decode("utf-8")) if req.data else None
+            calls.append((req.get_method(), req.full_url, body))
+            return _Response({"ok": True})
+
+        with mock.patch("urllib.request.urlopen", fake):
+            client.memory("Мария")
+            client.memory_op("pin", 11, pinned=True)
+            client.memory_op("forget", 11)
+        self.assertEqual([
+            ("GET", "http://127.0.0.1:8799/memory?q=%D0%9C%D0%B0%D1%80%D0%B8%D1%8F&session=native", None),
+            ("POST", "http://127.0.0.1:8799/memory", {"op": "pin", "id": 11, "pinned": True}),
+            ("POST", "http://127.0.0.1:8799/memory", {"op": "forget", "id": 11}),
+        ], calls)
+
     def test_provider_catalog_uses_agent_port(self):
         client = BackendClient()
         urls = []
