@@ -1201,10 +1201,36 @@ class ActivityPage(QWidget):
         head.addWidget(refresh)
         layout.addLayout(head)
 
-        sub = QLabel("Фильтруемый маршрут: запрос → skill/task → verification → provider result.")
+        sub = QLabel("Живой маршрут: запрос → решение → skill/task → verification → provider result.")
         sub.setObjectName("muted")
         sub.setWordWrap(True)
         layout.addWidget(sub)
+
+        metrics = QHBoxLayout()
+        metrics.setSpacing(10)
+        self.activity_metric = QLabel("IDLE")
+        self.activity_metric.setObjectName("opsMetric")
+        self.running_metric = QLabel("0")
+        self.running_metric.setObjectName("opsMetric")
+        self.verified_metric = QLabel("0")
+        self.verified_metric.setObjectName("opsMetricReady")
+        self.failed_metric = QLabel("0")
+        self.failed_metric.setObjectName("opsMetricDanger")
+        for caption, value, accent in (
+            ("СЕЙЧАС", self.activity_metric, "violet"),
+            ("АКТИВНЫЕ ЗАДАЧИ", self.running_metric, "cyan"),
+            ("VERIFIED", self.verified_metric, ""),
+            ("ОШИБКИ", self.failed_metric, "amber"),
+        ):
+            card = GlassCard(accent)
+            box = QVBoxLayout(card)
+            box.setContentsMargins(13, 10, 13, 10)
+            label = QLabel(caption)
+            label.setObjectName("metricLabel")
+            box.addWidget(label)
+            box.addWidget(value)
+            metrics.addWidget(card, 1)
+        layout.addLayout(metrics)
 
         filters = QHBoxLayout()
         self.task_filter = QComboBox()
@@ -1220,12 +1246,13 @@ class ActivityPage(QWidget):
         filters.addWidget(self.status_filter)
 
         self.search_filter = QLineEdit()
-        self.search_filter.setPlaceholderText("skill / текст / outcome")
+        self.search_filter.setPlaceholderText("Поиск: skill, задача, outcome, provider…")
         self.search_filter.textChanged.connect(self._render)
         filters.addWidget(self.search_filter, 1)
         layout.addLayout(filters)
 
         self.browser = QTextBrowser()
+        self.browser.setObjectName("activityTimeline")
         layout.addWidget(self.browser, 1)
 
     @staticmethod
@@ -1242,17 +1269,30 @@ class ActivityPage(QWidget):
 
     def _activity_card(self, row: dict[str, Any], title: str) -> str:
         phase = str(row.get("phase") or "idle")
-        bits = [f"<b>{self._e(title)}</b> · {self._e(self.PHASES.get(phase, phase))}"]
+        phase_label = self._e(self.PHASES.get(phase, phase))
+        bits = [
+            "<div style='margin:10px 0;padding:14px 16px;background:#15172F;"
+            "border:1px solid #514487;border-radius:14px'>",
+            "<table width='100%' cellspacing='0'><tr><td>",
+            f"<span style='color:#A78BFA;font-size:10px;font-weight:700'>{self._e(title).upper()}</span>",
+            f"<br><b style='font-size:15px;color:#FFFFFF'>{phase_label}</b>",
+            "</td><td align='right'>",
+            f"<span style='color:#8BEACD;font-size:10px'>{self._e(row.get('skill') or 'LOCAL')}</span>",
+            "</td></tr></table>",
+        ]
         if row.get("heard"):
-            bits.append(f"<div>🎧 Вы: {self._e(row.get('heard'))}</div>")
+            bits.append(f"<div style='margin-top:9px;color:#B8B3CE'>🎧 <b>Вы:</b> {self._e(row.get('heard'))}</div>")
         if row.get("reply"):
-            bits.append(f"<div>💬 Люма: {self._e(row.get('reply'))}</div>")
+            bits.append(f"<div style='margin-top:4px;color:#ECE9F8'>💬 <b>Люма:</b> {self._e(row.get('reply'))}</div>")
         if row.get("skill"):
             task = f" · задача #{int(row.get('task_id') or 0)}" if row.get("task_id") else ""
-            bits.append(f"<div>⚡ {self._e(row.get('skill'))}{self._e(task)}</div>")
+            bits.append(
+                f"<div style='margin-top:8px;color:#8BEACD'>⚡ {self._e(row.get('skill'))}{self._e(task)}</div>"
+            )
         if row.get("detail"):
-            bits.append(f"<div><small>{self._e(row.get('detail'))}</small></div>")
-        return "<div style='margin:8px 0;padding:10px;border:1px solid #334155;border-radius:8px'>" + "".join(bits) + "</div>"
+            bits.append(f"<div style='margin-top:5px;color:#85819F'><small>{self._e(row.get('detail'))}</small></div>")
+        bits.append("</div>")
+        return "".join(bits)
 
     def _matches(self, *values: Any) -> bool:
         needle = " ".join(self.search_filter.text().casefold().split())
@@ -1267,25 +1307,27 @@ class ActivityPage(QWidget):
         result = step.get("result") if isinstance(step.get("result"), dict) else {}
         safe_result = {key: value for key, value in result.items() if key != "_verification"}
         bits = [
-            "<div style='margin-left:14px;padding:7px 0'>",
-            f"<b>{int(step.get('seq') or 0) + 1}. {self._e(step.get('skill'))}</b>",
-            f" · {self._e(step.get('status') or 'pending')}",
+            "<div style='margin:5px 0 5px 18px;padding:9px 11px;background:#0F1124;"
+            "border-left:3px solid #3B3F69;border-radius:8px'>",
+            f"<b style='color:#ECE9F8'>{int(step.get('seq') or 0) + 1:02d} · {self._e(step.get('skill'))}</b>",
+            f" · <span style='color:#9C98B7'>{self._e(step.get('status') or 'pending')}</span>",
         ]
         stamp = str(step.get("finished_at") or step.get("started_at") or "")
         if stamp:
             bits.append(f" · <small>{self._e(stamp)}</small>")
         if verification:
             bits.append(
-                f"<div>🔎 verification: <b>{self._e(verification.get('status'))}</b>"
+                f"<div style='margin-top:5px;color:#8BEACD'>🔎 verification: "
+                f"<b>{self._e(verification.get('status'))}</b>"
                 f" · {self._e(verification.get('reason'))}</div>"
             )
         if evidence:
             bits.append(
-                f"<div><small>evidence: {self._e(self._json_compact(evidence, 700))}</small></div>"
+                f"<div style='color:#7F7B99'><small>evidence: {self._e(self._json_compact(evidence, 700))}</small></div>"
             )
         if safe_result:
             bits.append(
-                f"<div><small>provider result: {self._e(self._json_compact(safe_result, 900))}</small></div>"
+                f"<div style='color:#7F7B99'><small>provider: {self._e(self._json_compact(safe_result, 900))}</small></div>"
             )
         pending = str(step.get("pending_action") or "")
         if pending:
@@ -1299,8 +1341,11 @@ class ActivityPage(QWidget):
         title = self._e(task.get("title") or f"Задача {task_id}")
         status = self._e(task.get("status") or "")
         chunks = [
-            "<div style='margin:10px 0;padding:10px;border:1px solid #334155;border-radius:8px'>",
-            f"<b>#{task_id} {title}</b> · {status}"
+            "<div style='margin:10px 0;padding:13px 15px;background:#111328;"
+            "border:1px solid #30345A;border-radius:13px'>",
+            f"<span style='color:#777493;font-size:10px'>TASK #{task_id}</span><br>"
+            f"<b style='color:#FFFFFF;font-size:14px'>{title}</b>"
+            f" · <span style='color:#A78BFA'>{status}</span>"
             f" · {int(task.get('progress') or 0)}/{int(task.get('total_steps') or len(steps))}",
         ]
         if task.get("error"):
@@ -1363,7 +1408,33 @@ class ActivityPage(QWidget):
             and self._matches(task.get("title"), task.get("goal"), task.get("status"), task.get("steps"))
         ]
 
-        chunks = ["<h3>Сейчас</h3>"]
+        current_phase = str(current.get("phase") or "idle").upper()
+        self.activity_metric.setText(current_phase)
+        self.running_metric.setText(str(sum(
+            1 for task in tasks if str(task.get("status") or "") in ("running", "waiting")
+        )))
+        all_steps = [
+            step for task in tasks for step in list(task.get("steps") or [])
+            if isinstance(step, dict)
+        ]
+        self.verified_metric.setText(str(sum(
+            1 for step in all_steps
+            if str((step.get("verification") or {}).get("status") or "") == "verified"
+        )))
+        self.failed_metric.setText(str(sum(
+            1 for task in tasks if str(task.get("status") or "") == "failed"
+        ) + sum(
+            1 for step in all_steps
+            if str((step.get("verification") or {}).get("status") or "") == "failed"
+        )))
+
+        section = lambda title, caption="": (
+            "<div style='margin:18px 0 7px 0'>"
+            f"<span style='color:#F5F2FF;font-size:15px;font-weight:700'>{self._e(title)}</span>"
+            + (f"<br><span style='color:#777493;font-size:10px'>{self._e(caption)}</span>" if caption else "")
+            + "</div>"
+        )
+        chunks = [section("Сейчас", "LIVE ROUTE")]
         if current and (current.get("active") or current.get("phase") != "idle") and self._matches(current):
             chunks.append(self._activity_card(current, "Текущий маршрут"))
         else:
@@ -1372,11 +1443,11 @@ class ActivityPage(QWidget):
         if recent and not selected_task:
             matching_recent = [row for row in recent[:4] if self._matches(row)]
             if matching_recent:
-                chunks.append("<h3>Недавние маршруты</h3>")
+                chunks.append(section("Недавние маршруты", "RECENT"))
                 for row in matching_recent:
                     chunks.append(self._activity_card(row, "Завершено"))
 
-        chunks.append("<h3>Задачи</h3>")
+        chunks.append(section("Задачи", "TASK ENGINE"))
         if filtered_tasks:
             for task in filtered_tasks[:20]:
                 chunks.append(self._task_card(task, detailed=bool(selected_task)))
@@ -1389,7 +1460,7 @@ class ActivityPage(QWidget):
             and self._matches(row.get("reason"), row.get("summary"), row.get("steps"))
         ]
         if matching_drafts:
-            chunks.append("<h3>Черновики replan</h3>")
+            chunks.append(section("Черновики replan", "ROUTE CHANGE"))
             for row in matching_drafts[:10]:
                 chunks.append(
                     f"<div><b>Задача #{int(row.get('task_id') or 0)}</b>"
@@ -1397,7 +1468,7 @@ class ActivityPage(QWidget):
                     f" · с шага {int(row.get('replace_from') or 0) + 1}</div>"
                 )
 
-        chunks.append("<h3>Фактические действия</h3>")
+        chunks.append(section("Фактические действия", "PROVIDER JOURNAL"))
         matching_journal = [
             row for row in journal
             if self._matches(row.get("skill"), row.get("outcome"), row.get("detail"),
@@ -1411,9 +1482,12 @@ class ActivityPage(QWidget):
                 stamp = self._e(row.get("at") or "")
                 suffix = f" · {target}" if target else ""
                 chunks.append(
-                    f"<div><small>{stamp}</small> · <b>{self._e(row.get('skill'))}</b>"
-                    f" · {outcome}{suffix}"
-                    + (f"<br><span style='margin-left:14px'>{detail}</span>" if detail else "")
+                    "<div style='margin:5px 0;padding:8px 10px;background:#0F1124;"
+                    "border-left:2px solid #343861;border-radius:7px'>"
+                    f"<small style='color:#777493'>{stamp}</small> · "
+                    f"<b style='color:#C9C4E3'>{self._e(row.get('skill'))}</b>"
+                    f" · <span style='color:#8BEACD'>{outcome}{suffix}</span>"
+                    + (f"<br><span style='color:#777493'>{detail}</span>" if detail else "")
                     + "</div>"
                 )
         else:
