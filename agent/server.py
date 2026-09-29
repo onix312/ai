@@ -222,6 +222,15 @@ class Agent:
 
     def update_tts_settings(self, payload: dict[str, Any]) -> dict[str, Any]:
         op = str(payload.get("op") or "update").strip().casefold()
+        if op == "pronunciations":
+            return tts_quality.pronunciation_payload()
+        if op == "pronunciation_set":
+            return tts_quality.set_pronunciation(
+                str(payload.get("source") or ""),
+                str(payload.get("target") or ""),
+            )
+        if op == "pronunciation_delete":
+            return tts_quality.delete_pronunciation(str(payload.get("source") or ""))
         if op == "test":
             phrase = str(payload.get("text") or "Привет. Я Люма. Проверяю локальный голос.").strip()
             state, reason = pc.speak(phrase[:240])
