@@ -10,7 +10,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QBuffer, QByteArray, QIODevice
 from PySide6.QtGui import QColor, QImage
-from PySide6.QtWidgets import QApplication, QLabel, QProgressBar, QPushButton
+from PySide6.QtWidgets import QApplication, QLabel, QLineEdit, QProgressBar, QPushButton
 
 from agent.native_ui.app import NativeApp
 from agent.native_ui.components import LumaPortrait
@@ -466,6 +466,29 @@ class NativeQtSmokeTests(unittest.TestCase):
             "count": 2,
             "layers": {"working": [], "episodic": [], "semantic": [], "user_model": []},
         })
+        center.set_page_payload("learning", {
+            "learned": [{
+                "id": 17, "phrase": "рабочий режим", "meaning_text": "открыть Telegram",
+                "source": "taught", "source_title": "научили", "uses": 3,
+                "good": 2, "bad": 0, "active": 1,
+            }],
+            "unknown": [{"id": 31, "text": "вруби рабочку", "count": 2,
+                         "last_at": "2026-09-29 21:00:00"}],
+            "aliases": [{"word": "телега", "meaning": "телеграм", "uses": 5}],
+            "insights": [{"text": "Обычно вечером вы открываете Steam.",
+                          "skill": "app.open", "phrase": "открой Steam",
+                          "days": 4, "hour": 20}],
+            "feedback": {"good": 8, "bad": 2},
+        })
+        center.set_page_payload("journal", {
+            "entries": [{
+                "id": 1, "at": "2026-09-29 20:00:00", "skill": "app.open",
+                "outcome": "ok", "detail": "Steam открыт", "target": "Steam",
+                "params": {"target": "steam"},
+            }],
+            "count": 1,
+            "stats": {"journal": 20},
+        })
         center.set_page_payload("activity", {
             "activity": {
                 "current": {
@@ -597,6 +620,11 @@ class NativeQtSmokeTests(unittest.TestCase):
                 filtered_memory.extend(label.text() for label in card.findChildren(QLabel))
         self.assertTrue(any("Мария любит PETG" in value for value in filtered_memory))
         self.assertFalse(any("Обычно печать начинается вечером" in value for value in filtered_memory))
+        self.assertIsInstance(center.pages["learning"], LearningPage)
+        self.assertEqual("1", center.pages["learning"].learned_metric.text())
+        self.assertEqual("1", center.pages["learning"].unknown_metric.text())
+        self.assertIsInstance(center.pages["journal"], JournalPage)
+        self.assertIn("Steam открыт", center.pages["journal"].browser.toPlainText())
         self.assertIsInstance(center.pages["activity"], ActivityPage)
         timeline = center.pages["activity"].browser.toPlainText()
         self.assertIn("открой телеграм", timeline)
