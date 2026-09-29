@@ -1072,7 +1072,7 @@ class AgentHandler(BaseHTTPRequestHandler):
         if self.role == "speech" and path == "/voice/stop":
             return self._json(200, agent.stop_voice_output())
         if self.role == "speech" and path == "/voice/tts":
-            return self._json(200, agent.update_tts_settings(body))
+            return self._json(200, agent.update_tts_settings(self._read_json()))
         if self.role == "speech" and path == "/voice/tune":
             return self._json(200, agent.microphone.tune(self._read_json()))
         if self.role == "speech" and path == "/voice/diagnostics/reset":
