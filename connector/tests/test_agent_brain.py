@@ -59,6 +59,8 @@ class PcHelpersTests(unittest.TestCase):
         self.assertEqual("notepad", pc.resolve_app("блокнот")[0])
         self.assertEqual("control", pc.resolve_app("панель управления")[0])
         self.assertEqual("orca", pc.resolve_app("открой орку")[0])
+        self.assertEqual("steam", pc.resolve_app("стим")[0])
+        self.assertEqual("apex", pc.resolve_app("apex legends")[0])
         self.assertIsNone(pc.resolve_app("format c:"))
         self.assertEqual("https://www.avito.ru/", pc.resolve_site("авито"))
         self.assertEqual("https://avito.ru/moskva", pc.resolve_site("avito.ru/moskva"))
@@ -76,6 +78,9 @@ class PcHelpersTests(unittest.TestCase):
             self.assertIn("вне разрешённых", pc.launch_plan(outside, roots=(tmp,))[1])
         self.assertEqual(["calc.exe"], pc.launch_plan("калькулятор", platform="win32")[0]["command"])
         self.assertEqual("exe", pc.launch_plan("bambu", platform="win32")[0]["kind"])
+        self.assertEqual("exe", pc.launch_plan("steam", platform="win32")[0]["kind"])
+        self.assertEqual(["uri:steam://rungameid/1172470"],
+                         pc.launch_plan("апекс", platform="win32")[0]["command"])
         self.assertIn("нет в списке", pc.launch_plan("rm -rf /")[1])
         self.assertIn("Скажите", pc.launch_plan("")[1])
 
@@ -228,6 +233,9 @@ class UnderstandTests(unittest.TestCase):
         "закрой блокнот": ("window.close", {"title": "блокнот"}),
         "нажми контрл с": ("system.hotkey", {"keys": "ctrl+c"}),
         "открой калькулятор": ("app.open", {"target": "калькулятор"}),
+        "Открой Steam": ("app.open", {"target": "steam"}),
+        "Открой стим": ("app.open", {"target": "стим"}),
+        "Открой apex": ("app.open", {"target": "apex"}),
         "как там компьютер": ("system.health", {}),
         "что грузит компьютер": ("system.process_list", {"limit": 8}),
         "поставь таймер на 25 минут": ("scheduler.focus_timer", {"minutes": 25, "note": ""}),
@@ -685,6 +693,67 @@ class BrainPanelTests(unittest.TestCase):
                          (answer["source"], answer["reply"]))
         self.brain.chat("запомни, что Мария любит PETG")
         self.assertEqual("memory", self.brain.chat("что ты помнишь про Марию")["source"], "своя память — первой")
+
+    def test_printer_camera_followup_uses_real_frame_and_local_vision(self):
+        self.panel.answer = {
+            "ok": True, "kind": "answer", "source": "facts",
+            "reply": "Парк сейчас: станков 1, печатают 1, прогресс 60%.",
+        }
+        self.brain.chat("Что там на принтере?")
+        frame = b"\xff\xd8\xffcamera-jpeg\xff\xd9"
+        self.panel.camera_frame = lambda: {
+            "ok": True, "image": frame, "mime": "image/jpeg",
+            "printer_id": "prn_test", "printer_name": "P1S",
+            "url": "http://127.0.0.1:8765/api/printer/camera.jpg?printer_id=prn_test",
+        }
+        with patch.object(model, "vision_ok", return_value=(True, "")), \
+                patch.object(model, "status", return_value={
+                    "ok": True, "url": "http://127.0.0.1:11434",
+                    "model": "gemma3:4b", "reason": "",
+                }), \
+                patch.object(model, "chat", return_value={
+                    "ok": True, "text": "Деталь стоит на столе, явных спагетти не вижу.",
+                    "model": "gemma3:4b", "reason": "",
+                }) as vision:
+            answer = self.brain.chat("Посмотри сам и скажи что там либо покажи картинку")
+        self.assertEqual("panel-camera", answer["source"])
+        self.assertIn("свежий кадр", answer["reply"].casefold())
+        self.assertIn("явных спагетти", answer["reply"])
+        self.assertEqual("prn_test", answer["image"]["printer_id"])
+        self.assertIn("/api/printer/camera.jpg", answer["image"]["url"])
+        self.assertEqual([frame], vision.call_args.kwargs["images"])
+
+    def test_printer_camera_is_still_shown_when_model_has_no_vision(self):
+        frame = b"\xff\xd8\xffcamera-jpeg\xff\xd9"
+        self.panel.camera_frame = lambda: {
+            "ok": True, "image": frame, "mime": "image/jpeg",
+            "printer_id": "prn_test", "printer_name": "P1S",
+            "url": "http://127.0.0.1:8765/api/printer/camera.jpg?printer_id=prn_test",
+        }
+        with patch.object(model, "vision_ok", return_value=(False, "модель не видит изображения")), \
+                patch.object(model, "chat") as vision:
+            answer = self.brain.chat("покажи картинку с принтера")
+        vision.assert_not_called()
+        self.assertEqual("panel-camera", answer["source"])
+        self.assertIn("показываю", answer["reply"])
+        self.assertIn("выдумывать не буду", answer["reply"])
+        self.assertEqual("image/jpeg", answer["image"]["mime"])
+
+    def test_visual_printer_followup_after_panel_status_does_not_fall_back_to_text_panel(self):
+        self.panel.answer = {
+            "ok": True, "kind": "answer", "source": "facts",
+            "reply": "Печать идёт, прогресс 60%.",
+        }
+        self.brain.chat("Что там на принтере?")
+        calls_before = len(self.panel.calls)
+        self.panel.camera_frame = lambda: {
+            "ok": False, "reason": "камера ещё не прислала кадр", "image": b"",
+        }
+        answer = self.brain.chat("Визуально как там всё?")
+        self.assertEqual("panel-camera", answer["source"])
+        self.assertIn("кадр сейчас недоступен", answer["reply"])
+        self.assertEqual(calls_before, len(self.panel.calls),
+                         "визуальный follow-up не должен спрашивать текстовый мозг панели")
 
     def test_follow_up_after_panel_answer_goes_to_panel_even_with_model(self):
         self.panel.answer = {"ok": True, "kind": "answer", "source": "entity", "reply": "Альфа: 40%, осталось ~1 ч."}
