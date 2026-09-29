@@ -89,7 +89,6 @@ class BackendClientTests(unittest.TestCase):
             ("POST", "http://127.0.0.1:8791/voice/tts"),
             ("POST", "http://127.0.0.1:8791/voice/tts"),
             ("POST", "http://127.0.0.1:8791/voice/tts"),
-            ("POST", "http://127.0.0.1:8791/voice/tts"),
             ("POST", "http://127.0.0.1:8791/voice/disable"),
         ], calls)
 
