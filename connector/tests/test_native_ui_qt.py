@@ -489,7 +489,11 @@ class NativeQtSmokeTests(unittest.TestCase):
         self.assertTrue(any("Обычно печать начинается вечером" in value for value in memory_labels))
         memory_page.search.setText("Мария")
         self.app.processEvents()
-        filtered_memory = [w.text() for w in memory_page.findChildren(QLabel)]
+        filtered_memory = []
+        for index in range(memory_page.host.count()):
+            card = memory_page.host.itemAt(index).widget()
+            if card is not None:
+                filtered_memory.extend(label.text() for label in card.findChildren(QLabel))
         self.assertTrue(any("Мария любит PETG" in value for value in filtered_memory))
         self.assertFalse(any("Обычно печать начинается вечером" in value for value in filtered_memory))
         self.assertIsInstance(center.pages["activity"], ActivityPage)
