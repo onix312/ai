@@ -111,6 +111,472 @@ class TextPage(QWidget):
                 "</td></tr></table>")
 
 
+class LearningPage(QWidget):
+    """Workspace for explicit lessons, unknown phrases, aliases and habit insights."""
+
+    refresh_requested = Signal()
+    action_requested = Signal(str, dict)
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._payload: dict[str, Any] = {}
+        root = QVBoxLayout(self)
+        root.setContentsMargins(2, 2, 2, 2)
+        root.setSpacing(12)
+
+        head = QHBoxLayout()
+        copy = QVBoxLayout()
+        title = QLabel("Обучение")
+        title.setObjectName("pageTitle")
+        copy.addWidget(title)
+        subtitle = QLabel("Что Люма уже выучила, что не поняла и какие устойчивые привычки заметила.")
+        subtitle.setObjectName("muted")
+        subtitle.setWordWrap(True)
+        copy.addWidget(subtitle)
+        head.addLayout(copy, 1)
+        refresh = QPushButton("Обновить")
+        refresh.clicked.connect(self.refresh_requested)
+        head.addWidget(refresh)
+        root.addLayout(head)
+
+        metrics = QHBoxLayout()
+        metrics.setSpacing(10)
+        self.learned_metric = QLabel("0")
+        self.learned_metric.setObjectName("opsMetricReady")
+        self.unknown_metric = QLabel("0")
+        self.unknown_metric.setObjectName("opsMetricDanger")
+        self.alias_metric = QLabel("0")
+        self.alias_metric.setObjectName("opsMetric")
+        self.insight_metric = QLabel("0")
+        self.insight_metric.setObjectName("opsMetric")
+        for caption, value, accent in (
+            ("ВЫУЧЕНО", self.learned_metric, "cyan"),
+            ("НЕПОНЯТО", self.unknown_metric, "amber"),
+            ("СИНОНИМЫ", self.alias_metric, "violet"),
+            ("ПРИВЫЧКИ", self.insight_metric, ""),
+        ):
+            card = GlassCard(accent)
+            box = QVBoxLayout(card)
+            box.setContentsMargins(13, 10, 13, 10)
+            label = QLabel(caption)
+            label.setObjectName("metricLabel")
+            box.addWidget(label)
+            box.addWidget(value)
+            metrics.addWidget(card, 1)
+        root.addLayout(metrics)
+
+        filters = QHBoxLayout()
+        self.search = QLineEdit()
+        self.search.setPlaceholderText("Поиск по фразам, значению и синонимам…")
+        self.search.textChanged.connect(self._render)
+        filters.addWidget(self.search, 1)
+        self.section_filter = QComboBox()
+        self.section_filter.addItem("Все разделы", "all")
+        self.section_filter.addItem("Выученное", "learned")
+        self.section_filter.addItem("Непонятое", "unknown")
+        self.section_filter.addItem("Синонимы", "aliases")
+        self.section_filter.addItem("Привычки", "insights")
+        self.section_filter.currentIndexChanged.connect(self._render)
+        filters.addWidget(self.section_filter)
+        root.addLayout(filters)
+
+        self.feedback_status = QLabel("FEEDBACK · 👍 0 · 👎 0")
+        self.feedback_status.setObjectName("voiceChain")
+        self.feedback_status.setWordWrap(True)
+        root.addWidget(self.feedback_status)
+
+        self.scroll = QScrollArea()
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setFrameShape(QFrame.NoFrame)
+        self.host_widget = QWidget()
+        self.host = QVBoxLayout(self.host_widget)
+        self.host.setAlignment(Qt.AlignTop)
+        self.host.setSpacing(9)
+        self.scroll.setWidget(self.host_widget)
+        root.addWidget(self.scroll, 1)
+
+    def _clear(self) -> None:
+        while self.host.count():
+            item = self.host.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+
+    def _section(self, title: str, caption: str = "") -> None:
+        row = QFrame()
+        row.setObjectName("taskSection")
+        box = QVBoxLayout(row)
+        box.setContentsMargins(2, 10, 2, 2)
+        box.setSpacing(1)
+        heading = QLabel(title)
+        heading.setObjectName("sectionTitle")
+        box.addWidget(heading)
+        if caption:
+            sub = QLabel(caption.upper())
+            sub.setObjectName("heroKicker")
+            box.addWidget(sub)
+        self.host.addWidget(row)
+
+    def _matches(self, *values: Any) -> bool:
+        needle = " ".join(self.search.text().casefold().split())
+        if not needle:
+            return True
+        return needle in " ".join(str(value or "") for value in values).casefold()
+
+    def _confirm_destructive(self, button: QPushButton, op: str, payload: dict[str, Any]) -> None:
+        if not bool(button.property("confirmArmed")):
+            button.setProperty("confirmArmed", True)
+            button.setText("Подтвердить удаление")
+            button.setToolTip("Повторный клик удалит эту выученную запись.")
+            button.style().unpolish(button)
+            button.style().polish(button)
+            return
+        button.setProperty("confirmArmed", False)
+        self.action_requested.emit(op, dict(payload))
+
+    def _teach_unknown(self, phrase: str, field: QLineEdit) -> None:
+        meaning = " ".join(field.text().split())
+        if not meaning:
+            field.setPlaceholderText("Сначала опиши, что Люма должна делать")
+            return
+        self.action_requested.emit("teach", {"phrase": phrase, "meaning": meaning})
+
+    def set_payload(self, payload: dict[str, Any]) -> None:
+        self._payload = dict(payload or {})
+        learned = [row for row in list(self._payload.get("learned") or []) if isinstance(row, dict)]
+        unknown = [row for row in list(self._payload.get("unknown") or []) if isinstance(row, dict)]
+        aliases = [row for row in list(self._payload.get("aliases") or []) if isinstance(row, dict)]
+        insights = [row for row in list(self._payload.get("insights") or []) if isinstance(row, dict)]
+        feedback = self._payload.get("feedback") if isinstance(self._payload.get("feedback"), dict) else {}
+
+        self.learned_metric.setText(str(sum(1 for row in learned if bool(row.get("active", 1)))))
+        self.unknown_metric.setText(str(len(unknown)))
+        self.alias_metric.setText(str(len(aliases)))
+        self.insight_metric.setText(str(len(insights)))
+        self.feedback_status.setText(
+            f"FEEDBACK · 👍 {int(feedback.get('good') or 0)} · 👎 {int(feedback.get('bad') or 0)}"
+        )
+        self._render()
+
+    def _render(self, *_args: Any) -> None:
+        self._clear()
+        mode = str(self.section_filter.currentData() or "all")
+        shown = 0
+
+        learned = [
+            row for row in list(self._payload.get("learned") or [])
+            if isinstance(row, dict) and self._matches(
+                row.get("phrase"), row.get("meaning_text"), row.get("source_title"), row.get("pattern")
+            )
+        ]
+        if learned and mode in ("all", "learned"):
+            self._section("Выученное", "LESSONS")
+            for row in learned[:100]:
+                active = bool(row.get("active", 1))
+                card = GlassCard("cyan" if active else "")
+                box = QVBoxLayout(card)
+                box.setContentsMargins(14, 11, 14, 11)
+                top = QHBoxLayout()
+                badge = QLabel(
+                    ("ACTIVE" if active else "INACTIVE")
+                    + " · " + str(row.get("source_title") or row.get("source") or "learned").upper()
+                )
+                badge.setObjectName("heroKicker")
+                top.addWidget(badge)
+                top.addStretch(1)
+                stats = QLabel(
+                    f"uses {int(row.get('uses') or 0)} · +{int(row.get('good') or 0)} / -{int(row.get('bad') or 0)}"
+                )
+                stats.setObjectName("muted")
+                top.addWidget(stats)
+                box.addLayout(top)
+                phrase = QLabel(str(row.get("phrase") or "Фраза"))
+                phrase.setObjectName("memoryText")
+                phrase.setWordWrap(True)
+                box.addWidget(phrase)
+                meaning = QLabel(str(row.get("meaning_text") or row.get("meaning") or ""))
+                meaning.setObjectName("learningMeaning")
+                meaning.setWordWrap(True)
+                box.addWidget(meaning)
+                if row.get("pattern"):
+                    pattern = QLabel(f"pattern: {row.get('pattern')}")
+                    pattern.setObjectName("memoryMeta")
+                    pattern.setWordWrap(True)
+                    box.addWidget(pattern)
+                actions = QHBoxLayout()
+                actions.addStretch(1)
+                forget = QPushButton("Забыть урок")
+                forget.setObjectName("danger")
+                forget.setProperty("confirmArmed", False)
+                entry_id = int(row.get("id") or 0)
+                forget.clicked.connect(
+                    lambda _=False, button=forget, i=entry_id:
+                    self._confirm_destructive(button, "forget", {"id": i})
+                )
+                actions.addWidget(forget)
+                box.addLayout(actions)
+                self.host.addWidget(card)
+                shown += 1
+
+        unknown = [
+            row for row in list(self._payload.get("unknown") or [])
+            if isinstance(row, dict) and self._matches(row.get("text"), row.get("norm"))
+        ]
+        if unknown and mode in ("all", "unknown"):
+            self._section("Непонятое", "TEACH ME")
+            for row in unknown[:40]:
+                card = GlassCard("amber")
+                box = QVBoxLayout(card)
+                box.setContentsMargins(14, 11, 14, 11)
+                top = QHBoxLayout()
+                phrase = QLabel(str(row.get("text") or "Непонятая фраза"))
+                phrase.setObjectName("memoryText")
+                phrase.setWordWrap(True)
+                top.addWidget(phrase, 1)
+                count = QLabel(f"×{int(row.get('count') or 1)}")
+                count.setObjectName("opsMetricDanger")
+                top.addWidget(count)
+                box.addLayout(top)
+                meta = QLabel(f"Последний раз: {str(row.get('last_at') or row.get('at') or '')}")
+                meta.setObjectName("muted")
+                box.addWidget(meta)
+                teach_row = QHBoxLayout()
+                meaning = QLineEdit()
+                meaning.setPlaceholderText("Что эта фраза означает / что нужно сделать")
+                teach_row.addWidget(meaning, 1)
+                teach = QPushButton("Научить")
+                teach.setObjectName("primary")
+                phrase_text = str(row.get("text") or "")
+                teach.clicked.connect(
+                    lambda _=False, p=phrase_text, field=meaning: self._teach_unknown(p, field)
+                )
+                teach_row.addWidget(teach)
+                dismiss = QPushButton("Скрыть")
+                unknown_id = int(row.get("id") or 0)
+                dismiss.clicked.connect(
+                    lambda _=False, i=unknown_id: self.action_requested.emit("dismiss", {"id": i})
+                )
+                teach_row.addWidget(dismiss)
+                box.addLayout(teach_row)
+                self.host.addWidget(card)
+                shown += 1
+
+        aliases = [
+            row for row in list(self._payload.get("aliases") or [])
+            if isinstance(row, dict) and self._matches(row.get("word"), row.get("meaning"))
+        ]
+        if aliases and mode in ("all", "aliases"):
+            self._section("Синонимы владельца", "ALIASES")
+            for row in aliases[:100]:
+                card = GlassCard("violet")
+                box = QHBoxLayout(card)
+                box.setContentsMargins(14, 11, 14, 11)
+                text = QLabel(
+                    f"{str(row.get('word') or '')}  →  {str(row.get('meaning') or '')}"
+                    f"   · uses {int(row.get('uses') or 0)}"
+                )
+                text.setObjectName("learningAlias")
+                text.setWordWrap(True)
+                box.addWidget(text, 1)
+                forget = QPushButton("Забыть")
+                forget.setObjectName("danger")
+                forget.setProperty("confirmArmed", False)
+                word = str(row.get("word") or "")
+                forget.clicked.connect(
+                    lambda _=False, button=forget, w=word:
+                    self._confirm_destructive(button, "alias_forget", {"word": w})
+                )
+                box.addWidget(forget)
+                self.host.addWidget(card)
+                shown += 1
+
+        insights = [
+            row for row in list(self._payload.get("insights") or [])
+            if isinstance(row, dict) and self._matches(row.get("text"), row.get("phrase"), row.get("skill"))
+        ]
+        if insights and mode in ("all", "insights"):
+            self._section("Замеченные привычки", "INSIGHTS · READ ONLY")
+            for row in insights[:20]:
+                card = GlassCard()
+                box = QVBoxLayout(card)
+                box.setContentsMargins(14, 11, 14, 11)
+                text = QLabel(str(row.get("text") or row.get("phrase") or "Наблюдение"))
+                text.setObjectName("learningInsight")
+                text.setWordWrap(True)
+                box.addWidget(text)
+                meta = QLabel(
+                    f"{str(row.get('skill') or '')} · {int(row.get('days') or 0)} дней"
+                    + (f" · около {int(row.get('hour')):02d}:00" if row.get("hour") is not None else "")
+                )
+                meta.setObjectName("muted")
+                box.addWidget(meta)
+                self.host.addWidget(card)
+                shown += 1
+
+        if not shown:
+            empty = GlassCard()
+            box = QVBoxLayout(empty)
+            title = QLabel("По этому фильтру ничего нет")
+            title.setObjectName("metricValueSmall")
+            box.addWidget(title)
+            hint = QLabel("Люма пополняет этот экран по мере диалога, исправлений и повторяющихся действий.")
+            hint.setObjectName("muted")
+            hint.setWordWrap(True)
+            box.addWidget(hint)
+            self.host.addWidget(empty)
+
+
+class JournalPage(QWidget):
+    """Read-only audit timeline of actual provider/skill executions."""
+
+    refresh_requested = Signal()
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._payload: dict[str, Any] = {}
+        root = QVBoxLayout(self)
+        root.setContentsMargins(2, 2, 2, 2)
+        root.setSpacing(12)
+
+        head = QHBoxLayout()
+        copy = QVBoxLayout()
+        title = QLabel("Журнал")
+        title.setObjectName("pageTitle")
+        copy.addWidget(title)
+        subtitle = QLabel("Фактический audit trail: что Люма вызвала, куда и с каким результатом.")
+        subtitle.setObjectName("muted")
+        subtitle.setWordWrap(True)
+        copy.addWidget(subtitle)
+        head.addLayout(copy, 1)
+        refresh = QPushButton("Обновить")
+        refresh.clicked.connect(self.refresh_requested)
+        head.addWidget(refresh)
+        root.addLayout(head)
+
+        metrics = QHBoxLayout()
+        metrics.setSpacing(10)
+        self.total_metric = QLabel("0")
+        self.total_metric.setObjectName("opsMetric")
+        self.ok_metric = QLabel("0")
+        self.ok_metric.setObjectName("opsMetricReady")
+        self.error_metric = QLabel("0")
+        self.error_metric.setObjectName("opsMetricDanger")
+        self.skills_metric = QLabel("0")
+        self.skills_metric.setObjectName("opsMetric")
+        for caption, value, accent in (
+            ("ПОКАЗАНО", self.total_metric, "violet"),
+            ("SUCCESS", self.ok_metric, "cyan"),
+            ("ERROR / DENIED", self.error_metric, "amber"),
+            ("SKILLS", self.skills_metric, ""),
+        ):
+            card = GlassCard(accent)
+            box = QVBoxLayout(card)
+            box.setContentsMargins(13, 10, 13, 10)
+            label = QLabel(caption)
+            label.setObjectName("metricLabel")
+            box.addWidget(label)
+            box.addWidget(value)
+            metrics.addWidget(card, 1)
+        root.addLayout(metrics)
+
+        filters = QHBoxLayout()
+        self.search = QLineEdit()
+        self.search.setPlaceholderText("Поиск по skill, target, detail, params…")
+        self.search.textChanged.connect(self._render)
+        filters.addWidget(self.search, 1)
+        self.outcome_filter = QComboBox()
+        self.outcome_filter.addItem("Все исходы", "")
+        self.outcome_filter.currentIndexChanged.connect(self._render)
+        filters.addWidget(self.outcome_filter)
+        root.addLayout(filters)
+
+        self.browser = QTextBrowser()
+        self.browser.setObjectName("activityTimeline")
+        root.addWidget(self.browser, 1)
+
+    @staticmethod
+    def _e(value: Any) -> str:
+        return html.escape(" ".join(str(value or "").split()))
+
+    @staticmethod
+    def _params(value: Any) -> str:
+        if not isinstance(value, dict) or not value:
+            return ""
+        try:
+            return json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)[:700]
+        except Exception:
+            return str(value)[:700]
+
+    def set_payload(self, payload: dict[str, Any]) -> None:
+        self._payload = dict(payload or {})
+        rows = [row for row in list(self._payload.get("entries") or []) if isinstance(row, dict)]
+        current = str(self.outcome_filter.currentData() or "")
+        outcomes = sorted({str(row.get("outcome") or "unknown") for row in rows})
+        self.outcome_filter.blockSignals(True)
+        self.outcome_filter.clear()
+        self.outcome_filter.addItem("Все исходы", "")
+        for outcome in outcomes:
+            self.outcome_filter.addItem(outcome, outcome)
+        index = self.outcome_filter.findData(current)
+        self.outcome_filter.setCurrentIndex(index if index >= 0 else 0)
+        self.outcome_filter.blockSignals(False)
+
+        self.total_metric.setText(str(len(rows)))
+        self.ok_metric.setText(str(sum(
+            1 for row in rows if str(row.get("outcome") or "").casefold() in ("ok", "success", "done")
+        )))
+        self.error_metric.setText(str(sum(
+            1 for row in rows if str(row.get("outcome") or "").casefold()
+            in ("error", "failed", "denied", "blocked", "cancelled")
+        )))
+        self.skills_metric.setText(str(len({str(row.get("skill") or "") for row in rows if row.get("skill")})))
+        self._render()
+
+    def _render(self, *_args: Any) -> None:
+        rows = [row for row in list(self._payload.get("entries") or []) if isinstance(row, dict)]
+        needle = " ".join(self.search.text().casefold().split())
+        wanted = str(self.outcome_filter.currentData() or "")
+        filtered = []
+        for row in rows:
+            if wanted and str(row.get("outcome") or "") != wanted:
+                continue
+            hay = " ".join(str(row.get(key) or "") for key in ("skill", "outcome", "detail", "target"))
+            hay += " " + self._params(row.get("params"))
+            if needle and needle not in hay.casefold():
+                continue
+            filtered.append(row)
+
+        chunks = [
+            "<div style='margin:2px 0 12px 0;color:#777493;font-size:10px'>"
+            "READ ONLY AUDIT · newest first</div>"
+        ]
+        if not filtered:
+            chunks.append("<div style='padding:18px;color:#777493'>Записей по фильтру нет.</div>")
+        for row in filtered[:120]:
+            outcome = str(row.get("outcome") or "unknown")
+            ok = outcome.casefold() in ("ok", "success", "done")
+            tone = "#78EDC6" if ok else "#F5B84C"
+            params = self._params(row.get("params"))
+            chunks.append(
+                "<div style='margin:7px 0;padding:11px 13px;background:#101225;"
+                "border:1px solid #2A2D4C;border-radius:11px'>"
+                "<table width='100%' cellspacing='0'><tr><td>"
+                f"<span style='color:#777493;font-size:10px'>{self._e(row.get('at'))}</span><br>"
+                f"<b style='color:#F5F2FF;font-size:13px'>{self._e(row.get('skill'))}</b>"
+                "</td><td align='right'>"
+                f"<span style='color:{tone};font-size:10px;font-weight:700'>{self._e(outcome).upper()}</span>"
+                "</td></tr></table>"
+                + (f"<div style='margin-top:5px;color:#B8B3CE'>target · {self._e(row.get('target'))}</div>"
+                   if row.get("target") else "")
+                + (f"<div style='margin-top:3px;color:#ECE9F8'>{self._e(row.get('detail'))}</div>"
+                   if row.get("detail") else "")
+                + (f"<div style='margin-top:4px;color:#777493'><small>{self._e(params)}</small></div>"
+                   if params else "")
+                + "</div>"
+            )
+        self.browser.setHtml("".join(chunks))
+
+
 class MemoryPage(QWidget):
     """Long-term memory map with explicit pin/forget controls."""
 
