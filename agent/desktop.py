@@ -27,13 +27,20 @@ def _bundle_root() -> pathlib.Path:
 
 def _apply_packaged_defaults() -> None:
     root = _bundle_root()
-    model = root / "models" / "tts" / "luma.onnx"
+    model_candidates = (
+        root / "models" / "tts" / "luma.onnx",
+        root.parent / "models" / "tts" / "luma.onnx",
+    )
     piper_candidates = (
         root / "piper" / "piper.exe",
         root / "piper.exe",
+        root.parent / "piper" / "piper.exe",
     )
-    if model.is_file() and not os.environ.get("LUMA_TTS_MODEL_PATH"):
-        os.environ["LUMA_TTS_MODEL_PATH"] = str(model)
+    if not os.environ.get("LUMA_TTS_MODEL_PATH"):
+        for model in model_candidates:
+            if model.is_file():
+                os.environ["LUMA_TTS_MODEL_PATH"] = str(model)
+                break
     if not os.environ.get("LUMA_TTS_PIPER"):
         for candidate in piper_candidates:
             if candidate.is_file():
