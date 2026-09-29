@@ -291,6 +291,10 @@ class TaskEngine:
         return True, "", policy.payload()
 
     def start(self, task_id: int) -> dict[str, Any]:
+        stopped = getattr(self.agent, "execution_stopped", None)
+        if callable(stopped) and stopped():
+            return {"ok": False, "reason": "STOP ALL активен", "stopped": True,
+                    "task": self.get(task_id)}
         allowed, why, policy = autonomy.check_agent(self.agent, "operator", "core")
         if not allowed:
             return {"ok": False, "reason": why, "autonomy_blocked": True,
@@ -317,6 +321,10 @@ class TaskEngine:
         return {"ok": True, "started": True, "task": self.get(task_id)}
 
     def run_sync(self, task_id: int) -> dict[str, Any]:
+        stopped = getattr(self.agent, "execution_stopped", None)
+        if callable(stopped) and stopped():
+            return {"ok": False, "reason": "STOP ALL активен", "stopped": True,
+                    "task": self.get(task_id)}
         allowed, why, policy = autonomy.check_agent(self.agent, "operator", "core")
         if not allowed:
             return {"ok": False, "reason": why, "autonomy_blocked": True,
