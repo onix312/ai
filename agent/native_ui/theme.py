@@ -253,6 +253,22 @@ def stylesheet() -> str:
         padding: 5px;
     }
 
+    QTextBrowser#settingsDataView {
+        background: #0D0F20;
+        border: 1px solid #25294A;
+        border-radius: 11px;
+        padding: 4px;
+    }
+
+    QLabel#settingsStatus {
+        background: #10282A;
+        color: #89F2CE;
+        border: 1px solid #265956;
+        border-radius: 10px;
+        padding: 7px 10px;
+        font-weight: 650;
+    }
+
     QTextBrowser#activityTimeline {
         background: #0B0D1B;
         border: 1px solid #25294A;
