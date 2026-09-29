@@ -79,6 +79,8 @@ class NativeApp:
         self.center.tts_test.connect(self.test_tts)
         self.center.pronunciation_add.connect(self.add_pronunciation)
         self.center.pronunciation_delete.connect(self.delete_pronunciation)
+        self.center.memory_pin.connect(self.memory_pin)
+        self.center.memory_forget.connect(self.memory_forget)
         self.center.task_command.connect(self.task_command)
         self.center.plan_preview.connect(self.plan_preview)
         self.center.plan_command.connect(self.plan_command)
@@ -493,6 +495,36 @@ class NativeApp:
             self.refresh_page("tasks")
 
         self.run_async(lambda: self.backend.replan_op("preview", task_id=task_id), done)
+
+    def memory_pin(self, memory_id: int, pinned: bool) -> None:
+        if int(memory_id or 0) <= 0:
+            return
+
+        def done(payload: dict[str, Any]) -> None:
+            if not payload.get("ok"):
+                self.quick.show_answer(str(payload.get("reason") or "Не удалось изменить память."))
+            self.refresh_page("memory")
+
+        self.run_async(
+            lambda: self.backend.memory_op("pin", int(memory_id), pinned=bool(pinned)),
+            done,
+        )
+
+    def memory_forget(self, memory_id: int) -> None:
+        if int(memory_id or 0) <= 0:
+            return
+
+        def done(payload: dict[str, Any]) -> None:
+            if payload.get("ok"):
+                self.quick.show_answer("Запись удалена из памяти.")
+            else:
+                self.quick.show_answer(str(payload.get("reason") or "Не удалось удалить запись."))
+            self.refresh_page("memory")
+
+        self.run_async(
+            lambda: self.backend.memory_op("forget", int(memory_id)),
+            done,
+        )
 
     def save_persona(self, profile: dict[str, Any]) -> None:
         def done(payload: dict[str, Any]) -> None:
