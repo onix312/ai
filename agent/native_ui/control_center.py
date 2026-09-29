@@ -160,6 +160,26 @@ class ChatPage(QWidget):
         live_row.addWidget(self.live_orb, 0, Qt.AlignVCenter)
         layout.addWidget(live_card)
 
+        self.trace_card = GlassCard()
+        trace_box = QVBoxLayout(self.trace_card)
+        trace_box.setContentsMargins(12, 9, 12, 10)
+        trace_box.setSpacing(5)
+        trace_head = QHBoxLayout()
+        trace_title = QLabel("ХОД ВЫПОЛНЕНИЯ")
+        trace_title.setObjectName("heroKicker")
+        trace_head.addWidget(trace_title)
+        trace_head.addStretch(1)
+        self.trace_badge = QLabel("LOCAL")
+        self.trace_badge.setObjectName("tracePill")
+        trace_head.addWidget(self.trace_badge)
+        trace_box.addLayout(trace_head)
+        self.trace_text = QLabel("")
+        self.trace_text.setObjectName("actionTrace")
+        self.trace_text.setWordWrap(True)
+        trace_box.addWidget(self.trace_text)
+        self.trace_card.hide()
+        layout.addWidget(self.trace_card)
+
         self.camera_card = GlassCard("cyan")
         camera_box = QVBoxLayout(self.camera_card)
         camera_box.setContentsMargins(10, 9, 10, 10)
@@ -307,12 +327,46 @@ class ChatPage(QWidget):
         if not self._turns:
             self.camera_card.hide()
             self.camera_frame.clear()
+            self.clear_action_trace()
         self._render_turns()
 
     def append_local(self, who: str, text: str) -> None:
         role = "user" if str(who or "").casefold() in {"вы", "user"} else "assistant"
         self._turns.append({"role": role, "text": str(text or "")})
         self._render_turns()
+
+    def clear_action_trace(self) -> None:
+        self.trace_text.clear()
+        self.trace_card.hide()
+
+    def show_action_trace(self, steps: list[dict[str, Any]] | None) -> None:
+        """Show explicit operational stages returned by the agent, never hidden model reasoning."""
+        rows = [row for row in list(steps or []) if isinstance(row, dict)]
+        if not rows:
+            self.clear_action_trace()
+            return
+        icons = {
+            "rule": "◆", "context": "◇", "model": "◉", "check": "✓",
+            "skill": "→", "task": "▰", "panel": "⌁", "learned": "✦",
+            "plan": "≋",
+        }
+        lines = []
+        for row in rows[-6:]:
+            kind = str(row.get("kind") or "").casefold()
+            title = " ".join(str(row.get("title") or "").split())
+            detail = " ".join(str(row.get("detail") or "").split())
+            if not title:
+                continue
+            line = f"{icons.get(kind, '·')} {title}"
+            if detail:
+                line += f"  ·  {detail[:150]}"
+            lines.append(line)
+        if not lines:
+            self.clear_action_trace()
+            return
+        self.trace_text.setText("\n".join(lines))
+        self.trace_badge.setText("LOCAL · " + str(len(lines)) + " ШАГ.")
+        self.trace_card.show()
 
     def show_camera_image(self, data: bytes, title: str = "") -> bool:
         pixmap = QPixmap()
@@ -1282,12 +1336,34 @@ class TasksPage(QWidget):
         for task in tasks:
             card = QFrame()
             card.setObjectName("glassCard")
-            box = QVBoxLayout(card)
-            title = str(task.get("title") or f"Задача {task.get('id')}")
             status = str(task.get("status") or "planned")
+            card.setProperty("accent", "cyan" if status in ("running", "waiting") else "violet")
+            box = QVBoxLayout(card)
+            box.setSpacing(8)
+            title = str(task.get("title") or f"Задача {task.get('id')}")
             progress = int(task.get("progress") or 0)
             total = int(task.get("total_steps") or 0)
-            box.addWidget(QLabel(f"{title}  ·  {status}  ·  {progress}/{total}"))
+
+            task_head = QHBoxLayout()
+            title_label = QLabel(title)
+            title_label.setObjectName("taskTitle")
+            title_label.setWordWrap(True)
+            task_head.addWidget(title_label, 1)
+            status_label = QLabel(status.upper())
+            status_label.setObjectName("taskStatus")
+            task_head.addWidget(status_label, 0, Qt.AlignTop)
+            box.addLayout(task_head)
+
+            progress_bar = QProgressBar()
+            progress_bar.setObjectName("taskProgress")
+            progress_bar.setTextVisible(False)
+            progress_bar.setRange(0, max(1, total))
+            progress_bar.setValue(max(0, min(progress, max(1, total))))
+            box.addWidget(progress_bar)
+            progress_meta = QLabel(f"{progress}/{total} шагов")
+            progress_meta.setObjectName("muted")
+            box.addWidget(progress_meta)
+
             steps = list(task.get("steps") or [])
             checks = [
                 str((step.get("verification") or {}).get("status") or "")
@@ -1304,15 +1380,47 @@ class TasksPage(QWidget):
                 check_label = QLabel("Проверка: " + " · ".join(parts))
                 check_label.setObjectName("muted")
                 box.addWidget(check_label)
-            current_index = int(task.get("current_step") or 0)
+
+            current_raw = task.get("current_step")
+            current_index = int(current_raw if current_raw is not None else progress)
+            for step in steps:
+                seq = int(step.get("seq") or 0)
+                step_status = str(step.get("status") or "")
+                if not step_status:
+                    if seq < progress:
+                        step_status = "done"
+                    elif seq == current_index and status not in ("done", "cancelled"):
+                        step_status = "running"
+                    else:
+                        step_status = "pending"
+                verification = str((step.get("verification") or {}).get("status") or "")
+                symbol = {
+                    "done": "✓", "running": "●", "waiting": "◌",
+                    "failed": "×", "cancelled": "−", "pending": "○",
+                }.get(step_status, "○")
+                text_line = f"{symbol}  {seq + 1:02d}  {step.get('title') or step.get('skill') or 'Шаг'}"
+                text_line += f"  ·  {step_status}"
+                if verification:
+                    text_line += f"  ·  {verification}"
+                params = dict(step.get("params") or {})
+                if params:
+                    compact = ", ".join(f"{key}={value}" for key, value in list(params.items())[:3])
+                    text_line += f"\n      {compact}"
+                step_label = QLabel(text_line)
+                step_label.setWordWrap(True)
+                step_label.setObjectName("taskStepCurrent" if seq == current_index and status not in ("done", "cancelled")
+                                         else "taskStep")
+                box.addWidget(step_label)
+
             current = next((step for step in steps if int(step.get("seq") or 0) == current_index), None)
             if current and status not in ("done", "cancelled"):
-                detail = QLabel(f"Сейчас: {current.get('skill') or 'шаг'}")
-                detail.setObjectName("muted")
+                detail = QLabel(f"Сейчас выполняю: {current.get('title') or current.get('skill') or 'шаг'}")
+                detail.setObjectName("taskNow")
+                detail.setWordWrap(True)
                 box.addWidget(detail)
             if task.get("error"):
                 error = QLabel(str(task.get("error")))
-                error.setObjectName("muted")
+                error.setObjectName("taskError")
                 error.setWordWrap(True)
                 box.addWidget(error)
             buttons = QHBoxLayout()
