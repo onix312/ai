@@ -142,7 +142,7 @@ def _normalize_urls(text: str) -> str:
 
 
 def _normalize_symbols(text: str) -> str:
-    text = re.sub(r"(?<=\d)\s*%\b?", " процентов", text)
+    text = re.sub(r"(?<=\d)\s*%", " процентов", text)
     text = text.replace("°C", " градусов Цельсия")
     text = text.replace("°", " градусов")
     text = re.sub(r"(?<=\d)\s*GB\b", " гигабайт", text, flags=re.IGNORECASE)
