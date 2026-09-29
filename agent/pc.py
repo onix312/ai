@@ -1256,6 +1256,9 @@ def tts_status() -> dict[str, Any]:
         "piper": bool(executable),
         "model_ready": pathlib.Path(model).is_file(),
         "recommended_voice": "ru_RU-irina-medium",
+        "last_engine": str(_TTS_METRICS.get("last_engine") or ""),
+        "last_synth_ms": int(_TTS_METRICS.get("last_synth_ms") or 0),
+        "last_chars": int(_TTS_METRICS.get("last_chars") or 0),
     }
 
 
@@ -1272,6 +1275,7 @@ _TTS_LOCK = threading.RLock()
 _TTS_PROCESS: subprocess.Popen | None = None
 _TTS_TEMP_FILE = ""
 _TTS_OVERRIDES: dict[str, str] = {"piper": "", "model": "", "speaker": ""}
+_TTS_METRICS: dict[str, Any] = {"last_engine": "", "last_synth_ms": 0, "last_chars": 0}
 _LAST_TTS_TEXT = ""
 _LAST_TTS_AT = 0.0
 
@@ -1431,6 +1435,7 @@ def _system_speak(clean: str, rate: int, volume: int, engine: str = "") -> tuple
         _TTS_PROCESS = process
         _LAST_TTS_TEXT = clean
         _LAST_TTS_AT = time.time()
+        _TTS_METRICS.update({"last_engine": engine, "last_synth_ms": 0, "last_chars": len(clean)})
     return {"engine": engine, "chars": len(clean), "pid": process.pid}, ""
 
 
@@ -1474,6 +1479,7 @@ def _piper_speak(clean: str, rate: int, volume: int) -> tuple[dict[str, Any], st
 
     flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if IS_WINDOWS else 0
     stop_speaking()
+    synth_started = time.perf_counter()
     try:
         synth = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
                                  stderr=subprocess.PIPE, creationflags=flags)
@@ -1500,7 +1506,10 @@ def _piper_speak(clean: str, rate: int, volume: int) -> tuple[dict[str, Any], st
             return {}, "Озвучка остановлена"
         _TTS_PROCESS = None
 
+    synth_ms = max(0, int((time.perf_counter() - synth_started) * 1000))
     if synth.returncode:
+        with _TTS_LOCK:
+            _TTS_METRICS.update({"last_engine": "piper", "last_synth_ms": synth_ms, "last_chars": len(clean)})
         _cleanup_tts_file(wav_path)
         detail = bytes(stderr or b"").decode("utf-8", "replace").strip().splitlines()
         reason = detail[-1][:180] if detail else f"код {synth.returncode}"
@@ -1528,6 +1537,7 @@ def _piper_speak(clean: str, rate: int, volume: int) -> tuple[dict[str, Any], st
     with _TTS_LOCK:
         _TTS_PROCESS = playback
         _TTS_TEMP_FILE = wav_path
+        _TTS_METRICS.update({"last_engine": "piper", "last_synth_ms": synth_ms, "last_chars": len(clean)})
     return {
         "engine": "piper",
         "chars": len(clean),
@@ -1536,6 +1546,7 @@ def _piper_speak(clean: str, rate: int, volume: int) -> tuple[dict[str, Any], st
         "speaker": speaker,
         "rate": rate,
         "volume": volume,
+        "synth_ms": synth_ms,
     }, ""
 
 
