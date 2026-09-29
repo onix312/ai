@@ -173,7 +173,7 @@ class NativeApp:
         self.center.update_status(
             self.state.connected, self.state.voice_enabled, self.state.model_ok,
             self.state.panel_ok, self.state.last_error,
-            self.state.safety_stopped,
+            self.state.safety_stopped, self.state.assistant_state,
         )
         if not self.state.connected:
             if self.orb.isVisible():
@@ -185,7 +185,10 @@ class NativeApp:
             "model": self.state.tts_model,
             "model_path": self.state.tts_model_path,
             "piper_path": self.state.tts_piper_path,
+            "piper_model_path": self.state.tts_piper_model_path,
+            "piper_speaker": self.state.tts_piper_speaker,
             "speaker": self.state.tts_speaker,
+            "sample_rate": self.state.tts_sample_rate,
             "model_ready": self.state.tts_model_ready,
             "last_synth_ms": self.state.tts_last_synth_ms,
             "last_chars": self.state.tts_last_chars,
