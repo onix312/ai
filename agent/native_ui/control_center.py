@@ -1309,7 +1309,8 @@ class ControlCenter(QMainWindow):
         self.voice_diag_status.setText(str(text or ""))
 
     def update_status(self, connected: bool, armed: bool, model_ok: bool,
-                      panel_ok: bool, error: str = "", safety_stopped: bool = False) -> None:
+                      panel_ok: bool, error: str = "", safety_stopped: bool = False,
+                      assistant_state: str = "idle") -> None:
         self.brand_card.set_online(connected)
         self.status_header.set_status(
             connected=connected,
@@ -1318,6 +1319,7 @@ class ControlCenter(QMainWindow):
             panel_ok=panel_ok,
             safety_stopped=safety_stopped,
             error=error,
+            assistant_state=assistant_state,
         )
         if connected:
             bits = ["Люма ✓", "модель ✓" if model_ok else "модель –",
