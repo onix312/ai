@@ -65,6 +65,9 @@ class VoiceRuntime:
         self.echo_floor = 0.0
         self.echo_threshold = int(config.VOICE_VAD_THRESHOLD)
         self.echo_suppressed = 0
+        self.echo_gate_multiplier = float(config.VOICE_ECHO_GATE_MULTIPLIER)
+        self.echo_gate_margin = int(config.VOICE_ECHO_GATE_MARGIN)
+        self.echo_floor_alpha = float(config.VOICE_ECHO_FLOOR_ALPHA)
         self.streaming_asr = False
         self.last_error = ""
         self.state = "idle"
@@ -105,6 +108,10 @@ class VoiceRuntime:
             "echo_floor": int(self.echo_floor),
             "echo_threshold": int(self.echo_threshold),
             "echo_suppressed": int(self.echo_suppressed),
+            "echo_gate_multiplier": float(self.echo_gate_multiplier),
+            "echo_gate_margin": int(self.echo_gate_margin),
+            "echo_floor_alpha": float(self.echo_floor_alpha),
+            "vad_threshold": int(config.VOICE_VAD_THRESHOLD),
             "streaming_asr": bool(self.streaming_asr),
             "asr_engine": str(getattr(self.recognizer, "name", "") or ""),
             "vocabulary_count": len(self.vocabulary_terms),
@@ -163,6 +170,30 @@ class VoiceRuntime:
             pc.stop_speaking()
         except Exception:
             pass
+
+    def tune(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Adjust lightweight echo-gate tuning at runtime. RAM-only."""
+        data = payload or {}
+        try:
+            if "multiplier" in data:
+                self.echo_gate_multiplier = min(4.0, max(1.0, float(data["multiplier"])))
+            if "margin" in data:
+                self.echo_gate_margin = min(4000, max(0, int(data["margin"])))
+            if "alpha" in data:
+                self.echo_floor_alpha = min(0.95, max(0.05, float(data["alpha"])))
+        except (TypeError, ValueError):
+            return {"ok": False, "reason": "Некорректные параметры Voice Diagnostics", **self.status()}
+        return {"ok": True, **self.status()}
+
+    def reset_diagnostics(self) -> dict[str, Any]:
+        """Reset learned acoustic floor/counters and restore default tuning."""
+        self.echo_floor = 0.0
+        self.echo_threshold = int(config.VOICE_VAD_THRESHOLD)
+        self.echo_suppressed = 0
+        self.echo_gate_multiplier = float(config.VOICE_ECHO_GATE_MULTIPLIER)
+        self.echo_gate_margin = int(config.VOICE_ECHO_GATE_MARGIN)
+        self.echo_floor_alpha = float(config.VOICE_ECHO_FLOOR_ALPHA)
+        return {"ok": True, **self.status()}
 
     def stop_output(self) -> dict[str, Any]:
         from . import pc
@@ -316,14 +347,14 @@ class VoiceRuntime:
             if speaking_now and not started and self.echo_floor > 0:
                 threshold = max(
                     threshold,
-                    int(self.echo_floor * float(config.VOICE_ECHO_GATE_MULTIPLIER)),
-                    int(self.echo_floor + int(config.VOICE_ECHO_GATE_MARGIN)),
+                    int(self.echo_floor * float(self.echo_gate_multiplier)),
+                    int(self.echo_floor + int(self.echo_gate_margin)),
                 )
             self.echo_threshold = threshold
             loud = level >= threshold
             if speaking_now and not started:
                 if not loud:
-                    alpha = float(config.VOICE_ECHO_FLOOR_ALPHA)
+                    alpha = float(self.echo_floor_alpha)
                     if self.echo_floor <= 0:
                         self.echo_floor = float(level)
                     else:
