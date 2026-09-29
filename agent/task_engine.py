@@ -363,6 +363,13 @@ class TaskEngine:
                 pending = next((step for step in steps if step["status"] != "done"), None)
                 if pending is None:
                     self._set_task(task_id, status="done", current_step=len(steps), error="")
+                    try:
+                        live = getattr(self.agent, "set_activity", None)
+                        if callable(live):
+                            live("done", session=f"task:{task_id}", task_id=task_id,
+                                 detail="Задача завершена", active=False)
+                    except Exception:
+                        pass
                     return
                 seq = int(pending["seq"])
                 if pending["status"] == "waiting":
@@ -370,6 +377,14 @@ class TaskEngine:
                     return
                 self._set_step(task_id, seq, status="running", started_at=now_iso(),
                                pending_action="", result={})
+                try:
+                    live = getattr(self.agent, "set_activity", None)
+                    if callable(live):
+                        live("task", session=f"task:{task_id}", skill=str(pending["skill"]),
+                             task_id=task_id,
+                             detail=f"Шаг {seq + 1}/{len(steps)}", active=True)
+                except Exception:
+                    pass
                 result = self._run_skill(
                     str(pending["skill"]), pending.get("params") or {})
                 if result.get("queued") and result.get("id"):
