@@ -49,6 +49,19 @@ class ChatPage(QWidget):
     submitted = Signal(str)
     clear_requested = Signal()
 
+    EMPTY_HTML = """
+    <div style="margin:28px 36px; color:#e8edf7;">
+      <p style="font-size:27px; font-weight:700; margin-bottom:8px;">Привет, я Люма</p>
+      <p style="font-size:15px; color:#9fb0c9; margin-bottom:26px;">
+        Спросите о делах или поручите действие на компьютере.
+      </p>
+      <p style="font-size:14px; font-weight:600; color:#d7e3f6;">С чего начать</p>
+      <p style="font-size:14px; color:#a9b9d0;">• Что у меня сегодня?</p>
+      <p style="font-size:14px; color:#a9b9d0;">• Покажи мои задачи</p>
+      <p style="font-size:14px; color:#a9b9d0;">• Что ты умеешь?</p>
+    </div>
+    """
+
     def __init__(self) -> None:
         super().__init__()
         layout = QVBoxLayout(self)
@@ -66,6 +79,8 @@ class ChatPage(QWidget):
         self.live.setWordWrap(True)
         layout.addWidget(self.live)
         self.feed = QTextBrowser()
+        self.feed.setHtml(self.EMPTY_HTML)
+        self._has_history = False
         layout.addWidget(self.feed, 1)
         row = QHBoxLayout()
         self.input = QLineEdit()
@@ -90,13 +105,17 @@ class ChatPage(QWidget):
             role = str(turn.get("role") or "")
             who = "Вы" if role == "user" else "Люма"
             text = str(turn.get("text") or "")
-            chunks.append(f"<p><b>{who}</b><br>{text}</p>")
-        self.feed.setHtml("".join(chunks))
+            chunks.append(f"<p><b>{who}</b><br>{html.escape(text)}</p>")
+        self.feed.setHtml("".join(chunks) if chunks else self.EMPTY_HTML)
+        self._has_history = bool(chunks)
         bar = self.feed.verticalScrollBar()
         bar.setValue(bar.maximum())
 
     def append_local(self, who: str, text: str) -> None:
-        self.feed.append(f"<p><b>{who}</b><br>{text}</p>")
+        if not self._has_history:
+            self.feed.clear()
+            self._has_history = True
+        self.feed.append(f"<p><b>{html.escape(who)}</b><br>{html.escape(text)}</p>")
 
     def set_live_activity(self, phase: str = "idle", heard: str = "", reply: str = "",
                           skill: str = "", detail: str = "", task_id: int = 0) -> None:
@@ -651,15 +670,15 @@ class ControlCenter(QMainWindow):
     pronunciation_delete = Signal(str)
 
     NAV = [
-        ("chat", "💬  Разговор"),
-        ("today", "☀  Сегодня"),
-        ("tasks", "✓  Задачи"),
-        ("activity", "◉  Активность"),
-        ("memory", "🧠  Память"),
-        ("learning", "🎓  Обучение"),
-        ("skills", "⚡  Навыки"),
-        ("journal", "≡  Журнал"),
-        ("settings", "⚙  Настройки"),
+        ("chat", "Разговор"),
+        ("today", "Сегодня"),
+        ("tasks", "Задачи"),
+        ("activity", "Активность"),
+        ("memory", "Память"),
+        ("learning", "Обучение"),
+        ("skills", "Навыки"),
+        ("journal", "Журнал"),
+        ("settings", "Настройки"),
     ]
 
     def __init__(self) -> None:
@@ -674,14 +693,23 @@ class ControlCenter(QMainWindow):
 
         body = QHBoxLayout()
         body.setContentsMargins(0, 0, 0, 0)
+        sidebar = QWidget()
+        sidebar.setObjectName("sidebar")
+        sidebar.setFixedWidth(220)
+        side = QVBoxLayout(sidebar)
+        side.setContentsMargins(12, 22, 12, 14)
+        side.setSpacing(18)
+        brand = QLabel("Люма")
+        brand.setObjectName("brand")
+        side.addWidget(brand)
         self.nav = QListWidget()
         self.nav.setObjectName("nav")
-        self.nav.setFixedWidth(210)
         for key, label in self.NAV:
             item = QListWidgetItem(label)
             item.setData(Qt.UserRole, key)
             self.nav.addItem(item)
-        body.addWidget(self.nav)
+        side.addWidget(self.nav, 1)
+        body.addWidget(sidebar)
 
         self.stack = QStackedWidget()
         self.pages: dict[str, QWidget] = {}
@@ -1096,13 +1124,16 @@ class ControlCenter(QMainWindow):
         self.nav.setCurrentRow(0)
         self.setStyleSheet("""
         QMainWindow, QWidget { background:#0b1120; color:#e5e7eb; font-size:14px; }
-        QListWidget#nav { background:#111827; border:0; padding:14px 8px; }
-        QListWidget#nav::item { padding:12px 14px; border-radius:9px; margin:2px; }
-        QListWidget#nav::item:selected { background:#1d4ed8; color:white; }
+        QWidget#sidebar { background:#101a2c; border-right:1px solid #253149; }
+        QLabel#brand { background:transparent; color:#f8fafc; font-size:24px; font-weight:700; padding:0 12px; }
+        QListWidget#nav { background:transparent; border:0; outline:0; }
+        QListWidget#nav::item { padding:11px 14px; border-radius:10px; margin:2px 0; color:#b4c2d7; }
+        QListWidget#nav::item:hover { background:#1b2c45; color:white; }
+        QListWidget#nav::item:selected { background:#243d68; color:white; }
         QLabel#pageTitle { font-size:24px; font-weight:700; }
         QLabel#muted { color:#94a3b8; }
         QLabel#footer { background:#111827; color:#94a3b8; padding:8px 14px; }
-        QTextBrowser, QLineEdit { background:#111827; color:#e5e7eb; border:1px solid #263244; border-radius:10px; padding:10px; }
+        QTextBrowser, QLineEdit { background:#121c2f; color:#e5e7eb; border:1px solid #2c3a52; border-radius:10px; padding:10px; selection-background-color:#335991; }
         QPushButton { background:#1e293b; color:#e5e7eb; border:0; border-radius:9px; padding:9px 13px; }
         QPushButton:hover { background:#334155; }
         QPushButton#primary { background:#2563eb; }

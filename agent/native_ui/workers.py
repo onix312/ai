@@ -9,6 +9,7 @@ from PySide6.QtCore import QObject, QRunnable, Signal, Slot
 class WorkerSignals(QObject):
     done = Signal(object)
     failed = Signal(str)
+    finished = Signal(object)
 
 
 class Worker(QRunnable):
@@ -23,3 +24,5 @@ class Worker(QRunnable):
             self.signals.done.emit(self.fn())
         except Exception as exc:  # UI обязан остаться живым при любом отказе backend
             self.signals.failed.emit(str(exc))
+        finally:
+            self.signals.finished.emit(self)

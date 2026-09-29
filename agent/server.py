@@ -882,20 +882,26 @@ class AgentHandler(BaseHTTPRequestHandler):
     # --- ответы -----------------------------------------------------------
     def _json(self, code: int, payload: dict[str, Any]) -> None:
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-        self.send_response(code)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
-        self.send_header("X-Content-Type-Options", "nosniff")
-        self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.send_response(code)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.end_headers()
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionAbortedError, ConnectionResetError):
+            self.close_connection = True
 
     def _bytes(self, code: int, body: bytes, content_type: str) -> None:
-        self.send_response(code)
-        self.send_header("Content-Type", content_type)
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.send_response(code)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionAbortedError, ConnectionResetError):
+            self.close_connection = True
 
     def _read_json(self) -> dict[str, Any]:
         length = int(self.headers.get("Content-Length") or 0)
