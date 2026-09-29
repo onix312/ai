@@ -147,6 +147,9 @@ class BackendClient:
         suffix = "?" + urllib.parse.urlencode({"q": query, "session": "native"})
         return self.get("/memory" + suffix)
 
+    def memory_op(self, op: str, memory_id: int = 0, **payload: Any) -> dict[str, Any]:
+        return self.post("/memory", {"op": str(op), "id": int(memory_id or 0), **payload})
+
     def skills(self) -> dict[str, Any]:
         return self.get("/skills")
 
