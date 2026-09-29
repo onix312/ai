@@ -1741,6 +1741,8 @@ class TasksPage(QWidget):
             box.addLayout(buttons)
             self.host.addWidget(card)
 
+        if tasks:
+            self._section("Задачи", "TASK ENGINE")
         for task in tasks:
             card = QFrame()
             card.setObjectName("glassCard")
