@@ -130,7 +130,11 @@ class Agent:
             current = dict(self._activity)
             recent = [dict(item) for item in self._activity_recent[:4]]
         if not current.get("active") and time.time() - float(current.get("updated_at") or 0) > 12:
-            current = {**current, "phase": "idle", "detail": ""}
+            current = {
+                "phase": "idle", "session": "", "heard": "", "reply": "",
+                "skill": "", "task_id": 0, "detail": "", "active": False,
+                "updated_at": current.get("updated_at", 0),
+            }
         return {"current": current, "recent": recent}
 
     def voice_vocabulary(self) -> list[str]:
