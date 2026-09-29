@@ -911,6 +911,19 @@ class ServerSecurityTests(unittest.TestCase):
         code, _h, payload = self.request("/chat", {"text": "сколько у нас долгов", "mode": "pc"})
         self.assertFalse(payload["handled"])
 
+    def test_stop_all_latches_execution_until_resume(self):
+        code, _h, stopped = self.request("/safety/stop", {})
+        self.assertEqual(200, code)
+        self.assertTrue(stopped["latched"])
+        code, _h, status = self.request("/safety/status")
+        self.assertTrue(status["stopped"])
+        blocked = self.agent.run_skill("system.volume", {"level": 20})
+        self.assertFalse(blocked["ok"])
+        self.assertTrue(blocked["stopped"])
+        code, _h, resumed = self.request("/safety/resume", {})
+        self.assertEqual(200, code)
+        self.assertFalse(resumed["latched"])
+
 
 class WindowPageTests(unittest.TestCase):
     def test_page_escapes_server_strings(self):
