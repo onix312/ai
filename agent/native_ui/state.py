@@ -33,6 +33,8 @@ class UiState:
     tts_piper_path: str = ""
     tts_speaker: str = ""
     tts_model_ready: bool = False
+    tts_last_synth_ms: int = 0
+    tts_last_chars: int = 0
     safety_stopped: bool = False
     activity_phase: str = "idle"
     activity_heard: str = ""
@@ -69,6 +71,8 @@ class UiState:
         self.tts_piper_path = str(tts.get("piper_path") or "")
         self.tts_speaker = str(tts.get("speaker") or "")
         self.tts_model_ready = bool(tts.get("model_ready"))
+        self.tts_last_synth_ms = max(0, int(tts.get("last_synth_ms") or 0))
+        self.tts_last_chars = max(0, int(tts.get("last_chars") or 0))
         safety = payload.get("safety") if isinstance(payload.get("safety"), dict) else {}
         self.safety_stopped = bool(safety.get("stopped") or safety.get("latched"))
         activity = payload.get("activity") if isinstance(payload.get("activity"), dict) else {}
