@@ -228,8 +228,9 @@ class NativeApp:
         )
         if self.state.voice_error:
             self.center.set_voice_diagnostics_message(self.state.voice_error)
+        chat_phase = self.state.activity_phase if self.state.activity_active else display_state
         self.center.chat.set_live_activity(
-            self.state.activity_phase,
+            chat_phase,
             self.state.activity_heard,
             self.state.activity_reply,
             self.state.activity_skill,
