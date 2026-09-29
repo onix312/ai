@@ -297,7 +297,6 @@ class NativeApp:
         self.state.assistant_state = "thinking"
         self._render_status()
         self.quick.set_busy(True)
-        self.quick.show_answer("Думаю…")
         self.orb.set_state("thinking")
         self.center.chat.clear_action_trace()
         self.center.chat.append_local("Вы", clean)
@@ -306,18 +305,26 @@ class NativeApp:
             self._busy_chat = False
             reply = str(payload.get("reply") or payload.get("reason") or "Готово.")
             self.quick.set_busy(False)
-            self.quick.show_answer(reply)
+            trace_steps = list(payload.get("steps") or []) if isinstance(payload.get("steps"), list) else []
+            self._brain_route = str(payload.get("source") or payload.get("kind") or "ready")
+            agent_loop = payload.get("agent_loop") if isinstance(payload.get("agent_loop"), dict) else {}
+            self._brain_agent_iterations = int(agent_loop.get("iterations") or 0)
+            self._brain_repaired = any(
+                str(step.get("title") or "") == "Самокоррекция плана"
+                for step in trace_steps if isinstance(step, dict)
+            )
+            self.quick.show_answer(
+                reply,
+                source=str(payload.get("source") or payload.get("kind") or ""),
+                skill=str(payload.get("skill") or ""),
+                repaired=self._brain_repaired,
+            )
             self.center.chat.append_local(
                 "Люма", reply,
                 source=str(payload.get("source") or ""),
                 skill=str(payload.get("skill") or ""),
             )
-            trace_steps = list(payload.get("steps") or []) if isinstance(payload.get("steps"), list) else []
             self.center.chat.show_action_trace(trace_steps)
-            self._brain_route = str(payload.get("source") or payload.get("kind") or "ready")
-            agent_loop = payload.get("agent_loop") if isinstance(payload.get("agent_loop"), dict) else {}
-            self._brain_agent_iterations = int(agent_loop.get("iterations") or 0)
-            self._brain_repaired = any(
                 str(step.get("title") or "") == "Самокоррекция плана"
                 for step in trace_steps if isinstance(step, dict)
             )
@@ -349,7 +356,7 @@ class NativeApp:
         def failed(message: str) -> None:
             self._busy_chat = False
             self.quick.set_busy(False)
-            self.quick.show_answer(message)
+            self.quick.show_answer(message, source="error")
             self.center.chat.append_local("Люма", message)
             self.state.set_error(message)
             self.orb.set_state("error", 2400)
@@ -368,7 +375,7 @@ class NativeApp:
         def done(_payload: dict[str, Any]) -> None:
             self.center.chat.set_history([])
             self.center.chat.clear_action_trace()
-            self.quick.show_answer("Диалог очищен.")
+            self.quick.show_answer("Диалог очищен.", source="local")
 
         self.run_async(
             lambda: self.backend.post("/chat/clear", {"session": self.SESSION}),
