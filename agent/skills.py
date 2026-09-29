@@ -1374,6 +1374,131 @@ def prompt(caps: dict[str, Any], learned: dict[str, dict[str, Any]] | None = Non
     return "\n".join(lines)
 
 
+_PROMPT_GROUP_HINTS: dict[str, tuple[str, ...]] = {
+    "app": ("открой", "запусти", "включи", "прилож", "программ", "steam", "стим", "apex", "апекс"),
+    "window": ("окно", "сверни", "разверни", "переключ", "закрой", "рядом", "фокус"),
+    "screen": ("экран", "скрин", "видишь", "посмотри", "найди на экране", "картин"),
+    "browser": ("браузер", "вкладк", "страниц", "сайт", "ссылк", "выдел"),
+    "system": ("компьютер", "пк", "громк", "звук", "процесс", "перезагруз", "выключ", "медиа", "трек"),
+    "files": ("файл", "документ", "папк", "загрузк", "договор", "прайс", "счет", "счёт"),
+    "panel": ("принтер", "печать", "станок", "заказ", "клиент", "склад", "выруч", "долг", "printflow"),
+    "memory": ("запомни", "помни", "забудь", "памят"),
+    "reminder": ("напомни", "напомин"),
+    "list": ("список", "покупк"),
+    "goal": ("цель", "прогресс"),
+    "habit": ("привычк", "серия"),
+    "expense": ("расход", "потрат", "трата"),
+    "diary": ("дневник", "настроен"),
+    "voice": ("скажи", "озвуч", "голос", "диктуй"),
+    "scheduler": ("таймер", "помодоро", "фокус"),
+    "assistant": ("макрос", "сценар", "режим"),
+    "knowledge": ("знани", "предпочтен"),
+    "agent": ("почему", "журнал", "что умеешь", "навык"),
+}
+
+
+def _prompt_line(row: dict[str, Any]) -> str:
+    params = ", ".join(f"{k}:{v}" for k, v in row["params"].items())
+    mark = " — подтверждение" if row["confirm"] else ""
+    return (f"- {row['name']}: {row['title']}"
+            + (f" (параметры: {params})" if params else "")
+            + f" — {row['description']}{mark}")
+
+
+def relevant_prompt(query: str, caps: dict[str, Any],
+                    learned: dict[str, dict[str, Any]] | None = None,
+                    *, max_items: int = 28, max_chars: int = 5600) -> str:
+    """Компактный каталог навыков, релевантных текущей реплике.
+
+    Полный реестр уже слишком велик для системного промпта: простое обрезание
+    делало навыки в конце списка фактически невидимыми модели. Здесь весь
+    доступный реестр сначала ранжируется по словам запроса и доменным подсказкам,
+    а затем в бюджет попадают наиболее подходящие способности плюс небольшое
+    покрытие разных групп. Это retrieval для tools, а не permission-механизм:
+    перед исполнением Brain всё равно повторно проверяет реестр и параметры.
+    """
+    rows = [row for row in catalog(caps, learned) if row["available"]]
+    if not rows:
+        return ""
+    low = " ".join(str(query or "").casefold().replace("ё", "е").split())
+    tokens = {
+        token for token in re.findall(r"[0-9a-zа-я_-]{2,}", low)
+        if token not in {"мне", "тебе", "это", "как", "что", "для", "или", "еще", "ещё", "там", "тут"}
+    }
+    hinted_groups = {
+        group for group, hints in _PROMPT_GROUP_HINTS.items()
+        if any(hint in low for hint in hints)
+    }
+
+    def score(row: dict[str, Any]) -> tuple[int, int, str]:
+        name = str(row.get("name") or "")
+        group = name.split(".", 1)[0]
+        hay = " ".join((
+            name, str(row.get("title") or ""), str(row.get("description") or ""),
+            " ".join(str(key) for key in (row.get("params") or {}).keys()),
+        )).casefold().replace("ё", "е")
+        value = 0
+        if group in hinted_groups:
+            value += 18
+        for token in tokens:
+            if token in name.casefold():
+                value += 9
+            if token in hay:
+                value += 3
+        if row.get("learned"):
+            value += 2
+        return value, -len(_prompt_line(row)), name
+
+    ranked = sorted(rows, key=score, reverse=True)
+    selected: list[dict[str, Any]] = []
+    seen: set[str] = set()
+
+    # Сначала сильные совпадения.
+    for row in ranked:
+        if score(row)[0] <= 0:
+            break
+        selected.append(row)
+        seen.add(str(row["name"]))
+        if len(selected) >= max_items:
+            break
+
+    # Затем по одному представителю других групп, чтобы модель не теряла
+    # способность связать неожиданную формулировку с реальной функцией.
+    groups = {str(row["name"]).split(".", 1)[0] for row in selected}
+    for row in rows:
+        name = str(row["name"])
+        group = name.split(".", 1)[0]
+        if name in seen or group in groups:
+            continue
+        selected.append(row)
+        seen.add(name)
+        groups.add(group)
+        if len(selected) >= max_items:
+            break
+
+    # Если запрос совсем общий, добавляем ещё несколько наиболее компактных
+    # функций вместо алфавитного хвоста реестра.
+    for row in ranked:
+        name = str(row["name"])
+        if name in seen:
+            continue
+        selected.append(row)
+        seen.add(name)
+        if len(selected) >= max_items:
+            break
+
+    lines: list[str] = []
+    used = 0
+    for row in selected:
+        line = _prompt_line(row)
+        extra = len(line) + (1 if lines else 0)
+        if lines and used + extra > max_chars:
+            break
+        lines.append(line)
+        used += extra
+    return "\n".join(lines)
+
+
 # ---------------------------------------------------------------------------
 # Параметры: разбор и отказ
 # ---------------------------------------------------------------------------
