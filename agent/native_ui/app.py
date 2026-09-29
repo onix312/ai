@@ -67,6 +67,8 @@ class NativeApp:
         self.center.tts_save.connect(self.save_tts)
         self.center.tts_reset.connect(self.reset_tts)
         self.center.tts_test.connect(self.test_tts)
+        self.center.pronunciation_add.connect(self.add_pronunciation)
+        self.center.pronunciation_delete.connect(self.delete_pronunciation)
         self.center.task_command.connect(self.task_command)
         self.center.plan_preview.connect(self.plan_preview)
         self.center.plan_command.connect(self.plan_command)
@@ -146,6 +148,11 @@ class NativeApp:
         self.run_async(
             self.backend.tts_settings,
             self.center.set_tts_payload,
+            lambda _message: None,
+        )
+        self.run_async(
+            self.backend.pronunciation_items,
+            self.center.set_pronunciation_payload,
             lambda _message: None,
         )
 
@@ -476,6 +483,46 @@ class NativeApp:
             lambda: self.backend.tts_update(str(piper or ""), str(model or ""), str(speaker or "")),
             done,
         )
+
+    def add_pronunciation(self, source: str, target: str) -> None:
+        clean_source = str(source or "").strip()
+        clean_target = str(target or "").strip()
+        if not clean_source or not clean_target:
+            self.center.pronunciation_status.setText("Заполните оба поля.")
+            return
+
+        def done(payload: dict[str, Any]) -> None:
+            if payload.get("ok"):
+                self.center.set_pronunciation_payload(payload)
+                self.center.clear_pronunciation_inputs()
+                self.center.pronunciation_status.setText(
+                    f"✓ {clean_source} → {clean_target}"
+                )
+            else:
+                self.center.pronunciation_status.setText(
+                    str(payload.get("reason") or "Не удалось сохранить правило.")
+                )
+
+        self.run_async(
+            lambda: self.backend.pronunciation_set(clean_source, clean_target),
+            done,
+        )
+
+    def delete_pronunciation(self, source: str) -> None:
+        clean_source = str(source or "").strip()
+        if not clean_source:
+            self.center.pronunciation_status.setText("Выберите правило для удаления.")
+            return
+
+        def done(payload: dict[str, Any]) -> None:
+            if payload.get("ok"):
+                self.center.set_pronunciation_payload(payload)
+            else:
+                self.center.pronunciation_status.setText(
+                    str(payload.get("reason") or "Не удалось удалить правило.")
+                )
+
+        self.run_async(lambda: self.backend.pronunciation_delete(clean_source), done)
 
     def test_tts(self) -> None:
         def done(payload: dict[str, Any]) -> None:
