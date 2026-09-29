@@ -225,9 +225,11 @@ class TaskEngine:
                     return {"ok": False, "reason": "Перепланирование не допускает meta skills"}
                 skill = skills.get(step["skill"], self.agent.runner.learned())
                 assert skill is not None
-                available, reason = skills.availability(skill, self.agent.runner.caps)
+                available, availability_reason = skills.availability(
+                    skill, self.agent.runner.caps
+                )
                 if not available:
-                    return {"ok": False, "reason": reason}
+                    return {"ok": False, "reason": availability_reason}
             with self.store._lock:
                 conn = self.store._conn
                 try:
