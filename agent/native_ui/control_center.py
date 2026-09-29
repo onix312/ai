@@ -6,6 +6,7 @@ import json
 from typing import Any
 
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QComboBox, QDoubleSpinBox, QFrame, QHBoxLayout, QLabel, QLineEdit,
     QListWidget, QListWidgetItem, QMainWindow, QProgressBar, QPushButton,
@@ -159,6 +160,27 @@ class ChatPage(QWidget):
         live_row.addWidget(self.live_orb, 0, Qt.AlignVCenter)
         layout.addWidget(live_card)
 
+        self.camera_card = GlassCard("cyan")
+        camera_box = QVBoxLayout(self.camera_card)
+        camera_box.setContentsMargins(10, 9, 10, 10)
+        camera_head = QHBoxLayout()
+        self.camera_title = QLabel("КАМЕРА ПРИНТЕРА")
+        self.camera_title.setObjectName("heroKicker")
+        camera_head.addWidget(self.camera_title)
+        camera_head.addStretch(1)
+        close_camera = QPushButton("Скрыть")
+        close_camera.clicked.connect(self.camera_card.hide)
+        camera_head.addWidget(close_camera)
+        camera_box.addLayout(camera_head)
+        self.camera_frame = QLabel()
+        self.camera_frame.setObjectName("cameraFrame")
+        self.camera_frame.setAlignment(Qt.AlignCenter)
+        self.camera_frame.setMinimumHeight(180)
+        self.camera_frame.setMaximumHeight(360)
+        camera_box.addWidget(self.camera_frame, 1)
+        self.camera_card.hide()
+        layout.addWidget(self.camera_card)
+
         self.content = QStackedWidget()
 
         welcome = GlassCard()
@@ -282,12 +304,28 @@ class ChatPage(QWidget):
         for turn in turns:
             role = "user" if str(turn.get("role") or "") == "user" else "assistant"
             self._turns.append({"role": role, "text": str(turn.get("text") or "")})
+        if not self._turns:
+            self.camera_card.hide()
+            self.camera_frame.clear()
         self._render_turns()
 
     def append_local(self, who: str, text: str) -> None:
         role = "user" if str(who or "").casefold() in {"вы", "user"} else "assistant"
         self._turns.append({"role": role, "text": str(text or "")})
         self._render_turns()
+
+    def show_camera_image(self, data: bytes, title: str = "") -> bool:
+        pixmap = QPixmap()
+        if not data or not pixmap.loadFromData(bytes(data), "JPEG"):
+            self.camera_card.hide()
+            return False
+        scaled = pixmap.scaled(720, 360, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        self.camera_frame.setPixmap(scaled)
+        self.camera_title.setText(
+            "КАМЕРА ПРИНТЕРА" + (f" · {str(title)[:72]}" if str(title or "").strip() else "")
+        )
+        self.camera_card.show()
+        return True
 
     def set_live_activity(self, phase: str = "idle", heard: str = "", reply: str = "",
                           skill: str = "", detail: str = "", task_id: int = 0,
