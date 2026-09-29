@@ -6,6 +6,8 @@ from typing import Callable
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QLineEdit, QPushButton, QVBoxLayout, QWidget
 
+from . import theme
+
 
 class QuickPanel(QWidget):
     submitted = Signal(str)
@@ -19,19 +21,48 @@ class QuickPanel(QWidget):
         root.setContentsMargins(0, 0, 0, 0)
         card = QFrame()
         card.setObjectName("card")
-        card.setStyleSheet("""
-        QFrame#card { background:#111d30; border:1px solid #354660; border-radius:18px; }
-        QLineEdit { background:#16243a; border:1px solid #32435e; border-radius:11px; color:#f8fafc; font-size:18px; padding:13px 15px; }
-        QLabel { color:#9fb0c9; }
-        QLabel#quickBrand { color:#f8fafc; font-size:16px; font-weight:700; }
-        QPushButton { background:#1c2d47; color:#d2deed; border:1px solid #31445f; border-radius:10px; padding:8px 11px; }
-        QPushButton:hover { background:#2a4264; }
+        card.setStyleSheet(theme.stylesheet() + """
+        QFrame#card {
+            background:#101225;
+            border:1px solid #514487;
+            border-radius:20px;
+        }
+        QLineEdit {
+            background:#15172D;
+            border:1px solid #3B3F69;
+            border-radius:13px;
+            color:#F8F7FF;
+            font-size:18px;
+            padding:14px 16px;
+        }
+        QLineEdit:focus {
+            border:1px solid #8B6EF0;
+            background:#181A33;
+        }
+        QLabel { background:transparent; color:#9996B7; }
+        QLabel#quickBrand {
+            color:#FFFFFF;
+            font-size:17px;
+            font-weight:800;
+            letter-spacing:1px;
+        }
+        QPushButton {
+            background:#181B35;
+            color:#D8D4E8;
+            border:1px solid #35395F;
+            border-radius:10px;
+            padding:8px 11px;
+        }
+        QPushButton:hover {
+            background:#242044;
+            border-color:#6654B8;
+        }
         """)
         box = QVBoxLayout(card)
         box.setContentsMargins(18, 16, 18, 16)
         box.setSpacing(12)
         header = QHBoxLayout()
-        brand = QLabel("Люма")
+        brand = QLabel("LUMA")
         brand.setObjectName("quickBrand")
         header.addWidget(brand)
         header.addStretch(1)
@@ -45,7 +76,7 @@ class QuickPanel(QWidget):
         box.addLayout(row)
         self.answer = QLabel("")
         self.answer.setWordWrap(True)
-        self.answer.setStyleSheet("color:#d8e5f4; font-size:14px;")
+        self.answer.setStyleSheet("color:#E7E3F3; font-size:14px; background:transparent;")
         box.addWidget(self.answer)
         self.hints = QHBoxLayout()
         for text in ("Что у меня сегодня?", "Как там PrintFlow?", "Открой загрузки"):
