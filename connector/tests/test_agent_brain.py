@@ -533,6 +533,12 @@ class BrainChatTests(unittest.TestCase):
         self.assertEqual(42, result_context.get("cpu_percent"))
         self.assertEqual(61, result_context.get("memory", {}).get("load"))
         self.assertNotIn("secret_debug_blob", result_context)
+        bounded = brain.compact_result_context({
+            "ok": True,
+            "target": {"name": "x" * 1000, **{f"k{i}": i for i in range(30)}},
+        })
+        self.assertLessEqual(len(bounded["target"]), 10)
+        self.assertLessEqual(len(bounded["target"]["name"]), 320)
 
     def test_model_plan_validator_reports_missing_function_before_execution(self):
         problem = brain.model_plan_problem(
