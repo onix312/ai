@@ -7,9 +7,9 @@ from typing import Any
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
-    QComboBox, QFrame, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem,
-    QMainWindow, QPushButton, QScrollArea, QStackedWidget, QTextBrowser,
-    QVBoxLayout, QWidget,
+    QComboBox, QDoubleSpinBox, QFrame, QHBoxLayout, QLabel, QLineEdit,
+    QListWidget, QListWidgetItem, QMainWindow, QProgressBar, QPushButton,
+    QScrollArea, QSpinBox, QStackedWidget, QTextBrowser, QVBoxLayout, QWidget,
 )
 
 
@@ -497,6 +497,8 @@ class ControlCenter(QMainWindow):
     autonomy_reset = Signal()
     proactivity_save = Signal(object)
     proactivity_reset = Signal()
+    voice_tune = Signal(float, int, float)
+    voice_diag_reset = Signal()
 
     NAV = [
         ("chat", "💬  Разговор"),
@@ -593,6 +595,68 @@ class ControlCenter(QMainWindow):
         self.stop_all_button.clicked.connect(self.safety_toggle)
         controls.addWidget(self.stop_all_button)
         sl.addLayout(controls)
+
+        voice_title = QLabel("Voice Diagnostics")
+        voice_title.setStyleSheet("font-size:16px; font-weight:700; margin-top:12px;")
+        sl.addWidget(voice_title)
+        self.voice_diag_meta = QLabel("ASR: … · vocabulary: 0")
+        self.voice_diag_meta.setObjectName("muted")
+        sl.addWidget(self.voice_diag_meta)
+
+        self.voice_level = QProgressBar()
+        self.voice_level.setRange(0, 4000)
+        self.voice_level.setFormat("Mic level: %v")
+        sl.addWidget(self.voice_level)
+        self.voice_threshold = QProgressBar()
+        self.voice_threshold.setRange(0, 4000)
+        self.voice_threshold.setFormat("Echo/VAD threshold: %v")
+        sl.addWidget(self.voice_threshold)
+        self.voice_floor = QProgressBar()
+        self.voice_floor.setRange(0, 4000)
+        self.voice_floor.setFormat("Echo floor: %v")
+        sl.addWidget(self.voice_floor)
+
+        diag_row = QHBoxLayout()
+        self.voice_multiplier = QDoubleSpinBox()
+        self.voice_multiplier.setRange(1.0, 4.0)
+        self.voice_multiplier.setSingleStep(0.05)
+        self.voice_multiplier.setDecimals(2)
+        self.voice_multiplier.setPrefix("Gate × ")
+        diag_row.addWidget(self.voice_multiplier)
+        self.voice_margin = QSpinBox()
+        self.voice_margin.setRange(0, 4000)
+        self.voice_margin.setSingleStep(20)
+        self.voice_margin.setPrefix("Margin ")
+        diag_row.addWidget(self.voice_margin)
+        self.voice_alpha = QDoubleSpinBox()
+        self.voice_alpha.setRange(0.05, 0.95)
+        self.voice_alpha.setSingleStep(0.05)
+        self.voice_alpha.setDecimals(2)
+        self.voice_alpha.setPrefix("Adapt ")
+        diag_row.addWidget(self.voice_alpha)
+        sl.addLayout(diag_row)
+
+        diag_buttons = QHBoxLayout()
+        apply_voice = QPushButton("Применить калибровку")
+        apply_voice.clicked.connect(
+            lambda: self.voice_tune.emit(
+                float(self.voice_multiplier.value()),
+                int(self.voice_margin.value()),
+                float(self.voice_alpha.value()),
+            )
+        )
+        diag_buttons.addWidget(apply_voice)
+        reset_voice = QPushButton("Сбросить Voice Diagnostics")
+        reset_voice.clicked.connect(self.voice_diag_reset)
+        diag_buttons.addWidget(reset_voice)
+        diag_buttons.addStretch(1)
+        sl.addLayout(diag_buttons)
+
+        self.voice_diag_status = QLabel("Калибровка хранится только в RAM.")
+        self.voice_diag_status.setObjectName("muted")
+        self.voice_diag_status.setWordWrap(True)
+        sl.addWidget(self.voice_diag_status)
+
         persona_title = QLabel("Persona Люмы")
         persona_title.setStyleSheet("font-size:16px; font-weight:700; margin-top:12px;")
         sl.addWidget(persona_title)
@@ -805,6 +869,35 @@ class ControlCenter(QMainWindow):
         key = self.nav.item(row).data(Qt.UserRole)
         if key != "chat":
             self.refresh_page.emit(str(key))
+
+    def set_voice_diagnostics(self, *, audio_level: int, echo_floor: int,
+                              echo_threshold: int, echo_suppressed: int,
+                              multiplier: float, margin: int, alpha: float,
+                              vad_threshold: int, asr_engine: str,
+                              vocabulary_count: int) -> None:
+        top = max(4000, int(audio_level), int(echo_floor), int(echo_threshold), int(vad_threshold))
+        for bar in (self.voice_level, self.voice_floor, self.voice_threshold):
+            bar.setMaximum(top)
+        self.voice_level.setValue(max(0, int(audio_level)))
+        self.voice_floor.setValue(max(0, int(echo_floor)))
+        self.voice_threshold.setValue(max(0, int(echo_threshold)))
+        self.voice_multiplier.blockSignals(True)
+        self.voice_margin.blockSignals(True)
+        self.voice_alpha.blockSignals(True)
+        self.voice_multiplier.setValue(float(multiplier))
+        self.voice_margin.setValue(int(margin))
+        self.voice_alpha.setValue(float(alpha))
+        self.voice_multiplier.blockSignals(False)
+        self.voice_margin.blockSignals(False)
+        self.voice_alpha.blockSignals(False)
+        engine = str(asr_engine or "не загружен")
+        self.voice_diag_meta.setText(
+            f"ASR: {engine} · vocabulary: {int(vocabulary_count)} · "
+            f"VAD: {int(vad_threshold)} · echo suppressed: {int(echo_suppressed)}"
+        )
+
+    def set_voice_diagnostics_message(self, text: str) -> None:
+        self.voice_diag_status.setText(str(text or ""))
 
     def update_status(self, connected: bool, armed: bool, model_ok: bool,
                       panel_ok: bool, error: str = "", safety_stopped: bool = False) -> None:
