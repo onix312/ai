@@ -27,6 +27,8 @@ class TtsService:
                 for field in self.FIELDS
             }
             pc.configure_tts(**values)
+            output = str(((self.store.get_preference("tts.output_device") or {}).get("value")) or "")
+            pc.set_tts_output_device(output)
         except Exception:
             # TTS preferences must never prevent the local agent from starting.
             pass
@@ -53,7 +55,20 @@ class TtsService:
                 payload.get("text") or "Привет. Я Люма. Проверяю локальный голос."
             ).strip()
             state, reason = pc.speak(phrase[:240])
+            if state and state.get("pid"):
+                played, playback_reason = pc.wait_for_tts_playback(int(state.get("pid") or 0))
+                if not played:
+                    return {"ok": False, "reason": playback_reason, "speech": state, **pc.tts_status()}
             return {"ok": bool(state), "reason": reason, "speech": state, **pc.tts_status()}
+        if op == "output_set":
+            device_id = str(payload.get("device_id") or "")
+            result = pc.set_tts_output_device(device_id)
+            if result.get("ok"):
+                if device_id:
+                    self.store.set_preference("tts.output_device", device_id)
+                else:
+                    self.store.delete_preference("tts.output_device")
+            return result
         if op == "reset":
             result = pc.reset_tts_config()
             for field in self.FIELDS:

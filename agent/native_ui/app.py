@@ -86,6 +86,7 @@ class NativeApp:
         self.center.tts_save.connect(self.save_tts)
         self.center.tts_reset.connect(self.reset_tts)
         self.center.tts_test.connect(self.test_tts)
+        self.center.output_save.connect(self.set_output_device)
         self.center.pronunciation_add.connect(self.add_pronunciation)
         self.center.pronunciation_delete.connect(self.delete_pronunciation)
         self.center.memory_pin.connect(self.memory_pin)
@@ -695,12 +696,23 @@ class NativeApp:
                 synth_ms = int(payload.get("last_synth_ms") or 0)
                 engine = str(payload.get("engine") or "tts")
                 suffix = f" · synth {synth_ms} ms" if synth_ms else ""
-                self.center.set_tts_message(f"🔊 Тест голоса запущен: {engine}{suffix}")
+                self.center.set_tts_message(f"✓ Проверка воспроизведения завершена: {engine}{suffix}")
                 self.refresh_status()
             else:
                 self.center.set_tts_message(str(payload.get("reason") or "Не удалось воспроизвести тест голоса."))
 
         self.run_async(self.backend.tts_test, done)
+
+    def set_output_device(self, device_id: str) -> None:
+        def done(payload: dict[str, Any]) -> None:
+            if payload.get("ok"):
+                selected = next((row.get("name") for row in payload.get("output_devices", [])
+                                 if row.get("id") == device_id), "Системное устройство")
+                self.center.set_tts_message(f"Аудиовывод: {selected}. Нажмите «Прослушать», чтобы проверить звук.")
+                self.center.set_tts_payload(payload)
+            else:
+                self.center.set_tts_message(str(payload.get("reason") or "Не удалось выбрать аудиовывод."))
+        self.run_async(lambda: self.backend.set_output_device(device_id), done)
 
     def reset_tts(self) -> None:
         def done(payload: dict[str, Any]) -> None:

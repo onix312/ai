@@ -37,7 +37,7 @@ import uuid
 import webbrowser
 from typing import Any
 
-from . import silero_tts, tts_quality, winapi
+from . import audio_output, silero_tts, tts_quality, winapi
 
 IS_WINDOWS = sys.platform.startswith("win")
 IS_MAC = sys.platform == "darwin"
@@ -1297,6 +1297,8 @@ def tts_status() -> dict[str, Any]:
         "last_engine": str(_TTS_METRICS.get("last_engine") or ""),
         "last_synth_ms": int(_TTS_METRICS.get("last_synth_ms") or 0),
         "last_chars": int(_TTS_METRICS.get("last_chars") or 0),
+        "output_device": _TTS_OUTPUT_DEVICE,
+        "output_devices": audio_output.output_devices(),
     }
 
 
@@ -1314,6 +1316,17 @@ _TTS_PROCESS: subprocess.Popen | None = None
 _TTS_TEMP_FILE = ""
 _TTS_OVERRIDES: dict[str, str] = {"piper": "", "model": "", "speaker": ""}
 _TTS_METRICS: dict[str, Any] = {"last_engine": "", "last_synth_ms": 0, "last_chars": 0}
+_TTS_OUTPUT_DEVICE = ""
+
+
+def set_tts_output_device(device_id: str) -> dict[str, Any]:
+    global _TTS_OUTPUT_DEVICE
+    clean = str(device_id or "").strip()
+    if clean and clean not in {row["id"] for row in audio_output.output_devices()}:
+        return {"ok": False, "reason": "Устройство вывода не найдено. Обновите список устройств."}
+    stop_speaking()
+    _TTS_OUTPUT_DEVICE = clean
+    return {"ok": True, **tts_status()}
 _TTS_SYNTH_ACTIVE = False
 _TTS_CANCEL_SERIAL = 0
 _LAST_TTS_TEXT = ""
@@ -1451,6 +1464,8 @@ def _system_speak(clean: str, rate: int, volume: int, engine: str = "") -> tuple
     if not engine:
         return {}, ("Нет движка озвучки: в Windows нужен PowerShell (есть по умолчанию), "
                     "в Linux — espeak-ng")
+    if engine == "sapi" and _TTS_OUTPUT_DEVICE:
+        return _sapi_to_selected_output(clean, rate, volume)
     env = os.environ.copy()
     if engine == "sapi":
         command = ["powershell", "-NoProfile", "-NonInteractive", "-Command", _SAPI_SCRIPT]
@@ -1465,7 +1480,7 @@ def _system_speak(clean: str, rate: int, volume: int, engine: str = "") -> tuple
     stop_speaking()
     try:
         process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
-                                   stderr=subprocess.DEVNULL, env=env, creationflags=flags)
+                                   stderr=subprocess.PIPE, env=env, creationflags=flags)
         if process.stdin is not None:
             if engine != "sapi":
                 process.stdin.write(clean.encode("utf-8"))
@@ -1483,6 +1498,9 @@ def _system_speak(clean: str, rate: int, volume: int, engine: str = "") -> tuple
 
 def _wav_player(path: str) -> tuple[list[str], dict[str, str]]:
     env = os.environ.copy()
+    if _TTS_OUTPUT_DEVICE:
+        return [sys.executable, str(pathlib.Path(audio_output.__file__).resolve()),
+                path, _TTS_OUTPUT_DEVICE], env
     if IS_WINDOWS:
         powershell = shutil.which("powershell") or shutil.which("powershell.exe")
         if not powershell:
@@ -1501,6 +1519,70 @@ def _wav_player(path: str) -> tuple[list[str], dict[str, str]]:
         if found:
             return [found, *args, path], env
     return [], env
+
+
+def _sapi_to_selected_output(clean: str, rate: int, volume: int) -> tuple[dict[str, Any], str]:
+    handle, wav_path = tempfile.mkstemp(prefix="luma-sapi-", suffix=".wav")
+    os.close(handle)
+    env = os.environ.copy()
+    env.update(PF_TTS_RATE=str(rate), PF_TTS_VOLUME=str(volume),
+               PF_TTS_TEXT=clean, PF_TTS_WAV=wav_path)
+    script = _SAPI_SCRIPT.replace(
+        "$s.Speak($env:PF_TTS_TEXT)",
+        "$s.SetOutputToWaveFile($env:PF_TTS_WAV);$s.Speak($env:PF_TTS_TEXT)",
+    )
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if IS_WINDOWS else 0
+    stop_speaking()
+    try:
+        result = subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
+            env=env, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+            timeout=90, creationflags=flags, check=False,
+        )
+        if result.returncode or pathlib.Path(wav_path).stat().st_size < 44:
+            detail = result.stderr.decode("utf-8", "replace").strip()
+            _cleanup_tts_file(wav_path)
+            return {}, f"Системный голос не создал звук: {detail[-180:] or result.returncode}"
+        command, play_env = _wav_player(wav_path)
+        playback = subprocess.Popen(command, stdin=subprocess.DEVNULL,
+                                    stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+                                    env=play_env, creationflags=flags)
+    except (OSError, ValueError, subprocess.TimeoutExpired) as exc:
+        _cleanup_tts_file(wav_path)
+        return {}, f"Не удалось воспроизвести голос: {exc}"
+    global _TTS_PROCESS, _TTS_TEMP_FILE, _LAST_TTS_TEXT, _LAST_TTS_AT
+    with _TTS_LOCK:
+        _TTS_PROCESS = playback
+        _TTS_TEMP_FILE = wav_path
+        _LAST_TTS_TEXT = clean
+        _LAST_TTS_AT = time.time()
+        _TTS_METRICS.update({"last_engine": "sapi", "last_synth_ms": 0, "last_chars": len(clean)})
+    return {"engine": "sapi", "chars": len(clean), "pid": playback.pid,
+            "output_device": _TTS_OUTPUT_DEVICE}, ""
+
+
+def wait_for_tts_playback(pid: int, timeout: float = 90) -> tuple[bool, str]:
+    global _TTS_PROCESS, _TTS_TEMP_FILE
+    with _TTS_LOCK:
+        process = _TTS_PROCESS
+    if process is None or process.pid != pid:
+        return False, "Воспроизведение было остановлено или заменено другим ответом"
+    try:
+        code = process.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        stop_speaking()
+        return False, "Проверка звука превысила время ожидания"
+    detail = process.stderr.read().decode("utf-8", "replace").strip() if process.stderr else ""
+    with _TTS_LOCK:
+        if _TTS_PROCESS is process:
+            _TTS_PROCESS = None
+            wav_path = _TTS_TEMP_FILE
+            _TTS_TEMP_FILE = ""
+        else:
+            wav_path = ""
+    if wav_path:
+        _cleanup_tts_file(wav_path)
+    return (True, "") if code == 0 else (False, detail[-220:] or f"Плеер завершился с кодом {code}")
 
 
 def _silero_speak(clean: str, rate: int, volume: int) -> tuple[dict[str, Any], str]:
@@ -1548,7 +1630,7 @@ def _silero_speak(clean: str, rate: int, volume: int) -> tuple[dict[str, Any], s
             play_command,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
             env=env,
             creationflags=flags,
         )
@@ -1655,7 +1737,7 @@ def _piper_speak(clean: str, rate: int, volume: int) -> tuple[dict[str, Any], st
 
     try:
         playback = subprocess.Popen(play_command, stdin=subprocess.DEVNULL,
-                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                    stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
                                     env=env, creationflags=flags)
     except (OSError, ValueError) as exc:
         _cleanup_tts_file(wav_path)
