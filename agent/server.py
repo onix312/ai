@@ -32,6 +32,7 @@
 from __future__ import annotations
 
 import json
+import re
 import threading
 import time
 import urllib.parse
@@ -40,7 +41,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
 from . import brain as brain_mod
-from . import autonomy as autonomy_mod, capabilities, config, event_engine as event_mod, executor, pc, persona as persona_mod, planner, replanner, skills, speech, task_engine, tts_service, ui, voice_runtime, window, winapi
+from . import autonomy as autonomy_mod, browser_provider, capabilities, config, event_engine as event_mod, executor, pc, persona as persona_mod, planner, replanner, skills, speech, task_engine, tts_service, ui, voice_runtime, window, winapi
 from .providers import registry as provider_registry
 
 # Ожидающее действие живёт недолго: неподтверждённый клик не должен висеть
@@ -880,7 +881,7 @@ class AgentHandler(BaseHTTPRequestHandler):
         pass
 
     # --- ответы -----------------------------------------------------------
-    def _json(self, code: int, payload: dict[str, Any]) -> None:
+    def _json(self, code: int, payload: dict[str, Any], *, cors_origin: str = "") -> None:
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         try:
             self.send_response(code)
@@ -888,6 +889,9 @@ class AgentHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(body)))
             self.send_header("Cache-Control", "no-store")
             self.send_header("X-Content-Type-Options", "nosniff")
+            if cors_origin:
+                self.send_header("Access-Control-Allow-Origin", cors_origin)
+                self.send_header("Vary", "Origin")
             self.end_headers()
             self.wfile.write(body)
         except (BrokenPipeError, ConnectionAbortedError, ConnectionResetError):
@@ -965,6 +969,26 @@ class AgentHandler(BaseHTTPRequestHandler):
                                     "panel_url": agent.runner.panel.url})
         if self.role != "agent":
             return self._json(404, {"ok": False, "reason": f"Маршрута {path} нет"})
+        if path == "/browser/setup":
+            token = browser_provider.bridge.token
+            body = ("<!doctype html><html lang='ru'><meta charset='utf-8'>"
+                    "<title>Подключение браузера к Luma</title>"
+                    "<style>body{font:16px system-ui;max-width:620px;margin:8vh auto;padding:24px;"
+                    "color:#edf1ff;background:#111827}code{display:block;overflow-wrap:anywhere;"
+                    "padding:18px;background:#24304a;border-radius:12px}</style>"
+                    "<h1>Подключение браузера к Luma</h1>"
+                    "<p>Скопируйте ключ и вставьте его в расширение Luma Browser. "
+                    "Ключ хранится только на этом компьютере.</p>"
+                    f"<code>{token}</code></html>").encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Frame-Options", "DENY")
+            self.send_header("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'")
+            self.end_headers()
+            self.wfile.write(body)
+            return None
         if path == "/status":
             payload = agent.health()
             payload["pending"] = agent.pending()
@@ -1049,6 +1073,20 @@ class AgentHandler(BaseHTTPRequestHandler):
         return self._json(404, {"ok": False, "reason": f"Маршрута {path} нет"})
 
     def do_POST(self) -> None:  # noqa: N802
+        if self.path.split("?", 1)[0] == "/browser/bridge":
+            origin = self._browser_extension_origin()
+            if not origin:
+                return self._json(403, {"ok": False, "reason": "Запрос не от локального расширения"})
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+            except ValueError:
+                length = 0
+            if not 0 < length <= 256_000:
+                return self._json(413, {"ok": False, "reason": "Слишком большой запрос"}, cors_origin=origin)
+            body = self._read_json()
+            if not browser_provider.bridge.paired(str(body.get("token") or "")):
+                return self._json(403, {"ok": False, "reason": "Неверный ключ подключения"}, cors_origin=origin)
+            return self._json(200, browser_provider.bridge.exchange(body), cors_origin=origin)
         if not self._local_request():
             return None
         path = self.path.split("?", 1)[0]
@@ -1183,6 +1221,18 @@ class AgentHandler(BaseHTTPRequestHandler):
         return self._json(404, {"ok": False, "reason": f"Маршрута {path} нет"})
 
     def do_OPTIONS(self) -> None:  # noqa: N802
+        if self.path.split("?", 1)[0] == "/browser/bridge":
+            origin = self._browser_extension_origin()
+            if not origin:
+                return self._json(403, {"ok": False, "reason": "Запрос не от локального расширения"})
+            self.send_response(204)
+            self.send_header("Access-Control-Allow-Origin", origin)
+            self.send_header("Access-Control-Allow-Methods", "POST, OPTIONS")
+            self.send_header("Access-Control-Allow-Headers", "Content-Type")
+            self.send_header("Vary", "Origin")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return None
         # Предзапрос браузера бывает только у чужого сайта: своему окну он не
         # нужен, панель ходит с сервера. Разрешений CORS агент не выдаёт.
         if not self._local_request():
@@ -1193,6 +1243,17 @@ class AgentHandler(BaseHTTPRequestHandler):
         return None
 
     # --- граница loopback -------------------------------------------------
+    def _browser_extension_origin(self) -> str:
+        """Allow only a Chromium extension on this computer to use the paired bridge."""
+        origin = str(self.headers.get("Origin") or "").strip().lower()
+        host = str(self.headers.get("Host") or "").strip().lower()
+        port = self.server.server_address[1] if hasattr(self, "server") else config.AGENT_PORT
+        if (self.role != "agent" or self.client_address[0] not in ("127.0.0.1", "::1")
+                or host not in (f"127.0.0.1:{port}", f"localhost:{port}")
+                or not re.fullmatch(r"chrome-extension://[a-p]{32}", origin)):
+            return ""
+        return origin
+
     def _local_request(self) -> bool:
         """Запрос от своего окна или от панели. Иначе — 403 и `False`.
 

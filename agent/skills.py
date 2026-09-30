@@ -661,26 +661,26 @@ SKILLS: dict[str, dict[str, Any]] = {
     "browser.tabs": {
         "provider": "browser",
         "title": "Вкладки браузера",
-        "description": "Список вкладок Chromium через локальный DevTools: заголовок и адрес.",
-        "host": "agent", "risk": "read", "params": {"limit": "int"},
+        "description": "Список вкладок Chrome, Edge или Яндекс Браузера через расширение или локальный DevTools.",
+        "host": "agent", "risk": "read", "params": {"limit": "int", "browser": "oneof:chrome|edge|yandex"},
         "requires": ("browser",), "ideas": ("И284",),
-        "doc": "Только loopback CDP. Ничего не кликает и не меняет на странице.",
+        "doc": "Расширение подключается по ключу к loopback. Ничего не кликает и не меняет на странице.",
     },
     "browser.page": {
         "provider": "browser",
         "title": "Прочитать текущую страницу",
         "description": "Заголовок, URL, видимый текст, ссылки, кнопки и структура форм без значений полей.",
         "host": "agent", "risk": "read",
-        "params": {"target_id": "text", "max_chars": "int"},
+        "params": {"target_id": "text", "max_chars": "int", "browser": "oneof:chrome|edge|yandex"},
         "requires": ("browser",), "ideas": ("И278", "И279"),
-        "doc": "Фиксированный read-only DOM script; password и значения форм не возвращаются.",
+        "doc": "Read-only DOM script; password и значения форм не возвращаются.",
     },
     "browser.find": {
         "provider": "browser",
         "title": "Найти на странице",
         "description": "Найти фразу в видимом тексте текущей вкладки и вернуть контекст.",
         "host": "agent", "risk": "read",
-        "params": {"query": "text", "target_id": "text", "limit": "int"},
+        "params": {"query": "text", "target_id": "text", "limit": "int", "browser": "oneof:chrome|edge|yandex"},
         "requires": ("browser",), "ideas": ("И278",),
         "doc": "Поиск идёт по уже прочитанному видимому тексту, без кликов и ввода.",
     },
@@ -688,7 +688,7 @@ SKILLS: dict[str, dict[str, Any]] = {
         "provider": "browser",
         "title": "Выделенный текст страницы",
         "description": "Прочитать выделенный фрагмент текущей вкладки вместе с заголовком и URL.",
-        "host": "agent", "risk": "read", "params": {"target_id": "text"},
+        "host": "agent", "risk": "read", "params": {"target_id": "text", "browser": "oneof:chrome|edge|yandex"},
         "requires": ("browser",), "ideas": ("И295",),
         "doc": "Источник сохраняется как URL/заголовок; содержимое форм и пароли не читаются.",
     },
@@ -1641,7 +1641,7 @@ _OPTIONAL = ("folders", "folder", "limit", "days", "save", "execute", "params", 
              "id", "list", "items", "item", "unit", "deadline", "goal", "amount", "absolute", "remind_at",
              "habit", "period", "mood", "day", "phrase", "meaning", "when", "repeat",
              # Provider handlers define safe defaults for observation selectors.
-             "screenshot", "ocr", "target_id", "max_chars")
+             "screenshot", "ocr", "target_id", "max_chars", "browser")
 
 
 # ---------------------------------------------------------------------------
