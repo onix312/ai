@@ -1,0 +1,10 @@
+{
+  "manifest_version": 3,
+  "name": "Luma Browser Bridge",
+  "version": "1.0.0",
+  "description": "Read-only access to open tabs for the local Luma assistant.",
+  "permissions": ["tabs", "scripting", "storage", "alarms"],
+  "host_permissions": ["http://127.0.0.1:8799/*", "http://*/*", "https://*/*"],
+  "background": {"service_worker": "background.js"},
+  "action": {"default_title": "NOZZA Browser", "default_popup": "popup.html"}
+}

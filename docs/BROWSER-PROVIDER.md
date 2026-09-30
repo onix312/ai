@@ -1,7 +1,7 @@
-# Browser Provider 1.0
+# Browser Provider: расширение и DevTools
 
-Browser Provider даёт NOZZA структурированный read-only контекст Chromium через
-локальный Chrome DevTools Protocol (CDP). Это отдельный слой от Desktop
+Browser Provider даёт Luma структурированный read-only контекст Chromium через
+локальное расширение либо Chrome DevTools Protocol (CDP). Это отдельный слой от Desktop
 Perception: браузер читается как документ и дерево элементов страницы, а не как
 набор пикселей.
 
@@ -27,7 +27,13 @@ Perception: браузер читается как документ и дере�
 
 ## Безопасность
 
-Provider принимает DevTools endpoint только на loopback:
+Расширение обращается только к `127.0.0.1:8799` и требует ключ подключения.
+Его запросы принимаются только с `chrome-extension://` и только с этого
+компьютера. Ключ показывается на локальной странице `/browser/setup` и
+сохраняется в профиле расширения. Страницы сайтов не могут получить ключ или
+выполнить запрос к мосту от имени расширения.
+
+При использовании CDP Provider принимает endpoint только на loopback:
 
 - `127.0.0.1`
 - `localhost`
@@ -43,7 +49,7 @@ required/disabled и факт заполненности для несекрет
 возвращаются. Для password/card/one-time-code полей не возвращается даже
 placeholder/fill state.
 
-Browser Provider 1.0 не умеет:
+Browser Provider пока не умеет:
 
 - кликать;
 - вводить текст;
@@ -56,7 +62,23 @@ Browser Provider 1.0 не умеет:
 Любые будущие browser.click/fill/submit должны быть отдельными write skills и
 проходить обычный confirmation policy.
 
-## Подключение
+## Подключение расширения (Chrome, Edge, Яндекс Браузер)
+
+1. Откройте страницу управления расширениями своего браузера и включите режим разработчика.
+2. Установите распакованное расширение из папки `agent/browser_extension`.
+3. Откройте `http://127.0.0.1:8799/browser/setup` при запущенной Luma.
+4. Скопируйте ключ со страницы в окно расширения и выберите браузер.
+
+После подключения навыки `browser.tabs`, `browser.page`, `browser.find` и
+`browser.selection` работают через расширение. Если подключено несколько
+браузеров, передайте параметр `browser` (`chrome`, `edge` или `yandex`) или
+выберите вкладку по ID вида `edge:123` из `browser.tabs`.
+
+Расширение читает только открытые вкладки и видимое содержимое обычных
+`http`/`https` страниц. Клики, заполнение форм и отправка данных через этот
+мост не реализованы.
+
+## Подключение через DevTools
 
 По умолчанию NOZZA ищет локальный DevTools endpoint:
 
@@ -97,7 +119,7 @@ Agent.run_skill
       ↓
 Runner / Browser Provider
       ↓
-127.0.0.1 Chromium DevTools
+локальное расширение или 127.0.0.1 Chromium DevTools
 ```
 
 Browser Provider не является отдельным execution path и не обходит skills

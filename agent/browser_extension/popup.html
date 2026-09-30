@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="ru">
+<meta charset="utf-8">
+<title>Luma Browser</title>
+<style>
+  body { font: 14px system-ui; width: 300px; padding: 16px; color: #eaf0fa; background: #111b2b; }
+  h1 { font-size: 18px; margin: 0 0 12px; }
+  label { display: block; margin: 12px 0 6px; }
+  input, select { width: 100%; box-sizing: border-box; padding: 9px; border-radius: 8px; border: 1px solid #657992; color: #fff; background: #1b2940; }
+  button { margin-top: 10px; padding: 9px 14px; color: #061529; background: #79d9cf; border: 0; border-radius: 8px; cursor: pointer; }
+  a { color: #79d9cf; }
+  #status { min-height: 20px; }
+</style>
+<h1>Luma Browser</h1>
+<p>Ключ подключения: <a href="http://127.0.0.1:8799/browser/setup" target="_blank">открыть страницу Luma</a></p>
+<label for="token">Вставьте ключ</label>
+<input id="token" type="password" autocomplete="off">
+<label for="browser">Браузер</label>
+<select id="browser">
+  <option value="auto">Определить автоматически</option>
+  <option value="chrome">Chrome</option>
+  <option value="edge">Edge</option>
+  <option value="yandex">Яндекс Браузер</option>
+</select>
+<button id="save">Подключить</button>
+<p id="status" role="status"></p>
+<script src="popup.js"></script>
+</html>
