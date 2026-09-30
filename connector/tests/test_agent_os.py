@@ -324,6 +324,14 @@ class SpeechRuntimeTests(ServerTestCase):
         self.assertIn("state", payload)
         self.assertIn("conversation_active", payload)
 
+    def test_input_device_route_reads_and_passes_json(self):
+        with patch.object(self.agent, "update_input_device", return_value={
+            "ok": True, "input_device": "WASAPI:Headset",
+        }) as update:
+            payload = self.post(self.speech_port, "/voice/input", {"device_id": "WASAPI:Headset"})
+        self.assertTrue(payload["ok"])
+        update.assert_called_once_with("WASAPI:Headset")
+
     def test_voice_disable_route_is_idempotent(self):
         payload = self.post(self.speech_port, "/voice/disable")
         self.assertTrue(payload["ok"])

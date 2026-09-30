@@ -81,6 +81,16 @@ class NativeQtSmokeTests(unittest.TestCase):
         self.assertFalse(orb._state_timer.isActive())
         orb.deleteLater()
 
+    def test_voice_input_selector_shows_selected_microphone(self):
+        page = VoicePage()
+        page.set_input_devices(
+            [{"id": "WASAPI:Headset", "name": "Headset · WASAPI"}],
+            "WASAPI:Headset",
+        )
+        self.assertEqual("WASAPI:Headset", page.input_device.currentData())
+        self.assertEqual("Headset · WASAPI", page.input_device.currentText())
+        page.deleteLater()
+
     def test_tray_animation_frames_change_with_state(self):
         first = status_icon("listening", 0).pixmap(64, 64).toImage()
         second = status_icon("listening", 1).pixmap(64, 64).toImage()

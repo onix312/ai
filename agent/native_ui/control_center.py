@@ -2210,6 +2210,7 @@ class VoicePage(QWidget):
     tts_reset = Signal()
     tts_test = Signal()
     output_save = Signal(str)
+    input_save = Signal(str)
     pronunciation_add = Signal(str, str)
     pronunciation_delete = Signal(str)
     voice_tune = Signal(int, float, int, float)
@@ -2308,6 +2309,20 @@ class VoicePage(QWidget):
         save_output.clicked.connect(lambda: self.output_save.emit(str(self.output_device.currentData() or "")))
         output_row.addWidget(save_output)
         engine.addLayout(output_row)
+
+        input_row = QHBoxLayout()
+        input_label = QLabel("Микрофон")
+        input_label.setObjectName("muted")
+        input_row.addWidget(input_label)
+        self.input_device = QComboBox()
+        self.input_device.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+        self.input_device.setMinimumWidth(120)
+        self.input_device.addItem("Системный микрофон по умолчанию", "")
+        input_row.addWidget(self.input_device, 1)
+        save_input = QPushButton("Применить")
+        save_input.clicked.connect(lambda: self.input_save.emit(str(self.input_device.currentData() or "")))
+        input_row.addWidget(save_input)
+        engine.addLayout(input_row)
 
         chain = QLabel("SILERO BAYA  →  PIPER  →  SYSTEM")
         chain.setObjectName("voiceChain")
@@ -2530,6 +2545,21 @@ class VoicePage(QWidget):
             index = self.output_device.count() - 1
         self.output_device.setCurrentIndex(max(0, index))
         self.output_device.blockSignals(False)
+
+    def set_input_devices(self, devices: list[dict[str, str]], selected: str) -> None:
+        if self.input_device.hasFocus() or self.input_device.view().isVisible():
+            return
+        self.input_device.blockSignals(True)
+        self.input_device.clear()
+        self.input_device.addItem("Системный микрофон по умолчанию", "")
+        for device in devices:
+            self.input_device.addItem(str(device.get("name") or ""), str(device.get("id") or ""))
+        index = self.input_device.findData(selected)
+        if selected and index < 0:
+            self.input_device.addItem("Недоступен: " + selected, selected)
+            index = self.input_device.count() - 1
+        self.input_device.setCurrentIndex(max(0, index))
+        self.input_device.blockSignals(False)
 
 
 class ActivityPage(QWidget):
@@ -3325,6 +3355,7 @@ class ControlCenter(QMainWindow):
     tts_reset = Signal()
     tts_test = Signal()
     output_save = Signal(str)
+    input_save = Signal(str)
     pronunciation_add = Signal(str, str)
     pronunciation_delete = Signal(str)
 
@@ -3410,6 +3441,7 @@ class ControlCenter(QMainWindow):
         self.voice_page.tts_reset.connect(self.tts_reset.emit)
         self.voice_page.tts_test.connect(self.tts_test.emit)
         self.voice_page.output_save.connect(self.output_save.emit)
+        self.voice_page.input_save.connect(self.input_save.emit)
         self.voice_page.pronunciation_add.connect(self.pronunciation_add.emit)
         self.voice_page.pronunciation_delete.connect(self.pronunciation_delete.emit)
         self.voice_page.voice_tune.connect(self.voice_tune.emit)

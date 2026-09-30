@@ -87,6 +87,7 @@ class NativeApp:
         self.center.tts_reset.connect(self.reset_tts)
         self.center.tts_test.connect(self.test_tts)
         self.center.output_save.connect(self.set_output_device)
+        self.center.input_save.connect(self.set_input_device)
         self.center.pronunciation_add.connect(self.add_pronunciation)
         self.center.pronunciation_delete.connect(self.delete_pronunciation)
         self.center.memory_pin.connect(self.memory_pin)
@@ -255,6 +256,9 @@ class NativeApp:
             "last_synth_ms": self.state.tts_last_synth_ms,
             "last_chars": self.state.tts_last_chars,
         })
+        self.center.voice_page.set_input_devices(
+            self.state.input_devices, self.state.input_device,
+        )
         self.center.set_voice_diagnostics(
             audio_level=self.state.audio_level,
             echo_floor=self.state.echo_floor,
@@ -713,6 +717,21 @@ class NativeApp:
             else:
                 self.center.set_tts_message(str(payload.get("reason") or "Не удалось выбрать аудиовывод."))
         self.run_async(lambda: self.backend.set_output_device(device_id), done)
+
+    def set_input_device(self, device_id: str) -> None:
+        def done(payload: dict[str, Any]) -> None:
+            if payload.get("ok"):
+                selected = next((row.get("name") for row in payload.get("input_devices", [])
+                                 if row.get("id") == device_id), "Системный микрофон")
+                suffix = " Микрофон перезапускается." if payload.get("restarting") else ""
+                self.center.set_tts_message(f"Аудиовход: {selected}.{suffix}")
+                self.center.voice_page.set_input_devices(
+                    list(payload.get("input_devices") or []), device_id,
+                )
+            else:
+                self.center.set_tts_message(str(payload.get("reason") or "Не удалось выбрать микрофон."))
+
+        self.run_async(lambda: self.backend.set_input_device(device_id), done)
 
     def reset_tts(self) -> None:
         def done(payload: dict[str, Any]) -> None:

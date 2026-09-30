@@ -200,6 +200,11 @@ class Agent:
             self._runner = executor.Runner()
             self._tts = tts_service.TtsService(self._runner.store)
             self._tts.restore()
+            try:
+                saved_input = self._runner.store.get_preference("voice.input_device") or {}
+                self.microphone.set_input_device(str(saved_input.get("value") or ""))
+            except Exception:
+                pass
         return self._runner
 
     @property
@@ -213,6 +218,16 @@ class Agent:
 
     def update_tts_settings(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self.tts.update(payload)
+
+    def update_input_device(self, device_id: str) -> dict[str, Any]:
+        store = self.runner.store
+        result = self.microphone.set_input_device(device_id)
+        if result.get("ok"):
+            if device_id:
+                store.set_preference("voice.input_device", device_id)
+            else:
+                store.delete_preference("voice.input_device")
+        return result
 
     @property
     def brain(self) -> brain_mod.Brain:
@@ -1081,6 +1096,9 @@ class AgentHandler(BaseHTTPRequestHandler):
             return self._json(200, agent.update_tts_settings(self._read_json()))
         if self.role == "speech" and path == "/voice/tune":
             return self._json(200, agent.microphone.tune(self._read_json()))
+        if self.role == "speech" and path == "/voice/input":
+            body = self._read_json()
+            return self._json(200, agent.update_input_device(str(body.get("device_id") or "")))
         if self.role == "speech" and path == "/voice/diagnostics/reset":
             return self._json(200, agent.microphone.reset_diagnostics())
         if self.role != "agent":
