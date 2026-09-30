@@ -219,22 +219,22 @@ class VoiceOrb(QWidget):
             Qt.WindowDoesNotAcceptFocus
         )
         self.setAttribute(Qt.WA_TranslucentBackground, True)
-        self.setFixedWidth(390)
-        self.setFixedHeight(72)
+        self.setFixedWidth(360)
+        self.setFixedHeight(64)
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
         row = QHBoxLayout()
-        row.setContentsMargins(8, 5, 14, 5)
-        row.setSpacing(10)
+        row.setContentsMargins(7, 4, 12, 4)
+        row.setSpacing(8)
         self.core = LumaOrbCore(self, compact=True)
         row.addWidget(self.core, 0, Qt.AlignVCenter)
 
         text = QVBoxLayout()
         text.setSpacing(2)
         self.label = QLabel("Люма · Готова")
-        self.label.setStyleSheet("background:transparent;color:#F8F7FF;font-size:14px;font-weight:700;")
+        self.label.setStyleSheet("background:transparent;color:#F8F7FF;font-size:12px;font-weight:750;")
         self.context_label = QLabel("")
         self.context_label.setWordWrap(True)
         self.context_label.setStyleSheet("background:transparent;color:#B7B2CF;font-size:12px;")
@@ -254,7 +254,7 @@ class VoiceOrb(QWidget):
         showcase_row.setContentsMargins(8, 0, 12, 10)
         showcase_row.setSpacing(4)
         self.portrait = LumaPortrait(self.showcase)
-        self.portrait.setFixedSize(290, 245)
+        self.portrait.setFixedSize(330, 270)
         showcase_row.addWidget(self.portrait)
         states = QVBoxLayout()
         states.setSpacing(8)
@@ -265,7 +265,7 @@ class VoiceOrb(QWidget):
         ):
             item = QWidget()
             item.setObjectName("voiceStateCard")
-            item.setMinimumHeight(42)
+            item.setMinimumHeight(44)
             item_row = QHBoxLayout(item)
             item_row.setContentsMargins(5, 2, 10, 2)
             item_row.setSpacing(8)
@@ -273,7 +273,7 @@ class VoiceOrb(QWidget):
             icon.setPixmap(status_icon(key).pixmap(34, 34))
             item_row.addWidget(icon)
             title = QLabel(label)
-            title.setStyleSheet("background:transparent;color:#F4F0FF;font-size:13px;font-weight:700;")
+            title.setStyleSheet("background:transparent;color:#F4F0FF;font-size:12px;font-weight:750;")
             item_row.addWidget(title, 1)
             states.addWidget(item)
             self.state_labels[key] = item
@@ -378,11 +378,11 @@ class VoiceOrb(QWidget):
 
     def _resize_for_state(self) -> None:
         target_height = (
-            330 if self._state in ("listening", "thinking", "speaking", "working")
-            else 112 if self.context_label.text() or self.reply_label.text()
-            else 72
+            350 if self._state in ("listening", "thinking", "speaking", "working")
+            else 100 if self.context_label.text() or self.reply_label.text()
+            else 64
         )
-        target_width = 520 if target_height == 330 else 390
+        target_width = 560 if target_height == 350 else 360
         if self.width() != target_width:
             self.setFixedWidth(target_width)
         if self.height() != target_height:
@@ -402,6 +402,6 @@ class VoiceOrb(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing, True)
         rect = self.rect().adjusted(1, 1, -1, -1)
-        painter.setPen(QPen(QColor("#454B83"), 1))
-        painter.setBrush(QColor(12, 13, 30, 238))
-        painter.drawRoundedRect(rect, 20, 20)
+        painter.setPen(QPen(QColor("#7862D8"), 1.4))
+        painter.setBrush(QColor(7, 12, 31, 244))
+        painter.drawRoundedRect(rect, 14, 14)

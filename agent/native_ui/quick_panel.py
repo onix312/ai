@@ -68,15 +68,15 @@ class QuickActionButton(QPushButton):
         super().__init__("")
         self.title = title
         self.icon = icon
-        self.setMinimumHeight(74)
+        self.setMinimumHeight(62)
 
     def paintEvent(self, _event) -> None:  # noqa: N802
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing, True)
         rect = self.rect().adjusted(1, 1, -1, -1)
-        painter.setBrush(QColor("#24214B" if self.underMouse() else "#181B35"))
-        painter.setPen(QPen(QColor("#9A7CFF" if self.underMouse() else "#35395F"), 1))
-        painter.drawRoundedRect(rect, 10, 10)
+        painter.setBrush(QColor("#24214B" if self.underMouse() else "#101936"))
+        painter.setPen(QPen(QColor("#9A7CFF" if self.underMouse() else "#354A79"), 1))
+        painter.drawRoundedRect(rect, 8, 8)
         x = self.width() / 2
         y = 21
         painter.setPen(QPen(QColor("#CFBAFF"), 2, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
@@ -103,8 +103,8 @@ class QuickActionButton(QPushButton):
             painter.drawLine(int(x - 4), 17, int(x + 4), 17)
             painter.drawLine(int(x - 4), 22, int(x + 2), 22)
         painter.setPen(QColor("#F1EDFF"))
-        painter.setFont(QFont("Segoe UI", 10))
-        painter.drawText(self.rect().adjusted(6, 39, -6, -4), Qt.AlignCenter, self.title)
+        painter.setFont(QFont("Segoe UI", 9))
+        painter.drawText(self.rect().adjusted(5, 35, -5, -3), Qt.AlignCenter, self.title)
 
 
 class QuickPanel(QWidget):
@@ -116,24 +116,24 @@ class QuickPanel(QWidget):
         super().__init__()
         self.setWindowFlags(Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
         self.setAttribute(Qt.WA_TranslucentBackground, True)
-        self.setFixedWidth(690)
+        self.setFixedWidth(590)
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         card = QFrame()
         card.setObjectName("card")
         card.setStyleSheet(theme.stylesheet() + """
         QFrame#card {
-            background:#0C1025;
-            border:2px solid #8466F7;
-            border-radius:22px;
+            background:rgba(8, 14, 36, 246);
+            border:2px solid #8168FF;
+            border-radius:16px;
         }
         QLineEdit {
-            background:#15172D;
-            border:1px solid #3B3F69;
-            border-radius:13px;
+            background:rgba(11, 18, 43, 238);
+            border:1px solid #394878;
+            border-radius:9px;
             color:#F8F7FF;
-            font-size:18px;
-            padding:14px 16px;
+            font-size:14px;
+            padding:9px 12px;
         }
         QLineEdit:focus {
             border:1px solid #8B6EF0;
@@ -167,8 +167,8 @@ class QuickPanel(QWidget):
         }
         """)
         box = QVBoxLayout(card)
-        box.setContentsMargins(20, 16, 20, 18)
-        box.setSpacing(8)
+        box.setContentsMargins(14, 11, 14, 13)
+        box.setSpacing(6)
         header = QHBoxLayout()
         self.clock = QLabel()
         self.clock.setObjectName("quickBrand")
@@ -195,15 +195,15 @@ class QuickPanel(QWidget):
         hero = QHBoxLayout()
         copy = QVBoxLayout()
         greeting = QLabel("Привет!\nЯ LUMA")
-        greeting.setStyleSheet("color:#FFFFFF;font-size:27px;font-weight:800;background:transparent;")
+        greeting.setStyleSheet("color:#FFFFFF;font-size:24px;font-weight:900;background:transparent;")
         copy.addWidget(greeting)
         subtitle = QLabel("Слушаю тебя…\nВсегда рядом ♡")
-        subtitle.setStyleSheet("color:#D2C6FF;font-size:14px;background:transparent;")
+        subtitle.setStyleSheet("color:#D2C6FF;font-size:12px;background:transparent;")
         copy.addWidget(subtitle)
         copy.addStretch(1)
         hero.addLayout(copy, 2)
         self.portrait = LumaPortrait()
-        self.portrait.setFixedSize(240, 168)
+        self.portrait.setFixedSize(285, 164)
         hero.addWidget(self.portrait, 3, Qt.AlignRight)
         box.addLayout(hero)
         row = QHBoxLayout()
@@ -214,12 +214,13 @@ class QuickPanel(QWidget):
         box.addLayout(row)
         self.answer = QLabel("")
         self.answer.setWordWrap(True)
-        self.answer.setStyleSheet("color:#E7E3F3; font-size:14px; background:transparent;")
+        self.answer.setStyleSheet("color:#E7E3F3;font-size:11px;background:rgba(12,19,44,220);"
+                                  "border:1px solid #334470;border-radius:8px;padding:6px 9px;")
         self.answer.hide()
         box.addWidget(self.answer)
         mic_row = QHBoxLayout()
         mic_row.addStretch(1)
-        mic = RoundMicButton()
+        mic = RoundMicButton(48)
         self.mic = mic
         mic.clicked.connect(self.mic_toggle)
         mic_row.addWidget(mic)

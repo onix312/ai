@@ -1,6 +1,6 @@
-"""Browser Provider 1.0: read-only structured Chromium context over local CDP.
+"""Read-only structured Chromium context through an extension or local CDP.
 
-The provider never accepts arbitrary JavaScript from callers. It connects only to
+The provider never accepts arbitrary JavaScript from callers. CDP connects only to
 loopback DevTools endpoints and evaluates a fixed inspection script that returns
 visible text, links, buttons, form metadata and current selection. Form values
 are intentionally not returned.
@@ -16,6 +16,7 @@ import urllib.request
 from typing import Any
 
 from . import config
+from .browser_provider import bridge
 
 MAX_TABS = 50
 MAX_TEXT = 30000
@@ -157,6 +158,8 @@ def _websocket_available() -> bool:
 
 
 def probe() -> tuple[bool, str]:
+    if bridge.connected():
+        return True, ""
     if not _websocket_available():
         return False, "Нет websocket-client — Browser Provider недоступен"
     try:
@@ -175,8 +178,28 @@ def probe() -> tuple[bool, str]:
     return True, ""
 
 
-def tabs(limit: int = 30) -> dict[str, Any]:
+def tabs(limit: int = 30, browser_name: str = "") -> dict[str, Any]:
     limit = max(1, min(MAX_TABS, int(limit or 30)))
+    if bridge.connected():
+        names = [browser_name] if browser_name else list(dict.fromkeys(
+            session["browser"] for session in bridge.sessions()))
+        rows = []
+        for name in names:
+            result = bridge.request("tabs", {"browser": name})
+            if not result.get("ok"):
+                return {"ok": False, "tabs": [], "reason": str(result.get("reason") or "Расширение не ответило")}
+            for tab in result.get("tabs") or []:
+                if not isinstance(tab, dict) or not isinstance(tab.get("id"), int):
+                    continue
+                rows.append({"id": f"{name}:{tab['id']}", "browser": name,
+                             "title": str(tab.get("title") or "")[:500],
+                             "url": str(tab.get("url") or "")[:2000],
+                             "active": bool(tab.get("active"))})
+                if len(rows) >= limit:
+                    break
+            if len(rows) >= limit:
+                break
+        return {"ok": True, "tabs": rows, "count": len(rows), "reason": ""}
     try:
         data = _http_json("/json/list")
     except BrowserError as exc:
@@ -307,7 +330,32 @@ def _evaluate(target: dict[str, Any], expression: str) -> Any:
     return value
 
 
-def page(target_id: str = "", max_chars: int = MAX_TEXT) -> dict[str, Any]:
+def page(target_id: str = "", max_chars: int = MAX_TEXT, browser_name: str = "") -> dict[str, Any]:
+    if bridge.connected():
+        target_id = str(target_id or "").strip()
+        if ":" in target_id:
+            browser_name, target_id = target_id.split(":", 1)
+        if target_id and not target_id.isdecimal():
+            return {"ok": False, "reason": "Неверный номер вкладки расширения"}
+        result = bridge.request("observe", {"browser": browser_name,
+                                             "tab_id": int(target_id) if target_id else 0})
+        if not result.get("ok"):
+            return {"ok": False, "reason": str(result.get("reason") or "Расширение не ответило")}
+        tab = result.get("tab") or {}
+        data = result.get("page") or {}
+        if not isinstance(tab, dict) or not isinstance(data, dict):
+            return {"ok": False, "reason": "Расширение вернуло неожиданные данные"}
+        max_chars = max(500, min(MAX_TEXT, int(max_chars or MAX_TEXT)))
+        name = browser_name or next((item["browser"] for item in bridge.sessions()), "chrome")
+        return {"ok": True, "target_id": f"{name}:{tab.get('id')}",
+                "title": str(tab.get("title") or "")[:500],
+                "url": str(tab.get("url") or "")[:2000],
+                "text": str(data.get("text") or "")[:max_chars],
+                "selection": str(data.get("selected_text") or "")[:5000],
+                "links": list(data.get("links") or [])[:MAX_LINKS],
+                "buttons": list(data.get("buttons") or [])[:MAX_BUTTONS],
+                "forms": [{"fields": list(data.get("fields") or [])[:50]}],
+                "reason": ""}
     try:
         target = _target(target_id)
         data = _evaluate(target, _INSPECT_JS)
@@ -331,8 +379,8 @@ def page(target_id: str = "", max_chars: int = MAX_TEXT) -> dict[str, Any]:
     }
 
 
-def selection(target_id: str = "") -> dict[str, Any]:
-    result = page(target_id=target_id, max_chars=500)
+def selection(target_id: str = "", browser_name: str = "") -> dict[str, Any]:
+    result = page(target_id=target_id, max_chars=500, browser_name=browser_name)
     if not result.get("ok"):
         return result
     return {
@@ -345,11 +393,11 @@ def selection(target_id: str = "") -> dict[str, Any]:
     }
 
 
-def find(query: str, target_id: str = "", limit: int = 8) -> dict[str, Any]:
+def find(query: str, target_id: str = "", limit: int = 8, browser_name: str = "") -> dict[str, Any]:
     needle = " ".join(str(query or "").split())
     if not needle:
         return {"ok": False, "reason": "Пустой запрос поиска", "matches": []}
-    result = page(target_id=target_id, max_chars=MAX_TEXT)
+    result = page(target_id=target_id, max_chars=MAX_TEXT, browser_name=browser_name)
     if not result.get("ok"):
         return {**result, "matches": []}
     text = str(result.get("text") or "")

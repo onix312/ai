@@ -167,6 +167,7 @@ class TodayPage(QWidget):
 
     def __init__(self) -> None:
         super().__init__()
+        self.setObjectName("todayPage")
         self._payload: dict[str, Any] = {}
         root = QVBoxLayout(self)
         root.setContentsMargins(2, 2, 2, 2)
@@ -455,6 +456,7 @@ class LearningPage(QWidget):
 
     def __init__(self) -> None:
         super().__init__()
+        self.setObjectName("learningPage")
         self._payload: dict[str, Any] = {}
         root = QVBoxLayout(self)
         root.setContentsMargins(2, 2, 2, 2)
@@ -769,6 +771,7 @@ class JournalPage(QWidget):
 
     def __init__(self) -> None:
         super().__init__()
+        self.setObjectName("journalPage")
         self._payload: dict[str, Any] = {}
         root = QVBoxLayout(self)
         root.setContentsMargins(2, 2, 2, 2)
@@ -936,6 +939,7 @@ class MemoryPage(QWidget):
 
     def __init__(self) -> None:
         super().__init__()
+        self.setObjectName("memoryPage")
         self._payload: dict[str, Any] = {}
         root = QVBoxLayout(self)
         root.setContentsMargins(2, 2, 2, 2)
@@ -956,7 +960,10 @@ class MemoryPage(QWidget):
         head.addWidget(refresh)
         root.addLayout(head)
 
-        metrics = QHBoxLayout()
+        metrics_host = QWidget()
+        metrics_host.setObjectName("memoryMetrics")
+        metrics = QHBoxLayout(metrics_host)
+        metrics.setContentsMargins(0, 0, 0, 0)
         metrics.setSpacing(10)
         self.total_metric = QLabel("0")
         self.total_metric.setObjectName("opsMetric")
@@ -980,7 +987,8 @@ class MemoryPage(QWidget):
             box.addWidget(label)
             box.addWidget(value)
             metrics.addWidget(card, 1)
-        root.addLayout(metrics)
+        metrics_host.hide()
+        root.addWidget(metrics_host)
 
         filters = QHBoxLayout()
         self.search = QLineEdit()
@@ -1013,6 +1021,7 @@ class MemoryPage(QWidget):
         )
         note.setObjectName("voiceChain")
         note.setWordWrap(True)
+        note.hide()
         root.addWidget(note)
 
         self.scroll = QScrollArea()
@@ -1192,6 +1201,7 @@ class SkillsPage(QWidget):
 
     def __init__(self) -> None:
         super().__init__()
+        self.setObjectName("skillsPage")
         self._payload: dict[str, Any] = {}
         root = QVBoxLayout(self)
         root.setContentsMargins(2, 2, 2, 2)
@@ -1211,7 +1221,10 @@ class SkillsPage(QWidget):
         head.addWidget(refresh)
         root.addLayout(head)
 
-        metrics = QHBoxLayout()
+        metrics_host = QWidget()
+        metrics_host.setObjectName("skillsMetrics")
+        metrics = QHBoxLayout(metrics_host)
+        metrics.setContentsMargins(0, 0, 0, 0)
         self.ready_metric = QLabel("0")
         self.ready_metric.setObjectName("skillMetricReady")
         self.total_metric = QLabel("0")
@@ -1234,7 +1247,8 @@ class SkillsPage(QWidget):
             box.addWidget(kicker)
             box.addWidget(widget)
             metrics.addWidget(card)
-        root.addLayout(metrics)
+        metrics_host.hide()
+        root.addWidget(metrics_host)
 
         self.group_filter = ""
         self.group_tiles: list[QToolButton] = []
@@ -1261,7 +1275,10 @@ class SkillsPage(QWidget):
                 tiles.addWidget(button, 1)
             root.addLayout(tiles)
 
-        filter_row = QHBoxLayout()
+        filter_host = QWidget()
+        filter_host.setObjectName("skillsFilters")
+        filter_row = QHBoxLayout(filter_host)
+        filter_row.setContentsMargins(0, 0, 0, 0)
         self.search = QLineEdit()
         self.search.setPlaceholderText("Найти функцию: экран, Steam, файл, принтер, память…")
         self.search.textChanged.connect(self._render)
@@ -1282,7 +1299,13 @@ class SkillsPage(QWidget):
             self.risk_filter.addItem(value, value)
         self.risk_filter.currentIndexChanged.connect(self._render)
         filter_row.addWidget(self.risk_filter)
-        root.addLayout(filter_row)
+        root.addWidget(self.search)
+        filter_host.hide()
+        root.addWidget(filter_host)
+
+        scenarios_title = QLabel("Готовые сценарии")
+        scenarios_title.setObjectName("sectionTitle")
+        root.addWidget(scenarios_title)
 
         brain_note = QLabel(
             "LUMA TOOL ROUTER · мозг получает релевантные функции под каждую фразу, "
@@ -1290,6 +1313,7 @@ class SkillsPage(QWidget):
         )
         brain_note.setObjectName("voiceChain")
         brain_note.setWordWrap(True)
+        brain_note.hide()
         root.addWidget(brain_note)
 
         self.browser = QTextBrowser()
@@ -1408,12 +1432,13 @@ class ChatPage(QWidget):
 
     def __init__(self) -> None:
         super().__init__()
+        self.setObjectName("chatPage")
         self._turns: list[dict[str, str]] = []
         self._has_history = False
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(2, 2, 2, 2)
-        layout.setSpacing(12)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(9)
 
         head = QHBoxLayout()
         title_box = QVBoxLayout()
@@ -1429,9 +1454,10 @@ class ChatPage(QWidget):
         head.addWidget(clear)
         layout.addLayout(head)
 
-        live_card = GlassCard("violet")
-        live_row = QHBoxLayout(live_card)
-        live_row.setContentsMargins(12, 9, 14, 9)
+        self.live_card = GlassCard("violet")
+        self.live_card.setObjectName("chatLiveCard")
+        live_row = QHBoxLayout(self.live_card)
+        live_row.setContentsMargins(10, 6, 12, 6)
         live_row.setSpacing(10)
         self.live_portrait = LumaPortrait(compact=True)
         self.live_portrait.setFixedSize(42, 50)
@@ -1449,7 +1475,8 @@ class ChatPage(QWidget):
         self.live_orb = LumaOrbCore(compact=True)
         self.live_orb.setFixedSize(46, 46)
         live_row.addWidget(self.live_orb, 0, Qt.AlignVCenter)
-        layout.addWidget(live_card)
+        layout.addWidget(self.live_card)
+        self.live_card.hide()
 
         self.trace_card = GlassCard()
         trace_box = QVBoxLayout(self.trace_card)
@@ -1501,7 +1528,7 @@ class ChatPage(QWidget):
         portrait_box.setContentsMargins(8, 12, 8, 14)
         portrait_box.addStretch(1)
         self.welcome_portrait = LumaPortrait()
-        self.welcome_portrait.setMinimumSize(190, 270)
+        self.welcome_portrait.setMinimumSize(230, 320)
         portrait_box.addWidget(self.welcome_portrait, 0, Qt.AlignCenter)
         persona = QLabel("LUMA · ВСЕГДА РЯДОМ")
         persona.setObjectName("heroKicker")
@@ -1792,6 +1819,7 @@ class ChatPage(QWidget):
                           skill: str = "", detail: str = "", task_id: int = 0,
                           audio_level: int = 0) -> None:
         clean_phase = str(phase or "idle").casefold()
+        self.live_card.setVisible(clean_phase not in {"idle", "done"})
         orb_state = {
             "executing": "working",
             "task": "working",
@@ -1849,14 +1877,16 @@ class HomePage(QWidget):
 
     def __init__(self) -> None:
         super().__init__()
+        self.setObjectName("homePage")
         root = QVBoxLayout(self)
-        root.setContentsMargins(2, 2, 2, 2)
-        root.setSpacing(14)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(10)
 
         hero = GlassCard("violet")
+        hero.setObjectName("homeHero")
         hero_layout = QHBoxLayout(hero)
-        hero_layout.setContentsMargins(18, 16, 18, 16)
-        hero_layout.setSpacing(14)
+        hero_layout.setContentsMargins(14, 12, 14, 12)
+        hero_layout.setSpacing(10)
         main_column = QVBoxLayout()
         main_column.setSpacing(12)
         hero_top = QHBoxLayout()
@@ -1888,22 +1918,22 @@ class HomePage(QWidget):
         persona.addWidget(self.persona_badge, 0, Qt.AlignLeft)
 
         persona.addStretch(1)
-        for label, command in (
-            ("✓  Что у меня сегодня", "Что у меня сегодня?"),
-            ("▣  Открыть загрузки", "Открой загрузки"),
-            ("◇  Активные задачи", "Покажи активные задачи"),
+        for label, page in (
+            ("✓  Новая задача", "tasks"),
+            ("▣  Открыть приложение", "skills"),
+            ("□  Управление ПК", "skills"),
         ):
             button = QPushButton(label)
             button.setObjectName("heroAction")
             button.setMinimumHeight(38)
-            button.clicked.connect(lambda _=False, value=command: self.submitted.emit(value))
+            button.clicked.connect(lambda _=False, value=page: self.navigate.emit(value))
             persona.addWidget(button)
         hero_top.addLayout(persona, 4)
 
         orb_column = QVBoxLayout()
         orb_column.setSpacing(2)
         self.portrait = LumaPortrait()
-        self.portrait.setMinimumSize(280, 340)
+        self.portrait.setMinimumSize(340, 390)
         orb_column.addWidget(self.portrait, 1, Qt.AlignCenter)
         self.orb = LumaOrbCore(compact=True)
         orb_column.addWidget(self.orb, 0, Qt.AlignCenter)
@@ -2030,9 +2060,10 @@ class HomePage(QWidget):
         hero_layout.addLayout(telemetry, 3)
 
         action_card = GlassCard()
+        action_card.setObjectName("homeActions")
         action_box = QVBoxLayout(action_card)
-        action_box.setContentsMargins(16, 13, 16, 13)
-        action_box.setSpacing(10)
+        action_box.setContentsMargins(13, 10, 13, 10)
+        action_box.setSpacing(8)
         action_title = QLabel("Быстрые действия")
         action_title.setObjectName("sectionTitle")
         action_box.addWidget(action_title)
@@ -2041,16 +2072,21 @@ class HomePage(QWidget):
         self.search_input.returnPressed.connect(self._submit_search)
         action_box.addWidget(self.search_input)
         actions = QHBoxLayout()
-        for label, page in (
-            ("◈  Разговор", "chat"),
-            ("◉  Голос", "voice"),
-            ("◌  Память", "memory"),
-            ("⬡  Приложения", "skills"),
+        for label, command in (
+            ("♫\nМузыка", "Включи музыку"),
+            ("▣\nДисплей", "Открой настройки дисплея"),
+            ("◖\nГромкость", "Покажи управление громкостью"),
+            ("⌗\nСкриншот", "Сделай скриншот"),
+            ("◷\nТаймер", "Поставь таймер на 10 минут"),
+            ("▤\nЗаметка", "Создай заметку"),
+            ("Aa\nПеревод", "Переведи"),
+            ("▦\nКалендарь", "Что у меня сегодня?"),
         ):
             button = QPushButton(label)
             button.setObjectName("suggestion")
-            button.clicked.connect(lambda _=False, value=page: self.navigate.emit(value))
-            actions.addWidget(button)
+            button.setMinimumHeight(52)
+            button.clicked.connect(lambda _=False, value=command: self.submitted.emit(value))
+            actions.addWidget(button, 1)
         action_box.addLayout(actions)
         main_column.addWidget(action_card)
         root.addWidget(hero, 1)
@@ -2218,6 +2254,7 @@ class VoicePage(QWidget):
 
     def __init__(self) -> None:
         super().__init__()
+        self.setObjectName("voicePage")
         root = QVBoxLayout(self)
         root.setContentsMargins(2, 2, 2, 2)
         root.setSpacing(14)
@@ -2505,8 +2542,7 @@ class VoicePage(QWidget):
         super().resizeEvent(event)
         compact = self.width() < 1080
         self.content_layout.setDirection(QBoxLayout.TopToBottom if compact else QBoxLayout.LeftToRight)
-        size = (100, 120) if compact else (170, 184)
-        self.portrait.setFixedSize(*size)
+        self.portrait.setFixedSize(*( (100, 120) if compact else (170, 184) ))
         self.preview_orb.setVisible(not compact)
 
     def set_runtime_state(self, state: str, audio_level: int = 0) -> None:
@@ -2531,35 +2567,27 @@ class VoicePage(QWidget):
         bits.append("LOCAL READY" if ready else "FALLBACK")
         self.voice_profile.setText(" · ".join(bits))
 
-    def set_output_devices(self, devices: list[dict[str, str]], selected: str) -> None:
-        if self.output_device.hasFocus() or self.output_device.view().isVisible():
+    @staticmethod
+    def _set_device_items(combo: QComboBox, label: str, devices: list[dict[str, str]], selected: str) -> None:
+        if combo.hasFocus() or combo.view().isVisible():
             return
-        self.output_device.blockSignals(True)
-        self.output_device.clear()
-        self.output_device.addItem("Системное устройство по умолчанию", "")
+        combo.blockSignals(True)
+        combo.clear()
+        combo.addItem(label, "")
         for device in devices:
-            self.output_device.addItem(str(device.get("name") or ""), str(device.get("id") or ""))
-        index = self.output_device.findData(selected)
+            combo.addItem(str(device.get("name") or ""), str(device.get("id") or ""))
+        index = combo.findData(selected)
         if selected and index < 0:
-            self.output_device.addItem("Недоступно: " + selected, selected)
-            index = self.output_device.count() - 1
-        self.output_device.setCurrentIndex(max(0, index))
-        self.output_device.blockSignals(False)
+            combo.addItem("Недоступно: " + selected, selected)
+            index = combo.count() - 1
+        combo.setCurrentIndex(max(0, index))
+        combo.blockSignals(False)
+
+    def set_output_devices(self, devices: list[dict[str, str]], selected: str) -> None:
+        self._set_device_items(self.output_device, "Системное устройство по умолчанию", devices, selected)
 
     def set_input_devices(self, devices: list[dict[str, str]], selected: str) -> None:
-        if self.input_device.hasFocus() or self.input_device.view().isVisible():
-            return
-        self.input_device.blockSignals(True)
-        self.input_device.clear()
-        self.input_device.addItem("Системный микрофон по умолчанию", "")
-        for device in devices:
-            self.input_device.addItem(str(device.get("name") or ""), str(device.get("id") or ""))
-        index = self.input_device.findData(selected)
-        if selected and index < 0:
-            self.input_device.addItem("Недоступен: " + selected, selected)
-            index = self.input_device.count() - 1
-        self.input_device.setCurrentIndex(max(0, index))
-        self.input_device.blockSignals(False)
+        self._set_device_items(self.input_device, "Системный микрофон по умолчанию", devices, selected)
 
 
 class ActivityPage(QWidget):
@@ -2578,6 +2606,7 @@ class ActivityPage(QWidget):
 
     def __init__(self) -> None:
         super().__init__()
+        self.setObjectName("activityPage")
         self._payload: dict[str, Any] = {}
         layout = QVBoxLayout(self)
 
@@ -2915,6 +2944,7 @@ class TasksPage(QWidget):
 
     def __init__(self) -> None:
         super().__init__()
+        self.setObjectName("tasksPage")
         self.layout = QVBoxLayout(self)
         head = QHBoxLayout()
         title = QLabel("Задачи")
@@ -2931,7 +2961,10 @@ class TasksPage(QWidget):
         sub.setWordWrap(True)
         self.layout.addWidget(sub)
 
-        metrics = QHBoxLayout()
+        metrics_host = QWidget()
+        metrics_host.setObjectName("taskMetrics")
+        metrics = QHBoxLayout(metrics_host)
+        metrics.setContentsMargins(0, 0, 0, 0)
         metrics.setSpacing(10)
         self.tasks_running_metric = QLabel("0")
         self.tasks_running_metric.setObjectName("opsMetric")
@@ -2955,19 +2988,20 @@ class TasksPage(QWidget):
             box.addWidget(label)
             box.addWidget(value)
             metrics.addWidget(card, 1)
-        self.layout.addLayout(metrics)
+        metrics_host.hide()
+        self.layout.addWidget(metrics_host)
 
         planner_card = GlassCard("violet")
         planner_box = QVBoxLayout(planner_card)
         planner_box.setContentsMargins(14, 12, 14, 12)
-        planner_label = QLabel("PLAN A GOAL")
+        planner_label = QLabel("НОВАЯ ЗАДАЧА")
         planner_label.setObjectName("heroKicker")
         planner_box.addWidget(planner_label)
         planner_row = QHBoxLayout()
         self.goal_input = QLineEdit()
         self.goal_input.setPlaceholderText("Например: подготовь компьютер к работе")
         planner_row.addWidget(self.goal_input, 1)
-        preview = QPushButton("Составить план")
+        preview = QPushButton("+ Новая задача")
         preview.setObjectName("primary")
         preview.clicked.connect(self._preview_plan)
         planner_row.addWidget(preview)
@@ -2987,7 +3021,8 @@ class TasksPage(QWidget):
         content = QHBoxLayout()
         content.setSpacing(12)
         clock_card = GlassCard("violet")
-        clock_card.setFixedWidth(242)
+        clock_card.setObjectName("plannerRail")
+        clock_card.setFixedWidth(228)
         clock_box = QVBoxLayout(clock_card)
         clock_box.setContentsMargins(14, 18, 14, 18)
         clock_box.addWidget(QLabel("ПЛАНИРОВЩИК"))
@@ -3360,15 +3395,15 @@ class ControlCenter(QMainWindow):
     pronunciation_delete = Signal(str)
 
     NAV = [
-        ("home", "✦  Главная"),
-        ("chat", "◈  Разговор"),
-        ("voice", "◉  Голос"),
+        ("home", "⌂  Главная"),
+        ("chat", "◌  Чат"),
+        ("tasks", "□  Задачи"),
+        ("memory", "▣  Память"),
+        ("skills", "⌘  Приложения"),
+        ("activity", "⌁  Автоматизация"),
+        ("voice", "◉  Голос и TTS"),
         ("today", "◇  Сегодня"),
-        ("tasks", "✓  Задачи"),
-        ("activity", "⌁  Активность"),
-        ("memory", "◌  Память"),
         ("learning", "✦  Обучение"),
-        ("skills", "⬡  Приложения"),
         ("journal", "≋  Журнал"),
         ("settings", "⚙  Настройки"),
     ]
@@ -3377,7 +3412,7 @@ class ControlCenter(QMainWindow):
         super().__init__()
         self.setWindowTitle("Люма")
         self.setMinimumSize(980, 680)
-        self.resize(1180, 780)
+        self.resize(1400, 820)
         root = AmbientCanvas()
         root.setObjectName("shellRoot")
         self.ambient = root
@@ -3392,11 +3427,11 @@ class ControlCenter(QMainWindow):
 
         sidebar = QWidget()
         sidebar.setObjectName("sidebar")
-        sidebar.setFixedWidth(236)
+        sidebar.setFixedWidth(184)
         self.sidebar = sidebar
         side = QVBoxLayout(sidebar)
-        side.setContentsMargins(14, 18, 14, 14)
-        side.setSpacing(14)
+        side.setContentsMargins(10, 12, 10, 10)
+        side.setSpacing(8)
 
         self.brand_card = BrandCard()
         side.addWidget(self.brand_card)
@@ -3410,17 +3445,20 @@ class ControlCenter(QMainWindow):
         side.addWidget(self.nav, 1)
         self.sidebar_status = QLabel("●  LOCAL · OFFLINE READY")
         self.sidebar_status.setObjectName("sidebarStatus")
+        self.sidebar_status.setAlignment(Qt.AlignCenter)
         side.addWidget(self.sidebar_status)
         body.addWidget(sidebar)
 
         main = QWidget()
         main.setObjectName("mainContent")
         main_layout = QVBoxLayout(main)
-        main_layout.setContentsMargins(18, 16, 18, 12)
-        main_layout.setSpacing(14)
+        main_layout.setContentsMargins(10, 10, 10, 8)
+        main_layout.setSpacing(10)
         self.main_layout = main_layout
 
         self.status_header = StatusHeader()
+        self.status_header.setMaximumHeight(54)
+        self.status_header.hide()
         main_layout.addWidget(self.status_header)
 
         self.stack = QStackedWidget()
@@ -3526,6 +3564,7 @@ class ControlCenter(QMainWindow):
         sl.addWidget(self.appearance_tabs)
 
         appearance = GlassCard("violet")
+        appearance.setMinimumHeight(270)
         appearance_box = QHBoxLayout(appearance)
         appearance_box.setContentsMargins(16, 13, 16, 13)
         appearance_copy = QVBoxLayout()
@@ -3545,7 +3584,6 @@ class ControlCenter(QMainWindow):
             preview.setMinimumSize(108, 64)
             theme_row.addWidget(preview, 1)
         appearance_copy.addLayout(theme_row)
-        appearance_copy.addWidget(QLabel("Тёмная тема · фиолетовый и синий свет"))
         accent_row = QHBoxLayout()
         accent_row.addWidget(QLabel("Цвет акцента"))
         self.accent_buttons: dict[str, QPushButton] = {}
@@ -3574,10 +3612,12 @@ class ControlCenter(QMainWindow):
             self.panel_style_buttons[value] = button
         appearance_copy.addLayout(style_row)
         appearance_box.addLayout(appearance_copy, 1)
-        self.motion_toggle = QCheckBox("Уменьшить анимацию")
-        self.motion_toggle.toggled.connect(self._set_reduced_motion)
+        self.motion_toggle = QCheckBox("Включить живые анимации")
+        self.motion_toggle.setToolTip("Выключено — уменьшенное движение. Включено — живые анимации Люмы.")
+        self.motion_toggle.toggled.connect(lambda enabled: self._set_reduced_motion(not enabled))
         appearance_box.addWidget(self.motion_toggle)
         sl.addWidget(appearance)
+        sl.addSpacing(70)
 
         runtime_card = GlassCard("cyan")
         runtime_box = QVBoxLayout(runtime_card)
@@ -3793,6 +3833,7 @@ class ControlCenter(QMainWindow):
 
         self.footer = QLabel("● подключение…")
         self.footer.setObjectName("footer")
+        self.footer.hide()
         outer.addWidget(self.footer)
 
         self.nav.currentRowChanged.connect(self._change)
@@ -3806,16 +3847,18 @@ class ControlCenter(QMainWindow):
             palette.setColor(QPalette.Highlight, QColor("#413583"))
             palette.setColor(QPalette.HighlightedText, QColor("#FFFFFF"))
             view.setPalette(palette)
-            view.setStyleSheet(
-                "background-color:#101225;color:#F0EEFA;"
-                "selection-background-color:#413583;selection-color:#FFFFFF;"
-            )
+            view.setStyleSheet("QListView { background: #101225; color: #F0EEFA; border: 1px solid #49466F; }"
+                               "QListView::item { min-height: 30px; padding: 5px 9px; }"
+                               "QListView::item:selected { background: #413583; color: #FFFFFF; }")
         for scroll in self.findChildren(QScrollArea):
             scroll.viewport().setStyleSheet("background: transparent;")
         self.appearance_tabs.currentChanged.connect(self._settings_tab_changed)
         self._set_accent(str(QSettings("Luma", "Luma").value("accent", "#8B5CF6")))
-        self.motion_toggle.setChecked(QSettings("Luma", "Luma").value("reduced_motion", False, type=bool))
-        self._set_reduced_motion(self.motion_toggle.isChecked())
+        reduced_motion = QSettings("Luma", "Luma").value("reduced_motion", False, type=bool)
+        self.motion_toggle.blockSignals(True)
+        self.motion_toggle.setChecked(not reduced_motion)
+        self.motion_toggle.blockSignals(False)
+        self._set_reduced_motion(reduced_motion)
         self._set_panel_style(str(QSettings("Luma", "Luma").value("panel_style", "glass")))
 
     def _set_panel_style(self, mode: str) -> None:
@@ -3824,12 +3867,12 @@ class ControlCenter(QMainWindow):
         QSettings("Luma", "Luma").setValue("panel_style", mode)
         for value, button in self.panel_style_buttons.items():
             button.setChecked(value == mode)
-        widths = {"glass": 236, "compact": 200, "minimal": 176}
+        widths = {"glass": 184, "compact": 164, "minimal": 148}
         self.sidebar.setFixedWidth(widths[mode])
-        self.status_header.setVisible(mode != "minimal")
-        margins = (18, 16, 18, 12) if mode == "glass" else (12, 10, 12, 8)
+        self.status_header.setVisible(mode == "compact")
+        margins = (10, 10, 10, 8) if mode == "glass" else (8, 8, 8, 6)
         self.main_layout.setContentsMargins(*margins)
-        self.main_layout.setSpacing(14 if mode == "glass" else 9)
+        self.main_layout.setSpacing(10 if mode == "glass" else 8)
 
     def _set_accent(self, color: str) -> None:
         if color not in self.accent_buttons:
@@ -3842,7 +3885,7 @@ class ControlCenter(QMainWindow):
 
     def _settings_tab_changed(self, index: int) -> None:
         if index == 1:
-            self.nav.setCurrentRow(2)
+            self.nav.setCurrentRow(6)
         elif index == 2:
             self.settings_scroll.ensureWidgetVisible(self.persona_title)
         elif index == 3:
@@ -3997,7 +4040,6 @@ class ControlCenter(QMainWindow):
                       panel_ok: bool, error: str = "", safety_stopped: bool = False,
                       assistant_state: str = "idle") -> None:
         self.brand_card.set_online(connected)
-        self.sidebar_status.setText("●  LOCAL · READY" if connected else "●  LOCAL · OFFLINE READY")
         self.status_header.set_status(
             connected=connected,
             armed=armed,
@@ -4008,6 +4050,9 @@ class ControlCenter(QMainWindow):
             assistant_state=assistant_state,
         )
         if connected:
+            self.sidebar_status.setText(
+                "●  LOCAL · " + ("STOPPED" if safety_stopped else ("MIC ON" if armed else "READY"))
+            )
             bits = ["Люма ✓", "модель ✓" if model_ok else "модель –",
                     "PrintFlow ✓" if panel_ok else "PrintFlow –",
                     "wake ✓" if armed else "wake –",
@@ -4015,6 +4060,7 @@ class ControlCenter(QMainWindow):
             self.footer.setText("   ".join(bits))
             self.settings_status.setText("Backend: подключён · 127.0.0.1:8799")
         else:
+            self.sidebar_status.setText("●  OFFLINE")
             self.footer.setText("Агент недоступен" + (f": {error}" if error else ""))
             self.settings_status.setText("Backend: недоступен" + (f" · {error}" if error else ""))
         self.mic_button.setText("🎤 Выключить wake word" if armed else "🎤 Включить wake word")
