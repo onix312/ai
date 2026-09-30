@@ -960,7 +960,10 @@ class MemoryPage(QWidget):
         head.addWidget(refresh)
         root.addLayout(head)
 
-        metrics = QHBoxLayout()
+        metrics_host = QWidget()
+        metrics_host.setObjectName("memoryMetrics")
+        metrics = QHBoxLayout(metrics_host)
+        metrics.setContentsMargins(0, 0, 0, 0)
         metrics.setSpacing(10)
         self.total_metric = QLabel("0")
         self.total_metric.setObjectName("opsMetric")
@@ -984,7 +987,8 @@ class MemoryPage(QWidget):
             box.addWidget(label)
             box.addWidget(value)
             metrics.addWidget(card, 1)
-        root.addLayout(metrics)
+        metrics_host.hide()
+        root.addWidget(metrics_host)
 
         filters = QHBoxLayout()
         self.search = QLineEdit()
@@ -1017,6 +1021,7 @@ class MemoryPage(QWidget):
         )
         note.setObjectName("voiceChain")
         note.setWordWrap(True)
+        note.hide()
         root.addWidget(note)
 
         self.scroll = QScrollArea()
@@ -1216,7 +1221,10 @@ class SkillsPage(QWidget):
         head.addWidget(refresh)
         root.addLayout(head)
 
-        metrics = QHBoxLayout()
+        metrics_host = QWidget()
+        metrics_host.setObjectName("skillsMetrics")
+        metrics = QHBoxLayout(metrics_host)
+        metrics.setContentsMargins(0, 0, 0, 0)
         self.ready_metric = QLabel("0")
         self.ready_metric.setObjectName("skillMetricReady")
         self.total_metric = QLabel("0")
@@ -1239,7 +1247,8 @@ class SkillsPage(QWidget):
             box.addWidget(kicker)
             box.addWidget(widget)
             metrics.addWidget(card)
-        root.addLayout(metrics)
+        metrics_host.hide()
+        root.addWidget(metrics_host)
 
         self.group_filter = ""
         self.group_tiles: list[QToolButton] = []
@@ -1266,7 +1275,10 @@ class SkillsPage(QWidget):
                 tiles.addWidget(button, 1)
             root.addLayout(tiles)
 
-        filter_row = QHBoxLayout()
+        filter_host = QWidget()
+        filter_host.setObjectName("skillsFilters")
+        filter_row = QHBoxLayout(filter_host)
+        filter_row.setContentsMargins(0, 0, 0, 0)
         self.search = QLineEdit()
         self.search.setPlaceholderText("Найти функцию: экран, Steam, файл, принтер, память…")
         self.search.textChanged.connect(self._render)
@@ -1287,7 +1299,13 @@ class SkillsPage(QWidget):
             self.risk_filter.addItem(value, value)
         self.risk_filter.currentIndexChanged.connect(self._render)
         filter_row.addWidget(self.risk_filter)
-        root.addLayout(filter_row)
+        root.addWidget(self.search)
+        filter_host.hide()
+        root.addWidget(filter_host)
+
+        scenarios_title = QLabel("Готовые сценарии")
+        scenarios_title.setObjectName("sectionTitle")
+        root.addWidget(scenarios_title)
 
         brain_note = QLabel(
             "LUMA TOOL ROUTER · мозг получает релевантные функции под каждую фразу, "
@@ -1295,6 +1313,7 @@ class SkillsPage(QWidget):
         )
         brain_note.setObjectName("voiceChain")
         brain_note.setWordWrap(True)
+        brain_note.hide()
         root.addWidget(brain_note)
 
         self.browser = QTextBrowser()
@@ -2865,7 +2884,10 @@ class TasksPage(QWidget):
         sub.setWordWrap(True)
         self.layout.addWidget(sub)
 
-        metrics = QHBoxLayout()
+        metrics_host = QWidget()
+        metrics_host.setObjectName("taskMetrics")
+        metrics = QHBoxLayout(metrics_host)
+        metrics.setContentsMargins(0, 0, 0, 0)
         metrics.setSpacing(10)
         self.tasks_running_metric = QLabel("0")
         self.tasks_running_metric.setObjectName("opsMetric")
@@ -2889,19 +2911,20 @@ class TasksPage(QWidget):
             box.addWidget(label)
             box.addWidget(value)
             metrics.addWidget(card, 1)
-        self.layout.addLayout(metrics)
+        metrics_host.hide()
+        self.layout.addWidget(metrics_host)
 
         planner_card = GlassCard("violet")
         planner_box = QVBoxLayout(planner_card)
         planner_box.setContentsMargins(14, 12, 14, 12)
-        planner_label = QLabel("PLAN A GOAL")
+        planner_label = QLabel("НОВАЯ ЗАДАЧА")
         planner_label.setObjectName("heroKicker")
         planner_box.addWidget(planner_label)
         planner_row = QHBoxLayout()
         self.goal_input = QLineEdit()
         self.goal_input.setPlaceholderText("Например: подготовь компьютер к работе")
         planner_row.addWidget(self.goal_input, 1)
-        preview = QPushButton("Составить план")
+        preview = QPushButton("+ Новая задача")
         preview.setObjectName("primary")
         preview.clicked.connect(self._preview_plan)
         planner_row.addWidget(preview)
@@ -3298,7 +3321,7 @@ class ControlCenter(QMainWindow):
         ("tasks", "□  Задачи"),
         ("memory", "▣  Память"),
         ("skills", "⌘  Приложения"),
-        ("activity", "⌁  Активность"),
+        ("activity", "⌁  Автоматизация"),
         ("voice", "◉  Голос и TTS"),
         ("today", "◇  Сегодня"),
         ("learning", "✦  Обучение"),
@@ -3341,6 +3364,10 @@ class ControlCenter(QMainWindow):
             item.setData(Qt.UserRole, key)
             self.nav.addItem(item)
         side.addWidget(self.nav, 1)
+        self.sidebar_status = QLabel("●  LOCAL · OFFLINE READY")
+        self.sidebar_status.setObjectName("sidebarStatus")
+        self.sidebar_status.setAlignment(Qt.AlignCenter)
+        side.addWidget(self.sidebar_status)
         body.addWidget(sidebar)
 
         main = QWidget()
@@ -3462,7 +3489,19 @@ class ControlCenter(QMainWindow):
         appearance_title = QLabel("Внешний вид")
         appearance_title.setObjectName("sectionTitle")
         appearance_copy.addWidget(appearance_title)
-        appearance_copy.addWidget(QLabel("Тёмная тема · фиолетовый и синий свет"))
+        appearance_copy.addWidget(QLabel("Тема"))
+        theme_row = QHBoxLayout()
+        for label, object_name in (
+            ("✦\nТёмная", "themePreviewDark"),
+            ("☁\nСветлая", "themePreviewLight"),
+            ("◒\nСистемная", "themePreviewSystem"),
+        ):
+            preview = QLabel(label)
+            preview.setObjectName(object_name)
+            preview.setAlignment(Qt.AlignCenter)
+            preview.setMinimumSize(108, 64)
+            theme_row.addWidget(preview, 1)
+        appearance_copy.addLayout(theme_row)
         accent_row = QHBoxLayout()
         accent_row.addWidget(QLabel("Цвет акцента"))
         self.accent_buttons: dict[str, QPushButton] = {}
@@ -3491,8 +3530,9 @@ class ControlCenter(QMainWindow):
             self.panel_style_buttons[value] = button
         appearance_copy.addLayout(style_row)
         appearance_box.addLayout(appearance_copy, 1)
-        self.motion_toggle = QCheckBox("Уменьшить анимацию")
-        self.motion_toggle.toggled.connect(self._set_reduced_motion)
+        self.motion_toggle = QCheckBox("Включить живые анимации")
+        self.motion_toggle.setToolTip("Выключено — уменьшенное движение. Включено — живые анимации Люмы.")
+        self.motion_toggle.toggled.connect(lambda enabled: self._set_reduced_motion(not enabled))
         appearance_box.addWidget(self.motion_toggle)
         sl.addWidget(appearance)
 
@@ -3720,8 +3760,11 @@ class ControlCenter(QMainWindow):
             scroll.viewport().setStyleSheet("background: transparent;")
         self.appearance_tabs.currentChanged.connect(self._settings_tab_changed)
         self._set_accent(str(QSettings("Luma", "Luma").value("accent", "#8B5CF6")))
-        self.motion_toggle.setChecked(QSettings("Luma", "Luma").value("reduced_motion", False, type=bool))
-        self._set_reduced_motion(self.motion_toggle.isChecked())
+        reduced_motion = QSettings("Luma", "Luma").value("reduced_motion", False, type=bool)
+        self.motion_toggle.blockSignals(True)
+        self.motion_toggle.setChecked(not reduced_motion)
+        self.motion_toggle.blockSignals(False)
+        self._set_reduced_motion(reduced_motion)
         self._set_panel_style(str(QSettings("Luma", "Luma").value("panel_style", "glass")))
 
     def _set_panel_style(self, mode: str) -> None:
@@ -3909,6 +3952,9 @@ class ControlCenter(QMainWindow):
             assistant_state=assistant_state,
         )
         if connected:
+            self.sidebar_status.setText(
+                "●  LOCAL · " + ("STOPPED" if safety_stopped else ("MIC ON" if armed else "READY"))
+            )
             bits = ["Люма ✓", "модель ✓" if model_ok else "модель –",
                     "PrintFlow ✓" if panel_ok else "PrintFlow –",
                     "wake ✓" if armed else "wake –",
@@ -3916,6 +3962,7 @@ class ControlCenter(QMainWindow):
             self.footer.setText("   ".join(bits))
             self.settings_status.setText("Backend: подключён · 127.0.0.1:8799")
         else:
+            self.sidebar_status.setText("●  OFFLINE")
             self.footer.setText("Агент недоступен" + (f": {error}" if error else ""))
             self.settings_status.setText("Backend: недоступен" + (f" · {error}" if error else ""))
         self.mic_button.setText("🎤 Выключить wake word" if armed else "🎤 Включить wake word")
