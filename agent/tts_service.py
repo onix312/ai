@@ -76,6 +76,11 @@ class TtsService:
                     self.store.delete_preference(f"tts.{field}")
                 except Exception:
                     pass
+            pc.set_tts_output_device("")
+            try:
+                self.store.delete_preference("tts.output_device")
+            except Exception:
+                pass
             return result
 
         values = {

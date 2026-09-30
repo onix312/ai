@@ -1708,8 +1708,6 @@ class ChatPage(QWidget):
             message.setWordWrap(True)
             body.addWidget(message)
             line.addWidget(bubble, 0 if is_user else 1, Qt.AlignTop)
-            if not is_user:
-                line.addStretch(1)
             self.bubble_layout.addWidget(row)
         self._has_history = bool(self._turns)
         self.content.setCurrentIndex(1 if self._has_history else 0)
@@ -3760,6 +3758,10 @@ class ControlCenter(QMainWindow):
             palette.setColor(QPalette.Highlight, QColor("#413583"))
             palette.setColor(QPalette.HighlightedText, QColor("#FFFFFF"))
             view.setPalette(palette)
+            view.setStyleSheet(
+                "background-color:#101225;color:#F0EEFA;"
+                "selection-background-color:#413583;selection-color:#FFFFFF;"
+            )
         for scroll in self.findChildren(QScrollArea):
             scroll.viewport().setStyleSheet("background: transparent;")
         self.appearance_tabs.currentChanged.connect(self._settings_tab_changed)

@@ -80,7 +80,7 @@ class TtsServiceTests(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertEqual({}, store.values)
         self.assertEqual(
-            ["tts.piper", "tts.model", "tts.speaker"],
+            ["tts.piper", "tts.model", "tts.speaker", "tts.output_device"],
             store.deleted,
         )
 
