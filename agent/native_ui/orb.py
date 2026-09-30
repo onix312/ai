@@ -271,6 +271,29 @@ class VoiceOrb(QWidget):
         self._hide_timer = QTimer(self)
         self._hide_timer.setSingleShot(True)
         self._hide_timer.timeout.connect(self.hide)
+        self._state_phase = 0.0
+        self._state_timer = QTimer(self)
+        self._state_timer.setInterval(50)
+        self._state_timer.timeout.connect(self._animate_state)
+        self._state_timer.start()
+
+    def _animate_state(self) -> None:
+        if not self.showcase.isVisible():
+            return
+        self._state_phase = (self._state_phase + 0.09) % math.tau
+        self._paint_state_labels()
+
+    def _paint_state_labels(self) -> None:
+        glow = int(80 + 42 * (0.5 + 0.5 * math.sin(self._state_phase)))
+        for key, label in self.state_labels.items():
+            selected = key == self._state
+            border = f"rgb({glow + 45}, {glow + 18}, 255)" if selected else "#34395F"
+            color = "#FFFFFF" if selected else "#A5A1BD"
+            background = "#252052" if selected else "#131B39"
+            label.setStyleSheet(
+                f"background:{background};color:{color};border:1px solid {border};"
+                "border-radius:11px;font-size:13px;font-weight:700;"
+            )
 
     def set_state(self, state: str, auto_hide_ms: int = 0) -> None:
         clean = str(state or "idle").casefold()
@@ -280,14 +303,7 @@ class VoiceOrb(QWidget):
         self.core.set_state(self._state)
         self.portrait.set_state(self._state)
         self.showcase.setVisible(self._state in ("listening", "thinking", "speaking", "working"))
-        for key, label in self.state_labels.items():
-            selected = key == self._state
-            border = "#A987FF" if selected else "#34395F"
-            color = "#FFFFFF" if selected else "#A5A1BD"
-            label.setStyleSheet(
-                f"background:#131B39;color:{color};border:1px solid {border};"
-                "border-radius:11px;font-size:13px;font-weight:700;"
-            )
+        self._paint_state_labels()
         self._resize_for_state()
         self.label.setText(f"Люма · {self.LABELS[self._state]}")
         self.show_near_bottom()
