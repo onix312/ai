@@ -78,6 +78,35 @@ def stylesheet(accent: str = "#8B5CF6") -> str:
         border-right: 1px solid #59439A;
     }
 
+    QLabel#sidebarStatus {
+        background: transparent;
+        color: #71E7C4;
+        font-size: 10px;
+        font-weight: 700;
+        padding: 8px 4px 2px;
+        border-top: 1px solid #262B4C;
+    }
+
+    QLabel#themePreviewDark, QLabel#themePreviewLight, QLabel#themePreviewSystem {
+        border: 1px solid #49466F;
+        border-radius: 12px;
+        color: #F3F0FF;
+        font-weight: 700;
+        background: #11152D;
+    }
+
+    QLabel#themePreviewLight {
+        color: #26213A;
+        background: qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #FFF9FF,stop:1 #E3E8FF);
+        border-color: #C5B9E9;
+    }
+
+    QLabel#themePreviewSystem {
+        background: qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #171A31,stop:0.5 #171A31,stop:0.51 #E9E8F7,stop:1 #E9E8F7);
+        color: #EDEBFF;
+        border-color: #8B84B7;
+    }
+
     QFrame#brandCard {
         background: #111328;
         border: 1px solid #343861;

@@ -3408,6 +3408,9 @@ class ControlCenter(QMainWindow):
             item.setData(Qt.UserRole, key)
             self.nav.addItem(item)
         side.addWidget(self.nav, 1)
+        self.sidebar_status = QLabel("●  LOCAL · OFFLINE READY")
+        self.sidebar_status.setObjectName("sidebarStatus")
+        side.addWidget(self.sidebar_status)
         body.addWidget(sidebar)
 
         main = QWidget()
@@ -3529,6 +3532,19 @@ class ControlCenter(QMainWindow):
         appearance_title = QLabel("Внешний вид")
         appearance_title.setObjectName("sectionTitle")
         appearance_copy.addWidget(appearance_title)
+        appearance_copy.addWidget(QLabel("Тема"))
+        theme_row = QHBoxLayout()
+        for label, object_name in (
+            ("✦\nТёмная", "themePreviewDark"),
+            ("☁\nСветлая", "themePreviewLight"),
+            ("◒\nСистемная", "themePreviewSystem"),
+        ):
+            preview = QLabel(label)
+            preview.setObjectName(object_name)
+            preview.setAlignment(Qt.AlignCenter)
+            preview.setMinimumSize(108, 64)
+            theme_row.addWidget(preview, 1)
+        appearance_copy.addLayout(theme_row)
         appearance_copy.addWidget(QLabel("Тёмная тема · фиолетовый и синий свет"))
         accent_row = QHBoxLayout()
         accent_row.addWidget(QLabel("Цвет акцента"))
@@ -3981,6 +3997,7 @@ class ControlCenter(QMainWindow):
                       panel_ok: bool, error: str = "", safety_stopped: bool = False,
                       assistant_state: str = "idle") -> None:
         self.brand_card.set_online(connected)
+        self.sidebar_status.setText("●  LOCAL · READY" if connected else "●  LOCAL · OFFLINE READY")
         self.status_header.set_status(
             connected=connected,
             armed=armed,
