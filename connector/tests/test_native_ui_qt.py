@@ -10,13 +10,14 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QBuffer, QByteArray, QIODevice
 from PySide6.QtGui import QColor, QImage
-from PySide6.QtWidgets import QApplication, QLabel, QLineEdit, QProgressBar, QPushButton
+from PySide6.QtWidgets import QApplication, QFrame, QLabel, QLineEdit, QProgressBar, QPushButton
 
 from agent.native_ui.app import NativeApp
-from agent.native_ui.components import LumaPortrait
+from agent.native_ui.components import LumaClock, LumaPortrait
 from agent.native_ui.control_center import ActivityPage, ChatPage, ControlCenter, HomePage, JournalPage, LearningPage, MemoryPage, SkillsPage, TasksPage, TextPage, TodayPage, VoicePage
 from agent.native_ui.orb import LumaOrbCore, VoiceOrb
 from agent.native_ui.quick_panel import QuickPanel
+from agent.native_ui.tray import status_icon
 
 
 class NativeQtSmokeTests(unittest.TestCase):
@@ -29,9 +30,11 @@ class NativeQtSmokeTests(unittest.TestCase):
         self.assertEqual(chat.content.currentIndex(), 0)
         chat.set_history([{"role": "user", "text": "<b>привет</b>"}])
         self.assertEqual(chat.content.currentIndex(), 1)
+        self.assertEqual("chatBubbleUser", chat.bubble_layout.itemAt(0).widget().findChild(QFrame).objectName())
         self.assertIn("<b>привет</b>", chat.feed.toPlainText())
         self.assertIn("ВЫ", chat.feed.toPlainText())
         chat.append_local("Люма", "Готово", source="model", skill="system.health")
+        self.assertEqual("chatBubbleAssistant", chat.bubble_layout.itemAt(1).widget().findChild(QFrame).objectName())
         visible = chat.feed.toPlainText()
         self.assertIn("LUMA", visible)
         self.assertIn("Готово", visible)
@@ -70,7 +73,18 @@ class NativeQtSmokeTests(unittest.TestCase):
         self.assertEqual(orb.height(), 112)
         orb.set_live()
         self.assertEqual(orb.height(), 72)
+        orb.set_state("listening")
+        self.assertEqual((orb.width(), orb.height()), (520, 330))
+        orb.set_state("idle")
+        self.assertEqual((orb.width(), orb.height()), (390, 72))
+        orb.set_reduced_motion(True)
+        self.assertFalse(orb._state_timer.isActive())
         orb.deleteLater()
+
+    def test_tray_animation_frames_change_with_state(self):
+        first = status_icon("listening", 0).pixmap(64, 64).toImage()
+        second = status_icon("listening", 1).pixmap(64, 64).toImage()
+        self.assertNotEqual(bytes(first.bits()), bytes(second.bits()))
 
     def test_home_hero_and_orb_accept_live_runtime(self):
         center = ControlCenter()
@@ -78,6 +92,34 @@ class NativeQtSmokeTests(unittest.TestCase):
         self.assertIsInstance(center.pages["voice"], VoicePage)
         self.assertIsInstance(center.home.orb, LumaOrbCore)
         self.assertIsInstance(center.home.portrait, LumaPortrait)
+        mic_events = []
+        center.mic_toggle.connect(lambda: mic_events.append(True))
+        center.chat.mic_toggle.emit()
+        self.assertEqual([True], mic_events)
+        self.assertFalse(center.home.portrait._portrait.isNull())
+        self.assertFalse(center.home.portrait._energy.isNull())
+        self.assertFalse(center.ambient._background.isNull())
+        self.assertIsNotNone(center.pages["tasks"].findChild(LumaClock))
+        submitted = []
+        center.home.submitted.connect(submitted.append)
+        center.home.search_input.setText("Открой загрузки")
+        center.home._submit_search()
+        self.assertEqual(["Открой загрузки"], submitted)
+        self.assertEqual("", center.home.search_input.text())
+        center.home.navigate.emit("memory")
+        self.assertEqual(center.nav.currentRow(), 6)
+        center.home.navigate.emit("home")
+        self.assertEqual(center.nav.currentRow(), 0)
+        for row, (key, _) in enumerate(center.NAV):
+            center.nav.setCurrentRow(row)
+            self.assertIs(center.stack.currentWidget(), center.pages[key], key)
+        center.nav.setCurrentRow(0)
+        center._set_panel_style("compact")
+        self.assertEqual(200, center.sidebar.width())
+        center._set_panel_style("minimal")
+        self.assertTrue(center.status_header.isHidden())
+        center._set_panel_style("glass")
+        self.assertEqual(236, center.sidebar.width())
 
         center.set_home_runtime(
             connected=True,
@@ -170,17 +212,23 @@ class NativeQtSmokeTests(unittest.TestCase):
                 "observed_count": 1,
             }]
         })
+        page.kind_tabs.setCurrentIndex(1)
+        self.assertFalse(page.host.itemAt(0).widget().findChildren(QPushButton))
+        page.kind_tabs.setCurrentIndex(3)
+        self.assertEqual("preference", page.kind_tabs.tabData(page.kind_tabs.currentIndex()))
+        self.assertTrue(any(button.objectName() == "memoryPin" for button in page.host.itemAt(0).widget().findChildren(QPushButton)))
         pins = []
         forgotten = []
         page.pin_requested.connect(lambda memory_id, value: pins.append((memory_id, value)))
         page.forget_requested.connect(lambda memory_id: forgotten.append(memory_id))
 
+        current_card = page.host.itemAt(0).widget()
         pin = next(
-            button for button in page.findChildren(QPushButton)
+            button for button in current_card.findChildren(QPushButton)
             if button.objectName() == "memoryPin"
         )
         forget = next(
-            button for button in page.findChildren(QPushButton)
+            button for button in current_card.findChildren(QPushButton)
             if button.objectName() == "danger" and button.text() == "Забыть"
         )
         pin.click()
@@ -380,6 +428,12 @@ class NativeQtSmokeTests(unittest.TestCase):
         filtered = page.browser.toPlainText()
         self.assertIn("Описать экран", filtered)
         self.assertNotIn("Открыть программу", filtered)
+        page.search.clear()
+        page._select_group("app")
+        self.assertIn("Открыть программу", page.browser.toPlainText())
+        self.assertNotIn("Описать экран", page.browser.toPlainText())
+        page._select_group("app")
+        self.assertIn("Описать экран", page.browser.toPlainText())
 
         page.search.clear()
         page.provider_filter.setCurrentIndex(page.provider_filter.findData("core"))
@@ -400,6 +454,15 @@ class NativeQtSmokeTests(unittest.TestCase):
     def test_windows_construct_and_accept_state(self):
         orb = VoiceOrb()
         quick = QuickPanel()
+        toggles = []
+        quick.mic_toggle.connect(lambda: toggles.append(True))
+        quick.mic_toggle.emit()
+        self.assertEqual([True], toggles)
+        settings_requests = []
+        quick.open_settings.connect(lambda: settings_requests.append(True))
+        quick.open_settings.emit()
+        self.assertEqual([True], settings_requests)
+        self.assertRegex(quick.clock.text(), r"^\d{2}:\d{2}$")
         center = ControlCenter()
 
         orb.set_state("thinking")

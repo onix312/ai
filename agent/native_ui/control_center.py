@@ -3,23 +3,71 @@ from __future__ import annotations
 
 import html
 import json
+import ctypes
+import shutil
+import sys
+from datetime import date, datetime
+from pathlib import Path
 from typing import Any
 
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QPixmap
+from PySide6.QtCore import QSettings, QSize, Qt, QTimer, Signal
+from PySide6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
-    QComboBox, QDoubleSpinBox, QFrame, QHBoxLayout, QLabel, QLineEdit,
+    QCheckBox, QComboBox, QDoubleSpinBox, QFrame, QHBoxLayout, QLabel, QLineEdit,
     QListWidget, QListWidgetItem, QMainWindow, QProgressBar, QPushButton,
-    QScrollArea, QSpinBox, QStackedWidget, QTextBrowser, QVBoxLayout, QWidget,
+    QScrollArea, QSizePolicy, QSpinBox, QStackedWidget, QTabBar, QTextBrowser, QToolButton, QVBoxLayout, QWidget,
 )
 
-from .components import AmbientCanvas, BrandCard, GlassCard, LumaPortrait, StatusHeader
+from .components import AmbientCanvas, BrandCard, GlassCard, LumaClock, LumaPortrait, StatusHeader
 from .orb import LumaOrbCore
+from .quick_panel import RoundMicButton
 from . import theme
 
 
 def _pretty(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, indent=2, default=str)
+
+
+def _capability_icon(kind: str) -> QIcon:
+    pixmap = QPixmap(40, 40)
+    pixmap.fill(Qt.transparent)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.Antialiasing, True)
+    painter.setPen(QPen(QColor("#B9D4FF"), 2.1, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+    painter.setBrush(Qt.NoBrush)
+    if kind == "app":
+        for x in (8, 23):
+            for y in (8, 23):
+                painter.drawRoundedRect(x, y, 10, 10, 2, 2)
+    elif kind == "files":
+        painter.drawLine(6, 13, 18, 13)
+        painter.drawLine(18, 13, 22, 17)
+        painter.drawLine(22, 17, 34, 17)
+        painter.drawLine(6, 13, 6, 31)
+        painter.drawLine(6, 31, 34, 31)
+        painter.drawLine(34, 17, 34, 31)
+    elif kind == "system":
+        painter.drawRoundedRect(5, 8, 30, 21, 2, 2)
+        painter.drawLine(20, 29, 20, 34)
+        painter.drawLine(14, 34, 26, 34)
+    elif kind == "browser":
+        painter.drawEllipse(7, 7, 26, 26)
+        painter.drawEllipse(15, 7, 10, 26)
+        painter.drawLine(7, 20, 33, 20)
+    elif kind == "assistant":
+        for x, y in ((9, 11), (27, 8), (20, 29)):
+            painter.drawEllipse(x - 3, y - 3, 6, 6)
+        painter.drawLine(12, 11, 24, 8)
+        painter.drawLine(11, 14, 18, 26)
+        painter.drawLine(25, 11, 21, 26)
+    else:
+        painter.drawRoundedRect(8, 14, 24, 17, 3, 3)
+        painter.drawRect(12, 6, 16, 10)
+        painter.drawLine(12, 31, 12, 35)
+        painter.drawLine(12, 35, 28, 35)
+        painter.drawLine(28, 31, 28, 35)
+    painter.end()
+    return QIcon(pixmap)
 
 
 class TextPage(QWidget):
@@ -939,10 +987,6 @@ class MemoryPage(QWidget):
         self.search.setPlaceholderText("Найти в памяти: человек, проект, предпочтение, факт…")
         self.search.textChanged.connect(self._render)
         filters.addWidget(self.search, 1)
-        self.kind_filter = QComboBox()
-        self.kind_filter.addItem("Все типы", "")
-        self.kind_filter.currentIndexChanged.connect(self._render)
-        filters.addWidget(self.kind_filter)
         self.origin_filter = QComboBox()
         self.origin_filter.addItem("Все источники", "")
         for key, label in self.ORIGIN_LABELS.items():
@@ -950,6 +994,18 @@ class MemoryPage(QWidget):
         self.origin_filter.currentIndexChanged.connect(self._render)
         filters.addWidget(self.origin_filter)
         root.addLayout(filters)
+
+        self.kind_tabs = QTabBar()
+        self.kind_tabs.setObjectName("appearanceTabs")
+        self.kind_tabs.setExpanding(True)
+        for label, kind in (
+            ("Всё", ""), ("Заметки", "note"), ("Факты", "fact"),
+            ("Предпочтения", "preference"), ("Профиль", "profile"),
+        ):
+            index = self.kind_tabs.addTab(label)
+            self.kind_tabs.setTabData(index, kind)
+        self.kind_tabs.currentChanged.connect(self._render)
+        root.addWidget(self.kind_tabs)
 
         note = QLabel(
             "MEMORY LAYERS · working context → episodic events → semantic facts → user model. "
@@ -968,6 +1024,7 @@ class MemoryPage(QWidget):
         self.host.setSpacing(9)
         self.scroll.setWidget(self.host_widget)
         root.addWidget(self.scroll, 1)
+        self.set_payload({})
 
     def _forget_click(self, button: QPushButton, memory_id: int) -> None:
         armed = bool(button.property("confirmArmed"))
@@ -993,17 +1050,6 @@ class MemoryPage(QWidget):
     def set_payload(self, payload: dict[str, Any]) -> None:
         self._payload = dict(payload or {})
         rows = [row for row in list(self._payload.get("memories") or []) if isinstance(row, dict)]
-        kinds = sorted({str(row.get("kind") or "fact") for row in rows})
-        current = str(self.kind_filter.currentData() or "")
-        self.kind_filter.blockSignals(True)
-        self.kind_filter.clear()
-        self.kind_filter.addItem("Все типы", "")
-        for kind in kinds:
-            self.kind_filter.addItem(self.KIND_LABELS.get(kind, kind), kind)
-        index = self.kind_filter.findData(current)
-        self.kind_filter.setCurrentIndex(index if index >= 0 else 0)
-        self.kind_filter.blockSignals(False)
-
         self.total_metric.setText(str(len(rows)))
         self.pinned_metric.setText(str(sum(1 for row in rows if row.get("pinned"))))
         self.model_metric.setText(str(sum(
@@ -1016,7 +1062,7 @@ class MemoryPage(QWidget):
 
     def _matches(self, row: dict[str, Any]) -> bool:
         needle = " ".join(self.search.text().casefold().split())
-        wanted_kind = str(self.kind_filter.currentData() or "")
+        wanted_kind = str(self.kind_tabs.tabData(self.kind_tabs.currentIndex()) or "")
         wanted_origin = str(self.origin_filter.currentData() or "")
         if wanted_kind and str(row.get("kind") or "") != wanted_kind:
             return False
@@ -1153,7 +1199,7 @@ class SkillsPage(QWidget):
 
         head = QHBoxLayout()
         title_box = QVBoxLayout()
-        title = QLabel("Навыки")
+        title = QLabel("Приложения и навыки")
         title.setObjectName("pageTitle")
         title_box.addWidget(title)
         subtitle = QLabel("Карта реальных функций Люмы на этом компьютере.")
@@ -1190,6 +1236,31 @@ class SkillsPage(QWidget):
             metrics.addWidget(card)
         root.addLayout(metrics)
 
+        self.group_filter = ""
+        self.group_tiles: list[QToolButton] = []
+        for row_items in (
+            (("Приложения", "app"), ("Работа с файлами", "files"),
+             ("Управление ПК", "system")),
+            (("Интернет и поиск", "browser"), ("Сценарии", "assistant"),
+             ("Печать", "printer")),
+        ):
+            tiles = QHBoxLayout()
+            for label, group in row_items:
+                button = QToolButton()
+                button.setText(label)
+                button.setIcon(_capability_icon(group))
+                button.setIconSize(QSize(32, 32))
+                button.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
+                button.setObjectName("capabilityTile")
+                button.setProperty("group", group)
+                button.setCheckable(True)
+                button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+                button.setMinimumHeight(84)
+                button.clicked.connect(lambda _=False, value=group: self._select_group(value))
+                self.group_tiles.append(button)
+                tiles.addWidget(button, 1)
+            root.addLayout(tiles)
+
         filter_row = QHBoxLayout()
         self.search = QLineEdit()
         self.search.setPlaceholderText("Найти функцию: экран, Steam, файл, принтер, память…")
@@ -1224,6 +1295,7 @@ class SkillsPage(QWidget):
         self.browser = QTextBrowser()
         self.browser.setObjectName("skillsBrowser")
         root.addWidget(self.browser, 1)
+        self.set_payload({})
 
     def set_payload(self, payload: dict[str, Any]) -> None:
         self._payload = dict(payload or {})
@@ -1245,6 +1317,12 @@ class SkillsPage(QWidget):
         self.provider_filter.blockSignals(False)
         self._render()
 
+    def _select_group(self, group: str) -> None:
+        self.group_filter = "" if self.group_filter == group else group
+        for button in self.group_tiles:
+            button.setChecked(button.property("group") == self.group_filter)
+        self._render()
+
     def _render(self) -> None:
         rows = [row for row in list(self._payload.get("skills") or []) if isinstance(row, dict)]
         needle = " ".join(self.search.text().casefold().split())
@@ -1253,6 +1331,8 @@ class SkillsPage(QWidget):
         wanted_risk = str(self.risk_filter.currentData() or "")
         filtered = []
         for row in rows:
+            if self.group_filter and str(row.get("name") or "").split(".", 1)[0] != self.group_filter:
+                continue
             available = bool(row.get("available"))
             if mode == "ready" and not available:
                 continue
@@ -1324,6 +1404,7 @@ class SkillsPage(QWidget):
 class ChatPage(QWidget):
     submitted = Signal(str)
     clear_requested = Signal()
+    mic_toggle = Signal()
 
     def __init__(self) -> None:
         super().__init__()
@@ -1413,22 +1494,26 @@ class ChatPage(QWidget):
 
         self.content = QStackedWidget()
 
-        welcome = GlassCard()
-        intro = QHBoxLayout(welcome)
-        intro.setContentsMargins(28, 22, 28, 22)
-        intro.setSpacing(26)
-
-        portrait_column = QVBoxLayout()
-        portrait_column.addStretch(1)
+        conversation = QHBoxLayout()
+        conversation.setSpacing(12)
+        portrait_card = GlassCard("violet")
+        portrait_box = QVBoxLayout(portrait_card)
+        portrait_box.setContentsMargins(8, 12, 8, 14)
+        portrait_box.addStretch(1)
         self.welcome_portrait = LumaPortrait()
-        self.welcome_portrait.setFixedSize(170, 205)
-        portrait_column.addWidget(self.welcome_portrait, 0, Qt.AlignCenter)
-        persona = QLabel("LUMA · LOCAL PERSONA")
+        self.welcome_portrait.setMinimumSize(190, 270)
+        portrait_box.addWidget(self.welcome_portrait, 0, Qt.AlignCenter)
+        persona = QLabel("LUMA · ВСЕГДА РЯДОМ")
         persona.setObjectName("heroKicker")
         persona.setAlignment(Qt.AlignCenter)
-        portrait_column.addWidget(persona)
-        portrait_column.addStretch(1)
-        intro.addLayout(portrait_column, 4)
+        portrait_box.addWidget(persona)
+        portrait_box.addStretch(1)
+        conversation.addWidget(portrait_card, 3)
+
+        welcome = GlassCard()
+        intro = QVBoxLayout(welcome)
+        intro.setContentsMargins(24, 20, 24, 20)
+        intro.setSpacing(14)
 
         copy = QVBoxLayout()
         copy.addStretch(1)
@@ -1455,7 +1540,7 @@ class ChatPage(QWidget):
             button.clicked.connect(lambda _=False, value=prompt: self._pick_prompt(value))
             copy.addWidget(button)
         copy.addStretch(1)
-        intro.addLayout(copy, 7)
+        intro.addLayout(copy, 1)
 
         self.content.addWidget(welcome)
 
@@ -1465,10 +1550,23 @@ class ChatPage(QWidget):
         self.feed = QTextBrowser()
         self.feed.setObjectName("chatFeed")
         self.feed.setOpenExternalLinks(True)
+        self.feed.hide()
         feed_layout.addWidget(self.feed)
+        self.bubble_scroll = QScrollArea()
+        self.bubble_scroll.setObjectName("chatBubbleScroll")
+        self.bubble_scroll.setWidgetResizable(True)
+        self.bubble_scroll.setFrameShape(QFrame.NoFrame)
+        self.bubble_host = QWidget()
+        self.bubble_layout = QVBoxLayout(self.bubble_host)
+        self.bubble_layout.setContentsMargins(14, 18, 14, 18)
+        self.bubble_layout.setSpacing(11)
+        self.bubble_layout.setAlignment(Qt.AlignTop)
+        self.bubble_scroll.setWidget(self.bubble_host)
+        feed_layout.addWidget(self.bubble_scroll)
         self.content.addWidget(feed_card)
 
-        layout.addWidget(self.content, 1)
+        conversation.addWidget(self.content, 7)
+        layout.addLayout(conversation, 1)
 
         composer = GlassCard("cyan")
         composer_row = QHBoxLayout(composer)
@@ -1479,6 +1577,9 @@ class ChatPage(QWidget):
         self.input.setPlaceholderText("Спроси Люму или скажи, что сделать…")
         self.input.returnPressed.connect(self._submit)
         composer_row.addWidget(self.input, 1)
+        microphone = RoundMicButton(40)
+        microphone.clicked.connect(self.mic_toggle)
+        composer_row.addWidget(microphone)
         send = QPushButton("Отправить")
         send.setObjectName("primary")
         send.clicked.connect(self._submit)
@@ -1562,10 +1663,51 @@ class ChatPage(QWidget):
             + "".join(html_rows)
             + "</div>"
         )
+        while self.bubble_layout.count():
+            item = self.bubble_layout.takeAt(0)
+            if item.widget() is not None:
+                item.widget().deleteLater()
+        for turn in self._turns:
+            row = QWidget()
+            line = QHBoxLayout(row)
+            line.setContentsMargins(0, 0, 0, 0)
+            line.setSpacing(8)
+            is_user = turn.get("role") == "user"
+            if is_user:
+                line.addStretch(1)
+            else:
+                avatar = LumaOrbCore(compact=True)
+                avatar.setFixedSize(31, 31)
+                avatar.set_reduced_motion(True)
+                line.addWidget(avatar, 0, Qt.AlignTop)
+            bubble = QFrame()
+            bubble.setObjectName("chatBubbleUser" if is_user else "chatBubbleAssistant")
+            text_value = str(turn.get("text") or "")
+            bubble.setFixedWidth(min(450, max(190, 90 + len(text_value) * 6)))
+            body = QVBoxLayout(bubble)
+            body.setContentsMargins(13, 10, 13, 10)
+            body.setSpacing(4)
+            if not is_user:
+                route = self._route_label(turn.get("source", ""))
+                skill = str(turn.get("skill") or "").strip()
+                source_label = QLabel("LUMA" + (f" · {route}" if route else "") + (f" · {skill}" if skill else ""))
+                source_label.setObjectName("chatBubbleMeta")
+                body.addWidget(source_label)
+            message = QLabel(text_value)
+            message.setObjectName("chatBubbleText")
+            message.setTextFormat(Qt.PlainText)
+            message.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            message.setWordWrap(True)
+            body.addWidget(message)
+            line.addWidget(bubble, 0, Qt.AlignTop)
+            if not is_user:
+                line.addStretch(1)
+            self.bubble_layout.addWidget(row)
         self._has_history = bool(self._turns)
         self.content.setCurrentIndex(1 if self._has_history else 0)
-        bar = self.feed.verticalScrollBar()
-        bar.setValue(bar.maximum())
+        QTimer.singleShot(0, lambda: self.bubble_scroll.verticalScrollBar().setValue(
+            self.bubble_scroll.verticalScrollBar().maximum()
+        ))
 
     def set_history(self, turns: list[dict[str, Any]]) -> None:
         self._turns = []
@@ -1684,6 +1826,7 @@ class ChatPage(QWidget):
 
 class HomePage(QWidget):
     submitted = Signal(str)
+    navigate = Signal(str)
 
     STATE_LABELS = {
         "idle": "Готова",
@@ -1706,8 +1849,12 @@ class HomePage(QWidget):
 
         hero = GlassCard("violet")
         hero_layout = QHBoxLayout(hero)
-        hero_layout.setContentsMargins(22, 20, 22, 20)
-        hero_layout.setSpacing(20)
+        hero_layout.setContentsMargins(18, 16, 18, 16)
+        hero_layout.setSpacing(14)
+        main_column = QVBoxLayout()
+        main_column.setSpacing(12)
+        hero_top = QHBoxLayout()
+        hero_top.setSpacing(12)
 
         persona = QVBoxLayout()
         persona.setSpacing(6)
@@ -1715,7 +1862,7 @@ class HomePage(QWidget):
         kicker.setObjectName("heroKicker")
         persona.addWidget(kicker)
 
-        title = QLabel("Люма")
+        title = QLabel("Привет!\nЯ Luma")
         title.setObjectName("heroTitle")
         persona.addWidget(title)
 
@@ -1730,24 +1877,30 @@ class HomePage(QWidget):
 
         self.persona_badge = QLabel("●  PERSONA ONLINE")
         self.persona_badge.setObjectName("localPill")
-        self.persona_badge.setMaximumWidth(150)
+        self.persona_badge.setMaximumWidth(190)
         persona.addSpacing(8)
         persona.addWidget(self.persona_badge, 0, Qt.AlignLeft)
 
-        self.portrait = LumaPortrait()
-        self.portrait.setFixedSize(132, 156)
-
-        persona_row = QHBoxLayout()
-        persona_row.addLayout(persona, 1)
-        persona_row.addWidget(self.portrait, 0, Qt.AlignBottom)
-        hero_layout.addLayout(persona_row, 7)
+        persona.addStretch(1)
+        for label, command in (
+            ("✓  Что у меня сегодня", "Что у меня сегодня?"),
+            ("▣  Открыть загрузки", "Открой загрузки"),
+            ("◇  Активные задачи", "Покажи активные задачи"),
+        ):
+            button = QPushButton(label)
+            button.setObjectName("heroAction")
+            button.setMinimumHeight(38)
+            button.clicked.connect(lambda _=False, value=command: self.submitted.emit(value))
+            persona.addWidget(button)
+        hero_top.addLayout(persona, 4)
 
         orb_column = QVBoxLayout()
         orb_column.setSpacing(2)
-        self.orb = LumaOrbCore()
-        self.orb.setMinimumSize(250, 250)
-        self.orb.setMaximumSize(310, 310)
-        orb_column.addWidget(self.orb, 1, Qt.AlignCenter)
+        self.portrait = LumaPortrait()
+        self.portrait.setMinimumSize(280, 340)
+        orb_column.addWidget(self.portrait, 1, Qt.AlignCenter)
+        self.orb = LumaOrbCore(compact=True)
+        orb_column.addWidget(self.orb, 0, Qt.AlignCenter)
         self.state_title = QLabel("Готова")
         self.state_title.setObjectName("orbStateTitle")
         self.state_title.setAlignment(Qt.AlignCenter)
@@ -1758,10 +1911,28 @@ class HomePage(QWidget):
         self.state_detail.setWordWrap(True)
         self.state_detail.setMaximumWidth(360)
         orb_column.addWidget(self.state_detail)
-        hero_layout.addLayout(orb_column, 8)
+        hero_top.addLayout(orb_column, 6)
+        main_column.addLayout(hero_top, 1)
+        hero_layout.addLayout(main_column, 7)
 
         telemetry = QVBoxLayout()
         telemetry.setSpacing(10)
+
+        clock_card = GlassCard("violet")
+        clock_box = QVBoxLayout(clock_card)
+        clock_box.setContentsMargins(14, 12, 14, 12)
+        clock_box.setSpacing(2)
+        self.date_value = QLabel()
+        self.date_value.setObjectName("muted")
+        self.time_value = QLabel()
+        self.time_value.setObjectName("homeClock")
+        clock_box.addWidget(self.date_value)
+        clock_box.addWidget(self.time_value)
+        telemetry.addWidget(clock_card)
+        self._clock_timer = QTimer(self)
+        self._clock_timer.timeout.connect(self._refresh_clock)
+        self._clock_timer.start(15000)
+        self._refresh_clock()
 
         voice_card = GlassCard("cyan")
         voice_box = QVBoxLayout(voice_card)
@@ -1810,14 +1981,47 @@ class HomePage(QWidget):
         activity_box.addWidget(self.heard_value)
         telemetry.addWidget(activity_card)
 
+        system_card = GlassCard("cyan")
+        system_box = QVBoxLayout(system_card)
+        system_box.setContentsMargins(13, 11, 13, 11)
+        system_box.setSpacing(5)
+        system_title = QLabel("СИСТЕМА")
+        system_title.setObjectName("metricLabel")
+        system_box.addWidget(system_title)
+        self.system_values: dict[str, QLabel] = {}
+        self.system_bars: dict[str, QProgressBar] = {}
+        for key, title in (("cpu", "CPU"), ("ram", "RAM"), ("disk", "Диск")):
+            line = QHBoxLayout()
+            name = QLabel(title)
+            name.setObjectName("systemMeterName")
+            value = QLabel("—")
+            value.setObjectName("systemMeterValue")
+            line.addWidget(name)
+            line.addStretch(1)
+            line.addWidget(value)
+            system_box.addLayout(line)
+            bar = QProgressBar()
+            bar.setObjectName("systemMeter")
+            bar.setRange(0, 100)
+            bar.setValue(0)
+            bar.setTextVisible(False)
+            system_box.addWidget(bar)
+            self.system_values[key] = value
+            self.system_bars[key] = bar
+        telemetry.addWidget(system_card)
+        self._previous_cpu_times: tuple[int, int] | None = None
+        self._system_timer = QTimer(self)
+        self._system_timer.timeout.connect(self._refresh_system_metrics)
+        self._system_timer.start(5000)
+        self._refresh_system_metrics()
+
         self.local_badge = QLabel("LOCAL · OFFLINE READY")
         self.local_badge.setObjectName("localPill")
         self.local_badge.setAlignment(Qt.AlignCenter)
         telemetry.addWidget(self.local_badge)
         telemetry.addStretch(1)
 
-        hero_layout.addLayout(telemetry, 5)
-        root.addWidget(hero, 1)
+        hero_layout.addLayout(telemetry, 3)
 
         action_card = GlassCard()
         action_box = QVBoxLayout(action_card)
@@ -1826,19 +2030,74 @@ class HomePage(QWidget):
         action_title = QLabel("Быстрые действия")
         action_title.setObjectName("sectionTitle")
         action_box.addWidget(action_title)
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText("Спроси, найди файл или скажи, что сделать…")
+        self.search_input.returnPressed.connect(self._submit_search)
+        action_box.addWidget(self.search_input)
         actions = QHBoxLayout()
-        for text in (
-            "Что у меня сегодня?",
-            "Открой загрузки",
-            "Что ты умеешь?",
-            "Покажи активные задачи",
+        for label, page in (
+            ("◈  Разговор", "chat"),
+            ("◉  Голос", "voice"),
+            ("◌  Память", "memory"),
+            ("⬡  Приложения", "skills"),
         ):
-            button = QPushButton(text)
+            button = QPushButton(label)
             button.setObjectName("suggestion")
-            button.clicked.connect(lambda _=False, value=text: self.submitted.emit(value))
+            button.clicked.connect(lambda _=False, value=page: self.navigate.emit(value))
             actions.addWidget(button)
         action_box.addLayout(actions)
-        root.addWidget(action_card)
+        main_column.addWidget(action_card)
+        root.addWidget(hero, 1)
+
+    def _refresh_clock(self) -> None:
+        now = datetime.now()
+        weekday = ("Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота", "Воскресенье")
+        self.date_value.setText(f"{weekday[now.weekday()]} · {now:%d.%m.%Y}")
+        self.time_value.setText(f"{now:%H:%M}")
+
+    def _refresh_system_metrics(self) -> None:
+        values: dict[str, int] = {}
+        if sys.platform == "win32":
+            try:
+                idle, kernel, user = ctypes.c_ulonglong(), ctypes.c_ulonglong(), ctypes.c_ulonglong()
+                if ctypes.windll.kernel32.GetSystemTimes(ctypes.byref(idle), ctypes.byref(kernel), ctypes.byref(user)):
+                    current = (idle.value, kernel.value + user.value)
+                    if self._previous_cpu_times:
+                        idle_delta = current[0] - self._previous_cpu_times[0]
+                        total_delta = current[1] - self._previous_cpu_times[1]
+                        if total_delta > 0:
+                            values["cpu"] = round(100 * (1 - idle_delta / total_delta))
+                    self._previous_cpu_times = current
+
+                class MemoryStatus(ctypes.Structure):
+                    _fields_ = [("length", ctypes.c_ulong), ("load", ctypes.c_ulong),
+                                ("total_physical", ctypes.c_ulonglong), ("available_physical", ctypes.c_ulonglong),
+                                ("total_page", ctypes.c_ulonglong), ("available_page", ctypes.c_ulonglong),
+                                ("total_virtual", ctypes.c_ulonglong), ("available_virtual", ctypes.c_ulonglong),
+                                ("available_extended", ctypes.c_ulonglong)]
+
+                status = MemoryStatus()
+                status.length = ctypes.sizeof(status)
+                if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status)):
+                    values["ram"] = int(status.load)
+            except (AttributeError, OSError, ValueError):
+                pass
+        try:
+            disk = shutil.disk_usage(Path.home().anchor or "/")
+            if disk.total:
+                values["disk"] = round(100 * disk.used / disk.total)
+        except OSError:
+            pass
+        for key, value in values.items():
+            safe = max(0, min(100, value))
+            self.system_values[key].setText(f"{safe}%")
+            self.system_bars[key].setValue(safe)
+
+    def _submit_search(self) -> None:
+        query = self.search_input.text().strip()
+        if query:
+            self.submitted.emit(query)
+            self.search_input.clear()
 
     def set_runtime(self, *, connected: bool, state: str, audio_level: int = 0,
                     heard: str = "", reply: str = "", skill: str = "",
@@ -1855,6 +2114,7 @@ class HomePage(QWidget):
         self.orb.set_state(orb_state)
         self.orb.set_activity(audio_level)
         self.portrait.set_state(orb_state)
+        self.portrait.set_activity(audio_level)
         self.state_title.setText(self.STATE_LABELS.get(clean_state, "Работаю"))
 
         heard_clean = " ".join(str(heard or "").split())[:130]
@@ -1970,7 +2230,8 @@ class VoicePage(QWidget):
         hero_box.setContentsMargins(20, 16, 20, 16)
         hero_box.setSpacing(18)
 
-        self.portrait = LumaPortrait(compact=True)
+        self.portrait = LumaPortrait()
+        self.portrait.setFixedSize(170, 184)
         self.portrait.set_state("speaking")
         hero_box.addWidget(self.portrait, 0, Qt.AlignVCenter)
 
@@ -2640,7 +2901,24 @@ class TasksPage(QWidget):
         self.host = QVBoxLayout(self.host_widget)
         self.host.setAlignment(Qt.AlignTop)
         scroll.setWidget(self.host_widget)
-        self.layout.addWidget(scroll, 1)
+        content = QHBoxLayout()
+        content.setSpacing(12)
+        clock_card = GlassCard("violet")
+        clock_card.setFixedWidth(242)
+        clock_box = QVBoxLayout(clock_card)
+        clock_box.setContentsMargins(14, 18, 14, 18)
+        clock_box.addWidget(QLabel("ПЛАНИРОВЩИК"))
+        clock = LumaClock()
+        clock_box.addWidget(clock, 0, Qt.AlignCenter)
+        today_label = QLabel(date.today().strftime("%d.%m.%Y"))
+        today_label.setObjectName("metricValueSmall")
+        today_label.setAlignment(Qt.AlignCenter)
+        clock_box.addWidget(today_label)
+        clock_box.addStretch(1)
+        content.addWidget(clock_card)
+        content.addWidget(scroll, 1)
+        self.layout.addLayout(content, 1)
+        self.set_payload({})
 
     def _preview_plan(self) -> None:
         goal = self.goal_input.text().strip()
@@ -2697,7 +2975,26 @@ class TasksPage(QWidget):
         self.tasks_pending_metric.setText(str(len(pending)))
 
         if not plans and not replans and not tasks and not pending and not notifications:
-            self.host.addWidget(QLabel("Ничего не ждёт."))
+            empty = GlassCard("violet")
+            empty.setMaximumHeight(170)
+            row = QVBoxLayout(empty)
+            row.setContentsMargins(20, 18, 20, 18)
+            copy = QVBoxLayout()
+            heading = QLabel("Здесь появятся твои задачи")
+            heading.setObjectName("sectionTitle")
+            heading.setWordWrap(True)
+            copy.addWidget(heading)
+            hint = QLabel("Напиши цель выше — Люма составит план и покажет шаги здесь.")
+            hint.setObjectName("muted")
+            hint.setWordWrap(True)
+            copy.addWidget(hint)
+            copy.addStretch(1)
+            row.addLayout(copy)
+            start = QPushButton("Новая задача")
+            start.setObjectName("primary")
+            start.clicked.connect(self.goal_input.setFocus)
+            row.addWidget(start, 0, Qt.AlignLeft)
+            self.host.addWidget(empty)
             return
         if plans:
             self._section("Планы", "PLANNER PREVIEW")
@@ -2986,7 +3283,7 @@ class ControlCenter(QMainWindow):
         ("activity", "⌁  Активность"),
         ("memory", "◌  Память"),
         ("learning", "✦  Обучение"),
-        ("skills", "⬡  Навыки"),
+        ("skills", "⬡  Приложения"),
         ("journal", "≋  Журнал"),
         ("settings", "⚙  Настройки"),
     ]
@@ -2998,6 +3295,7 @@ class ControlCenter(QMainWindow):
         self.resize(1180, 780)
         root = AmbientCanvas()
         root.setObjectName("shellRoot")
+        self.ambient = root
         self.setCentralWidget(root)
         outer = QVBoxLayout(root)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -3010,6 +3308,7 @@ class ControlCenter(QMainWindow):
         sidebar = QWidget()
         sidebar.setObjectName("sidebar")
         sidebar.setFixedWidth(236)
+        self.sidebar = sidebar
         side = QVBoxLayout(sidebar)
         side.setContentsMargins(14, 18, 14, 14)
         side.setSpacing(14)
@@ -3031,6 +3330,7 @@ class ControlCenter(QMainWindow):
         main_layout = QVBoxLayout(main)
         main_layout.setContentsMargins(18, 16, 18, 12)
         main_layout.setSpacing(14)
+        self.main_layout = main_layout
 
         self.status_header = StatusHeader()
         main_layout.addWidget(self.status_header)
@@ -3040,10 +3340,12 @@ class ControlCenter(QMainWindow):
 
         self.home = HomePage()
         self.home.submitted.connect(self.chat_submitted)
+        self.home.navigate.connect(self._open_page)
         self.pages["home"] = self.home
         self.stack.addWidget(self.home)
 
         self.chat = ChatPage()
+        self.chat.mic_toggle.connect(self.mic_toggle)
         self.chat.submitted.connect(self.chat_submitted)
         self.chat.clear_requested.connect(self.clear_chat)
         self.pages["chat"] = self.chat
@@ -3115,15 +3417,64 @@ class ControlCenter(QMainWindow):
         self.stack.addWidget(skills_page)
 
         settings = QWidget()
+        settings.setObjectName("settingsSurface")
         sl = QVBoxLayout(settings)
         sl.setSpacing(12)
         title = QLabel("Настройки")
         title.setObjectName("pageTitle")
         sl.addWidget(title)
-        subtitle = QLabel("Persona, автономность, инициативность, providers и аварийное управление.")
+        subtitle = QLabel("Внешний вид, характер Люмы, разрешения и управление голосом.")
         subtitle.setObjectName("muted")
         subtitle.setWordWrap(True)
         sl.addWidget(subtitle)
+
+        self.appearance_tabs = QTabBar()
+        self.appearance_tabs.setObjectName("appearanceTabs")
+        self.appearance_tabs.setExpanding(True)
+        for label in ("Внешний вид", "Голос", "Поведение", "Интеграции"):
+            self.appearance_tabs.addTab(label)
+        sl.addWidget(self.appearance_tabs)
+
+        appearance = GlassCard("violet")
+        appearance_box = QHBoxLayout(appearance)
+        appearance_box.setContentsMargins(16, 13, 16, 13)
+        appearance_copy = QVBoxLayout()
+        appearance_title = QLabel("Внешний вид")
+        appearance_title.setObjectName("sectionTitle")
+        appearance_copy.addWidget(appearance_title)
+        appearance_copy.addWidget(QLabel("Тёмная тема · фиолетовый и синий свет"))
+        accent_row = QHBoxLayout()
+        accent_row.addWidget(QLabel("Цвет акцента"))
+        self.accent_buttons: dict[str, QPushButton] = {}
+        for color in ("#8B5CF6", "#F05BCA", "#4E8DFF", "#43D7FF", "#42D9C8", "#F5B84C"):
+            button = QPushButton("")
+            button.setFixedSize(28, 28)
+            button.setToolTip(color)
+            button.clicked.connect(lambda _=False, value=color: self._set_accent(value))
+            accent_row.addWidget(button)
+            self.accent_buttons[color] = button
+        accent_row.addStretch(1)
+        appearance_copy.addLayout(accent_row)
+        appearance_copy.addSpacing(7)
+        appearance_copy.addWidget(QLabel("Стиль панели"))
+        style_row = QHBoxLayout()
+        self.panel_style_buttons: dict[str, QPushButton] = {}
+        for value, label in (
+            ("glass", "Стеклянный"), ("compact", "Компактный"),
+            ("minimal", "Минимал"),
+        ):
+            button = QPushButton(label)
+            button.setObjectName("panelStyle")
+            button.setCheckable(True)
+            button.clicked.connect(lambda _=False, mode=value: self._set_panel_style(mode))
+            style_row.addWidget(button)
+            self.panel_style_buttons[value] = button
+        appearance_copy.addLayout(style_row)
+        appearance_box.addLayout(appearance_copy, 1)
+        self.motion_toggle = QCheckBox("Уменьшить анимацию")
+        self.motion_toggle.toggled.connect(self._set_reduced_motion)
+        appearance_box.addWidget(self.motion_toggle)
+        sl.addWidget(appearance)
 
         runtime_card = GlassCard("cyan")
         runtime_box = QVBoxLayout(runtime_card)
@@ -3158,7 +3509,8 @@ class ControlCenter(QMainWindow):
         voice_link.setWordWrap(True)
         sl.addWidget(voice_link)
 
-        persona_title = QLabel("Persona Люмы")
+        persona_title = QLabel("Характер Люмы")
+        self.persona_title = persona_title
         persona_title.setObjectName("sectionTitle")
         sl.addWidget(persona_title)
         self.persona_boxes: dict[str, QComboBox] = {}
@@ -3193,7 +3545,7 @@ class ControlCenter(QMainWindow):
         self.persona_status = QLabel("Загрузка профиля…")
         self.persona_status.setObjectName("muted")
         sl.addWidget(self.persona_status)
-        autonomy_title = QLabel("Autonomy")
+        autonomy_title = QLabel("Самостоятельность")
         autonomy_title.setObjectName("sectionTitle")
         sl.addWidget(autonomy_title)
 
@@ -3241,7 +3593,7 @@ class ControlCenter(QMainWindow):
         self.autonomy_status.setWordWrap(True)
         sl.addWidget(self.autonomy_status)
 
-        proactivity_title = QLabel("Proactivity")
+        proactivity_title = QLabel("Инициативность")
         proactivity_title.setObjectName("sectionTitle")
         sl.addWidget(proactivity_title)
 
@@ -3315,25 +3667,20 @@ class ControlCenter(QMainWindow):
         self.events_view.setMaximumHeight(150)
         self.events_view.setPlainText("Событий пока нет.")
         sl.addWidget(self.events_view)
-        providers_title = QLabel("Providers")
+        providers_title = QLabel("Подключения")
+        self.providers_title = providers_title
         providers_title.setObjectName("sectionTitle")
         sl.addWidget(providers_title)
         self.providers_view = QTextBrowser()
         self.providers_view.setMaximumHeight(220)
         self.providers_view.setPlainText("Загрузка…")
         sl.addWidget(self.providers_view)
-        note = QLabel(
-            "Нативный интерфейс не содержит мозг ассистента. Он подключается "
-            "к локальному agent core на 127.0.0.1; старый /ui остаётся fallback."
-        )
-        note.setWordWrap(True)
-        note.setObjectName("muted")
-        sl.addWidget(note)
         sl.addStretch(1)
         settings_scroll = QScrollArea()
         settings_scroll.setWidgetResizable(True)
         settings_scroll.setFrameShape(QFrame.NoFrame)
         settings_scroll.setWidget(settings)
+        self.settings_scroll = settings_scroll
         self.pages["settings"] = settings_scroll
         self.stack.addWidget(settings_scroll)
 
@@ -3348,14 +3695,72 @@ class ControlCenter(QMainWindow):
         self.nav.currentRowChanged.connect(self._change)
         self.nav.setCurrentRow(0)
         self.setStyleSheet(theme.stylesheet())
+        for scroll in self.findChildren(QScrollArea):
+            scroll.viewport().setStyleSheet("background: transparent;")
+        self.appearance_tabs.currentChanged.connect(self._settings_tab_changed)
+        self._set_accent(str(QSettings("Luma", "Luma").value("accent", "#8B5CF6")))
+        self.motion_toggle.setChecked(QSettings("Luma", "Luma").value("reduced_motion", False, type=bool))
+        self._set_reduced_motion(self.motion_toggle.isChecked())
+        self._set_panel_style(str(QSettings("Luma", "Luma").value("panel_style", "glass")))
+
+    def _set_panel_style(self, mode: str) -> None:
+        if mode not in self.panel_style_buttons:
+            mode = "glass"
+        QSettings("Luma", "Luma").setValue("panel_style", mode)
+        for value, button in self.panel_style_buttons.items():
+            button.setChecked(value == mode)
+        widths = {"glass": 236, "compact": 200, "minimal": 176}
+        self.sidebar.setFixedWidth(widths[mode])
+        self.status_header.setVisible(mode != "minimal")
+        margins = (18, 16, 18, 12) if mode == "glass" else (12, 10, 12, 8)
+        self.main_layout.setContentsMargins(*margins)
+        self.main_layout.setSpacing(14 if mode == "glass" else 9)
+
+    def _set_accent(self, color: str) -> None:
+        if color not in self.accent_buttons:
+            color = "#8B5CF6"
+        QSettings("Luma", "Luma").setValue("accent", color)
+        self.setStyleSheet(theme.stylesheet(color))
+        for value, button in self.accent_buttons.items():
+            border = "#FFFFFF" if value == color else "#35395F"
+            button.setStyleSheet(f"background:{value};border:2px solid {border};border-radius:14px;")
+
+    def _settings_tab_changed(self, index: int) -> None:
+        if index == 1:
+            self.nav.setCurrentRow(2)
+        elif index == 2:
+            self.settings_scroll.ensureWidgetVisible(self.persona_title)
+        elif index == 3:
+            self.settings_scroll.ensureWidgetVisible(self.providers_title)
+        else:
+            self.settings_scroll.verticalScrollBar().setValue(0)
+
+    def _set_reduced_motion(self, enabled: bool) -> None:
+        QSettings("Luma", "Luma").setValue("reduced_motion", bool(enabled))
+        self.ambient.set_reduced_motion(enabled)
+        for widget in self.findChildren(LumaPortrait):
+            widget.set_reduced_motion(enabled)
+        for widget in self.findChildren(LumaOrbCore):
+            widget.set_reduced_motion(enabled)
+        for widget in self.findChildren(RoundMicButton):
+            widget.set_reduced_motion(enabled)
 
     def _change(self, row: int) -> None:
         if row < 0:
             return
-        self.stack.setCurrentIndex(row)
         key = self.nav.item(row).data(Qt.UserRole)
+        page = self.pages.get(str(key))
+        if page is None:
+            return
+        self.stack.setCurrentWidget(page)
         if key not in ("home", "chat", "voice"):
             self.refresh_page.emit(str(key))
+
+    def _open_page(self, page: str) -> None:
+        for row, (key, _) in enumerate(self.NAV):
+            if key == page:
+                self.nav.setCurrentRow(row)
+                return
 
     def set_pronunciation_payload(self, payload: dict[str, Any]) -> None:
         items = payload.get("items") if isinstance(payload.get("items"), dict) else {}

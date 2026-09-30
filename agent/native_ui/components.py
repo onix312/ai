@@ -1,8 +1,10 @@
 """Reusable visual components for Luma's native UI."""
 from __future__ import annotations
 
-from PySide6.QtCore import QEasingCurve, QPointF, Property, QPropertyAnimation, QRectF, Qt, QTimer
-from PySide6.QtGui import QBrush, QColor, QPainter, QPainterPath, QPen, QRadialGradient
+from pathlib import Path
+
+from PySide6.QtCore import QEasingCurve, QPointF, Property, QPropertyAnimation, QRectF, Qt, QTime, QTimer
+from PySide6.QtGui import QBrush, QColor, QPainter, QPen, QPixmap, QRadialGradient
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 
@@ -13,6 +15,7 @@ class AmbientCanvas(QWidget):
         super().__init__(parent)
         self.setObjectName("ambientCanvas")
         self._glow = 0.58
+        self._background = QPixmap(str(Path(__file__).resolve().parent / "assets" / "luma-night-bg.png"))
         self._animation = QPropertyAnimation(self, b"glow", self)
         self._animation.setDuration(5200)
         self._animation.setStartValue(0.48)
@@ -20,6 +23,14 @@ class AmbientCanvas(QWidget):
         self._animation.setEasingCurve(QEasingCurve.InOutSine)
         self._animation.setLoopCount(-1)
         self._animation.start()
+
+    def set_reduced_motion(self, enabled: bool) -> None:
+        if enabled:
+            self._animation.stop()
+            self._glow = 0.58
+            self.update()
+        elif self._animation.state() != QPropertyAnimation.Running:
+            self._animation.start()
 
     def get_glow(self) -> float:
         return float(self._glow)
@@ -35,6 +46,12 @@ class AmbientCanvas(QWidget):
         painter.setRenderHint(QPainter.Antialiasing, True)
         painter.fillRect(self.rect(), QColor("#070816"))
 
+        if not self._background.isNull():
+            painter.setOpacity(0.40)
+            painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
+            painter.drawPixmap(self.rect(), self._background)
+            painter.setOpacity(1.0)
+
         w, h = max(1, self.width()), max(1, self.height())
         violet = QRadialGradient(w * 0.74, h * 0.28, max(w, h) * 0.58)
         violet.setColorAt(0.0, QColor(100, 63, 210, int(52 * self._glow)))
@@ -47,15 +64,22 @@ class AmbientCanvas(QWidget):
         cyan.setColorAt(1.0, QColor(7, 8, 22, 0))
         painter.fillRect(self.rect(), QBrush(cyan))
 
+        painter.setPen(Qt.NoPen)
+        for index in range(24):
+            x = int(((index * 179 + 43) % 997) / 997 * w)
+            y = int(((index * 311 + 71) % 991) / 991 * h)
+            painter.setBrush(QColor(160, 132, 255, int((35 + index % 5 * 13) * self._glow)))
+            painter.drawEllipse(QPointF(x, y), 1.1, 1.1)
+
 
 class LumaPortrait(QWidget):
-    """Asset-free stylized female AI portrait used until a final character asset ships."""
+    """Luma's portrait with a state-colored, softly animated halo."""
 
     STATE_COLORS = {
         "idle": QColor("#8B5CF6"),
         "listening": QColor("#43D7FF"),
         "thinking": QColor("#A78BFA"),
-        "speaking": QColor("#58E6B1"),
+        "speaking": QColor("#F067E8"),
         "working": QColor("#F5B84C"),
         "waiting": QColor("#9996B7"),
         "error": QColor("#F05266"),
@@ -65,8 +89,12 @@ class LumaPortrait(QWidget):
     def __init__(self, parent: QWidget | None = None, *, compact: bool = False) -> None:
         super().__init__(parent)
         self._state = "idle"
+        self._audio_level = 0
         self._phase = 0.0
         self._compact = bool(compact)
+        self._reduced_motion = False
+        self._portrait = QPixmap(str(Path(__file__).resolve().parent / "assets" / "luma-portrait.png"))
+        self._energy = QPixmap(str(Path(__file__).resolve().parent / "assets" / "luma-energy-ring.png"))
         self.setAttribute(Qt.WA_TranslucentBackground, True)
         self.setMinimumSize(108, 132)
         if compact:
@@ -83,9 +111,22 @@ class LumaPortrait(QWidget):
         self._state = clean if clean in self.STATE_COLORS else "idle"
         self.update()
 
+    def set_activity(self, level: int = 0) -> None:
+        self._audio_level = max(0, int(level or 0))
+        self.update()
+
+    def set_reduced_motion(self, enabled: bool) -> None:
+        self._reduced_motion = bool(enabled)
+        if enabled:
+            self._timer.stop()
+        elif not self._timer.isActive():
+            self._timer.start()
+
     def _tick(self) -> None:
         if self.isVisible() and self._state not in ("stopped",):
-            self._phase = (self._phase + 0.045) % 6.283185307
+            speed = {"listening": 0.075, "thinking": 0.095, "speaking": 0.11,
+                     "working": 0.065, "idle": 0.035}.get(self._state, 0.035)
+            self._phase = (self._phase + speed) % 6.283185307
             self.update()
 
     @staticmethod
@@ -113,72 +154,109 @@ class LumaPortrait(QWidget):
         painter.setBrush(QBrush(halo))
         painter.drawEllipse(QPointF(cx, h * 0.48), w * 0.49, h * 0.48)
 
-        # Hair mass, deliberately long and soft to read as Luma's female persona.
-        hair = QPainterPath()
-        hair.moveTo(cx, h * 0.13)
-        hair.cubicTo(w * 0.18, h * 0.15, w * 0.13, h * 0.44, w * 0.24, h * 0.77)
-        hair.cubicTo(w * 0.30, h * 0.91, w * 0.39, h * 0.84, cx, h * 0.88)
-        hair.cubicTo(w * 0.63, h * 0.85, w * 0.72, h * 0.92, w * 0.78, h * 0.77)
-        hair.cubicTo(w * 0.88, h * 0.43, w * 0.82, h * 0.16, cx, h * 0.13)
-        painter.setBrush(QColor("#ECEBFF"))
-        painter.setPen(QPen(self._with_alpha(color, 105), max(1.0, w * 0.009)))
-        painter.drawPath(hair)
+        orbit = QRectF(0, h * 0.03, w, h * 0.94)
+        if not self._compact and not self._energy.isNull():
+            painter.save()
+            painter.translate(cx, h * 0.5)
+            painter.rotate(4.0 * math.sin(self._phase * 0.45))
+            painter.translate(-cx, -h * 0.5)
+            painter.setOpacity(0.70 + 0.10 * pulse)
+            painter.drawPixmap(orbit, self._energy, QRectF(self._energy.rect()))
+            painter.restore()
 
-        # Face.
-        face = QPainterPath()
-        face.moveTo(cx, h * 0.22)
-        face.cubicTo(w * 0.35, h * 0.22, w * 0.31, h * 0.38, w * 0.34, h * 0.53)
-        face.cubicTo(w * 0.38, h * 0.67, w * 0.44, h * 0.72, cx, h * 0.73)
-        face.cubicTo(w * 0.56, h * 0.72, w * 0.63, h * 0.67, w * 0.66, h * 0.53)
-        face.cubicTo(w * 0.69, h * 0.38, w * 0.65, h * 0.22, cx, h * 0.22)
-        painter.setPen(QPen(QColor("#D8D5EC"), max(1.0, w * 0.007)))
-        painter.setBrush(QColor("#F1E7E5"))
-        painter.drawPath(face)
+        if not self._compact:
+            painter.setPen(Qt.NoPen)
+            for index in range(13):
+                angle = self._phase * (0.45 + index % 3 * 0.13) + index * 2.39996
+                x = cx + math.cos(angle) * w * (0.36 + index % 4 * 0.025)
+                y = h * 0.51 + math.sin(angle) * h * (0.35 + index % 3 * 0.018)
+                radius = 1.0 + (index % 3) * 0.65 + pulse * 0.4
+                painter.setBrush(self._with_alpha(color.lighter(150), 95 + index % 4 * 30))
+                painter.drawEllipse(QPointF(x, y), radius, radius)
 
-        # Side bangs.
+        if not self._portrait.isNull():
+            # Crop a little of the wide artwork in compact placements so the face remains legible.
+            inset = 0.1 if self._compact else 0.0
+            source = QRectF(
+                self._portrait.width() * inset,
+                0,
+                self._portrait.width() * (1 - 2 * inset),
+                self._portrait.height(),
+            )
+            painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
+            painter.drawPixmap(QRectF(0, 0, w, h), self._portrait, source)
+
+        if not self._compact and self._state in ("listening", "speaking"):
+            strength = min(1.0, self._audio_level / 7000.0)
+            painter.setPen(QPen(self._with_alpha(color.lighter(140), 145), max(1.0, w * 0.006)))
+            middle = h * 0.49
+            for index in range(17):
+                wave = abs(math.sin(self._phase * 2.2 + index * 0.83))
+                amplitude = h * (0.025 + (0.05 + 0.09 * strength) * wave)
+                x = w * (0.018 + index * 0.013)
+                painter.drawLine(QPointF(x, middle - amplitude), QPointF(x, middle + amplitude))
+                painter.drawLine(QPointF(w - x, middle - amplitude), QPointF(w - x, middle + amplitude))
+
+        if not self._compact and not self._energy.isNull():
+            painter.save()
+            painter.setClipRect(QRectF(0, h * 0.62, w, h * 0.38))
+            painter.translate(cx, h * 0.5)
+            painter.rotate(-3.0 * math.sin(self._phase * 0.55))
+            painter.translate(-cx, -h * 0.5)
+            painter.setOpacity(0.45 + 0.10 * pulse)
+            painter.drawPixmap(orbit, self._energy, QRectF(self._energy.rect()))
+            painter.restore()
+
+        painter.setBrush(Qt.NoBrush)
+        painter.setPen(QPen(self._with_alpha(color, 120 + int(60 * pulse)), max(1.0, w * 0.012)))
+        painter.drawEllipse(QRectF(w * 0.06, h * 0.12, w * 0.88, h * 0.76))
+
+
+class LumaClock(QWidget):
+    """Orbital clock for the task planner."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._energy = QPixmap(str(Path(__file__).resolve().parent / "assets" / "luma-energy-ring.png"))
+        self.setFixedSize(210, 210)
+        self._timer = QTimer(self)
+        self._timer.timeout.connect(self.update)
+        self._timer.start(30000)
+
+    def paintEvent(self, _event) -> None:  # noqa: N802
+        import math
+
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
+        if not self._energy.isNull():
+            painter.setOpacity(0.82)
+            painter.drawPixmap(QRectF(0, 0, 210, 210), self._energy, QRectF(self._energy.rect()))
+            painter.setOpacity(1.0)
+
+        center = QPointF(105, 96)
+        painter.setBrush(QColor(8, 13, 35, 205))
+        painter.setPen(QPen(QColor("#82B9FF"), 2))
+        painter.drawEllipse(center, 57, 57)
+        for mark in range(12):
+            angle = math.tau * mark / 12 - math.pi / 2
+            start = QPointF(center.x() + math.cos(angle) * 47, center.y() + math.sin(angle) * 47)
+            end = QPointF(center.x() + math.cos(angle) * 53, center.y() + math.sin(angle) * 53)
+            painter.setPen(QPen(QColor("#CAB4FF"), 2))
+            painter.drawLine(start, end)
+
+        now = QTime.currentTime()
+        hour_angle = math.tau * ((now.hour() % 12) + now.minute() / 60) / 12 - math.pi / 2
+        minute_angle = math.tau * now.minute() / 60 - math.pi / 2
+        painter.setPen(QPen(QColor("#E7D9FF"), 4, Qt.SolidLine, Qt.RoundCap))
+        painter.drawLine(center, QPointF(center.x() + math.cos(hour_angle) * 29,
+                                         center.y() + math.sin(hour_angle) * 29))
+        painter.setPen(QPen(QColor("#63DFFF"), 3, Qt.SolidLine, Qt.RoundCap))
+        painter.drawLine(center, QPointF(center.x() + math.cos(minute_angle) * 43,
+                                         center.y() + math.sin(minute_angle) * 43))
         painter.setPen(Qt.NoPen)
-        painter.setBrush(QColor("#F8F7FF"))
-        left_bang = QPainterPath()
-        left_bang.moveTo(cx, h * 0.18)
-        left_bang.cubicTo(w * 0.31, h * 0.20, w * 0.30, h * 0.36, w * 0.39, h * 0.48)
-        left_bang.cubicTo(w * 0.42, h * 0.35, w * 0.45, h * 0.25, cx, h * 0.18)
-        painter.drawPath(left_bang)
-        right_bang = QPainterPath()
-        right_bang.moveTo(cx, h * 0.18)
-        right_bang.cubicTo(w * 0.69, h * 0.20, w * 0.70, h * 0.34, w * 0.61, h * 0.46)
-        right_bang.cubicTo(w * 0.59, h * 0.34, w * 0.55, h * 0.24, cx, h * 0.18)
-        painter.drawPath(right_bang)
-
-        # Eyes with state glow.
-        eye_y = h * 0.47
-        eye_dx = w * 0.105
-        painter.setPen(Qt.NoPen)
-        painter.setBrush(self._with_alpha(color, 65))
-        painter.drawEllipse(QPointF(cx - eye_dx, eye_y), w * 0.055, h * 0.043)
-        painter.drawEllipse(QPointF(cx + eye_dx, eye_y), w * 0.055, h * 0.043)
-        painter.setBrush(color.lighter(150))
-        painter.drawEllipse(QPointF(cx - eye_dx, eye_y), w * 0.026, h * 0.024)
-        painter.drawEllipse(QPointF(cx + eye_dx, eye_y), w * 0.026, h * 0.024)
-
-        # Minimal nose/mouth, softer while speaking.
-        painter.setPen(QPen(QColor("#9B7180"), max(1.0, w * 0.008), Qt.SolidLine, Qt.RoundCap))
-        mouth_y = h * 0.61
-        mouth_half = w * (0.035 + (0.012 * pulse if self._state == "speaking" else 0.0))
-        painter.drawLine(QPointF(cx - mouth_half, mouth_y), QPointF(cx + mouth_half, mouth_y))
-
-        # Shoulders / luminous collar.
-        shoulders = QPainterPath()
-        shoulders.moveTo(w * 0.18, h * 0.98)
-        shoulders.cubicTo(w * 0.24, h * 0.79, w * 0.38, h * 0.76, cx, h * 0.78)
-        shoulders.cubicTo(w * 0.62, h * 0.76, w * 0.76, h * 0.79, w * 0.82, h * 0.98)
-        painter.setBrush(QColor("#17152D"))
-        painter.setPen(QPen(self._with_alpha(color, 110), max(1.0, w * 0.01)))
-        painter.drawPath(shoulders)
-
-        collar = QRectF(w * 0.38, h * 0.79, w * 0.24, h * 0.055)
-        painter.setPen(Qt.NoPen)
-        painter.setBrush(self._with_alpha(color, 120 + int(45 * pulse)))
-        painter.drawRoundedRect(collar, collar.height() / 2, collar.height() / 2)
+        painter.setBrush(QColor("#F9F6FF"))
+        painter.drawEllipse(center, 4, 4)
 
 
 class GlassCard(QFrame):

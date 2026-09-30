@@ -12,12 +12,15 @@ from PySide6.QtCore import QPointF, QRectF, QSize, Qt, QTimer
 from PySide6.QtGui import QBrush, QColor, QPainter, QPen, QRadialGradient
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
+from .components import LumaPortrait
+from .tray import status_icon
+
 
 _STATE_COLORS = {
     "idle": QColor("#8B5CF6"),
     "listening": QColor("#43D7FF"),
     "thinking": QColor("#A78BFA"),
-    "speaking": QColor("#58E6B1"),
+    "speaking": QColor("#F067E8"),
     "working": QColor("#F5B84C"),
     "waiting": QColor("#9C99B8"),
     "error": QColor("#F05266"),
@@ -76,6 +79,10 @@ class LumaOrbCore(QWidget):
 
     def set_reduced_motion(self, enabled: bool) -> None:
         self._reduced_motion = bool(enabled)
+        if enabled:
+            self._timer.stop()
+        elif not self._timer.isActive():
+            self._timer.start()
         self.update()
 
     def _tick(self) -> None:
@@ -198,7 +205,7 @@ class LumaOrbCore(QWidget):
 
 
 class VoiceOrb(QWidget):
-    """Compact always-on-top runtime indicator."""
+    """Always-on-top indicator with a larger persona view during conversation."""
 
     LABELS = _STATE_LABELS
 
@@ -215,7 +222,10 @@ class VoiceOrb(QWidget):
         self.setFixedWidth(390)
         self.setFixedHeight(72)
 
-        row = QHBoxLayout(self)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+        row = QHBoxLayout()
         row.setContentsMargins(8, 5, 14, 5)
         row.setSpacing(10)
         self.core = LumaOrbCore(self, compact=True)
@@ -237,15 +247,87 @@ class VoiceOrb(QWidget):
         text.addWidget(self.context_label)
         text.addWidget(self.reply_label)
         row.addLayout(text, 1)
+        root.addLayout(row)
+
+        self.showcase = QWidget(self)
+        showcase_row = QHBoxLayout(self.showcase)
+        showcase_row.setContentsMargins(8, 0, 12, 10)
+        showcase_row.setSpacing(4)
+        self.portrait = LumaPortrait(self.showcase)
+        self.portrait.setFixedSize(290, 245)
+        showcase_row.addWidget(self.portrait)
+        states = QVBoxLayout()
+        states.setSpacing(8)
+        self.state_labels: dict[str, QWidget] = {}
+        for key, label in (
+            ("listening", "Слушает"), ("thinking", "Думает"),
+            ("speaking", "Говорит"), ("working", "Обработка"),
+        ):
+            item = QWidget()
+            item.setObjectName("voiceStateCard")
+            item.setMinimumHeight(42)
+            item_row = QHBoxLayout(item)
+            item_row.setContentsMargins(5, 2, 10, 2)
+            item_row.setSpacing(8)
+            icon = QLabel()
+            icon.setPixmap(status_icon(key).pixmap(34, 34))
+            item_row.addWidget(icon)
+            title = QLabel(label)
+            title.setStyleSheet("background:transparent;color:#F4F0FF;font-size:13px;font-weight:700;")
+            item_row.addWidget(title, 1)
+            states.addWidget(item)
+            self.state_labels[key] = item
+        states.addStretch(1)
+        showcase_row.addLayout(states, 1)
+        root.addWidget(self.showcase)
+        self.showcase.hide()
 
         self._hide_timer = QTimer(self)
         self._hide_timer.setSingleShot(True)
         self._hide_timer.timeout.connect(self.hide)
+        self._state_phase = 0.0
+        self._state_timer = QTimer(self)
+        self._state_timer.setInterval(50)
+        self._state_timer.timeout.connect(self._animate_state)
+        self._state_timer.start()
+
+    def _animate_state(self) -> None:
+        if not self.showcase.isVisible():
+            return
+        self._state_phase = (self._state_phase + 0.09) % math.tau
+        self._paint_state_labels()
+
+    def set_reduced_motion(self, enabled: bool) -> None:
+        self.core.set_reduced_motion(enabled)
+        self.portrait.set_reduced_motion(enabled)
+        if enabled:
+            self._state_timer.stop()
+            self._state_phase = 0.0
+            self._paint_state_labels()
+        elif not self._state_timer.isActive():
+            self._state_timer.start()
+
+    def _paint_state_labels(self) -> None:
+        glow = int(80 + 42 * (0.5 + 0.5 * math.sin(self._state_phase)))
+        for key, label in self.state_labels.items():
+            selected = key == self._state
+            border = f"rgb({glow + 45}, {glow + 18}, 255)" if selected else "#34395F"
+            background = "#252052" if selected else "#131B39"
+            label.setStyleSheet(
+                f"QWidget#voiceStateCard {{background:{background};border:1px solid {border};"
+                "border-radius:11px;}"
+            )
 
     def set_state(self, state: str, auto_hide_ms: int = 0) -> None:
         clean = str(state or "idle").casefold()
+        if clean in ("executing", "task"):
+            clean = "working"
         self._state = clean if clean in self.LABELS else "idle"
         self.core.set_state(self._state)
+        self.portrait.set_state(self._state)
+        self.showcase.setVisible(self._state in ("listening", "thinking", "speaking", "working"))
+        self._paint_state_labels()
+        self._resize_for_state()
         self.label.setText(f"Люма · {self.LABELS[self._state]}")
         self.show_near_bottom()
         if auto_hide_ms:
@@ -255,6 +337,7 @@ class VoiceOrb(QWidget):
         self._audio_level = max(0, int(level or 0))
         self._partial = " ".join(str(partial or "").split())[:52]
         self.core.set_activity(self._audio_level)
+        self.portrait.set_activity(self._audio_level)
         if self._state == "listening" and self._partial:
             self.label.setText(self._partial)
         else:
@@ -290,12 +373,22 @@ class VoiceOrb(QWidget):
 
         self.context_label.setVisible(bool(self.context_label.text()))
         self.reply_label.setVisible(bool(self.reply_label.text()))
-        target_height = 112 if self.context_label.text() or self.reply_label.text() else 72
+        self._resize_for_state()
+        self.update()
+
+    def _resize_for_state(self) -> None:
+        target_height = (
+            330 if self._state in ("listening", "thinking", "speaking", "working")
+            else 112 if self.context_label.text() or self.reply_label.text()
+            else 72
+        )
+        target_width = 520 if target_height == 330 else 390
+        if self.width() != target_width:
+            self.setFixedWidth(target_width)
         if self.height() != target_height:
             self.setFixedHeight(target_height)
             if self.isVisible():
                 self.show_near_bottom()
-        self.update()
 
     def show_near_bottom(self) -> None:
         screen = self.screen()

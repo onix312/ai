@@ -20,10 +20,13 @@ COLORS = {
 }
 
 
-def stylesheet() -> str:
-    return """
-    QMainWindow, QWidget {
+def stylesheet(accent: str = "#8B5CF6") -> str:
+    css = """
+    QMainWindow {
         background: #070816;
+    }
+
+    QWidget {
         color: #F4F2FF;
         font-size: 14px;
     }
@@ -32,9 +35,47 @@ def stylesheet() -> str:
         background: transparent;
     }
 
+    QWidget#settingsSurface {
+        background: rgba(8, 11, 29, 178);
+    }
+
+    QTabBar#appearanceTabs {
+        background: #0F142D;
+        border: 1px solid #36355E;
+        border-radius: 12px;
+    }
+
+    QTabBar#appearanceTabs::tab {
+        background: transparent;
+        color: #B8B2D2;
+        min-height: 30px;
+        padding: 5px 12px;
+    }
+
+    QTabBar#appearanceTabs::tab:selected {
+        background: #302269;
+        color: #FFFFFF;
+        border: 1px solid #9A70FF;
+        border-radius: 10px;
+    }
+
+    QPushButton#panelStyle {
+        background: #141832;
+        border: 1px solid #383D68;
+        border-radius: 10px;
+        color: #C7C1E0;
+        min-height: 30px;
+    }
+
+    QPushButton#panelStyle:checked {
+        background: #302269;
+        border: 1px solid #A77EFF;
+        color: #FFFFFF;
+    }
+
     QWidget#sidebar {
-        background: rgba(12, 13, 30, 235);
-        border-right: 1px solid #292D52;
+        background: #090E24;
+        border-right: 1px solid #59439A;
     }
 
     QFrame#brandCard {
@@ -87,9 +128,9 @@ def stylesheet() -> str:
     }
 
     QListWidget#nav::item:selected {
-        background: #242044;
+        background: qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #6846C8,stop:1 #252D68);
         color: #FFFFFF;
-        border: 1px solid #6654B8;
+        border: 1px solid #9A79FF;
     }
 
     QFrame#topBar {
@@ -152,6 +193,58 @@ def stylesheet() -> str:
         line-height: 1.35;
     }
 
+    QScrollArea#chatBubbleScroll, QScrollArea#chatBubbleScroll > QWidget > QWidget {
+        background: #0D0F20;
+        border: 0;
+    }
+
+    QFrame#chatBubbleUser {
+        background: #3348B9;
+        border: 1px solid #6684FF;
+        border-radius: 14px;
+    }
+
+    QFrame#chatBubbleAssistant {
+        background: #151B35;
+        border: 1px solid #38406D;
+        border-radius: 14px;
+    }
+
+    QLabel#chatBubbleText {
+        background: transparent;
+        color: #F5F3FF;
+        font-size: 14px;
+    }
+
+    QLabel#chatBubbleMeta {
+        background: transparent;
+        color: #B9A7FF;
+        font-size: 10px;
+        font-weight: 700;
+    }
+
+    QLabel#homeClock {
+        color: #D7A9FF;
+        font-size: 29px;
+        font-weight: 800;
+    }
+
+    QPushButton#heroAction {
+        background: #1A1B43;
+        border: 1px solid #6C59B4;
+        border-radius: 11px;
+        color: #F1EDFF;
+        font-size: 13px;
+        font-weight: 650;
+        padding: 6px 10px;
+        text-align: left;
+    }
+
+    QPushButton#heroAction:hover {
+        background: #342A72;
+        border-color: #BDA4FF;
+    }
+
     QFrame#portraitFrame {
         background: #15152F;
         border: 1px solid #4B4380;
@@ -200,6 +293,25 @@ def stylesheet() -> str:
         color: #ECE9F8;
         font-size: 14px;
         font-weight: 650;
+    }
+
+    QLabel#systemMeterName, QLabel#systemMeterValue {
+        background: transparent;
+        color: #BBB4D9;
+        font-size: 11px;
+    }
+
+    QProgressBar#systemMeter {
+        min-height: 5px;
+        max-height: 5px;
+        border: 0;
+        border-radius: 3px;
+        background: #252951;
+    }
+
+    QProgressBar#systemMeter::chunk {
+        border-radius: 3px;
+        background: qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #43D7FF,stop:1 #B27AFF);
     }
 
     QLabel#opsMetric, QLabel#opsMetricReady, QLabel#opsMetricDanger {
@@ -481,17 +593,17 @@ def stylesheet() -> str:
     }
 
     QFrame#glassCard {
-        background: #111328;
-        border: 1px solid #30345A;
+        background: qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 rgba(21,27,59,232),stop:0.55 rgba(16,22,47,225),stop:1 rgba(11,16,37,232));
+        border: 1px solid #4B4380;
         border-radius: 16px;
     }
 
     QFrame#glassCard[accent="violet"] {
-        border: 1px solid #5E4AA3;
+        border: 1px solid #9A70FF;
     }
 
     QFrame#glassCard[accent="cyan"] {
-        border: 1px solid #28758B;
+        border: 1px solid #4FAEF9;
     }
 
     QFrame#glassCard[accent="amber"] {
@@ -553,9 +665,9 @@ def stylesheet() -> str:
     }
 
     QPushButton#primary {
-        background: #6847D8;
+        background: qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #6C49DE,stop:1 #3D68DD);
         color: #FFFFFF;
-        border: 1px solid #8B6EF0;
+        border: 1px solid #AB88FF;
     }
 
     QPushButton#primary:hover {
@@ -564,8 +676,8 @@ def stylesheet() -> str:
     }
 
     QPushButton#suggestion {
-        background: #12162B;
-        border: 1px solid #343861;
+        background: qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #24235A,stop:1 #111A3A);
+        border: 1px solid #6C5AB0;
         border-radius: 14px;
         padding: 15px 18px;
         text-align: left;
@@ -574,6 +686,20 @@ def stylesheet() -> str:
     QPushButton#suggestion:hover {
         background: #1A1E39;
         border-color: #6654B8;
+    }
+
+    QToolButton#capabilityTile {
+        background: qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #17264A,stop:1 #10172E);
+        border: 1px solid #405891;
+        border-radius: 12px;
+        color: #F5F2FF;
+        font-size: 14px;
+        font-weight: 700;
+    }
+
+    QToolButton#capabilityTile:hover, QToolButton#capabilityTile:checked {
+        background: #28236A;
+        border: 1px solid #AA80FF;
     }
 
     QPushButton#danger {
@@ -623,3 +749,7 @@ def stylesheet() -> str:
         font-size: 11px;
     }
     """
+    if accent != "#8B5CF6":
+        for source in ("#8B5CF6", "#9A70FF", "#AB88FF", "#7D63E6", "#6654B8"):
+            css = css.replace(source, accent)
+    return css

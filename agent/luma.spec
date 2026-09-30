@@ -13,6 +13,18 @@ for package in ("agent", "pywinauto", "rapidocr_onnxruntime", "vosk"):
         pass
 
 datas = []
+datas.append((
+    os.path.join(ROOT, "agent", "native_ui", "assets", "luma-portrait.png"),
+    os.path.join("agent", "native_ui", "assets"),
+))
+datas.append((
+    os.path.join(ROOT, "agent", "native_ui", "assets", "luma-night-bg.png"),
+    os.path.join("agent", "native_ui", "assets"),
+))
+datas.append((
+    os.path.join(ROOT, "agent", "native_ui", "assets", "luma-energy-ring.png"),
+    os.path.join("agent", "native_ui", "assets"),
+))
 for package in ("rapidocr_onnxruntime", "vosk"):
     try:
         datas += collect_data_files(package)

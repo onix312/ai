@@ -2,18 +2,28 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from functools import lru_cache
+import math
+from pathlib import Path
 
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QAction, QColor, QIcon, QPainter, QPixmap
+from PySide6.QtCore import QPointF, Qt, QTimer
+from PySide6.QtGui import QAction, QColor, QIcon, QPainter, QPen, QPixmap, QRadialGradient
 from PySide6.QtWidgets import QMenu, QSystemTrayIcon
 
 
-def status_icon(state: str = "idle") -> QIcon:
+@lru_cache(maxsize=1)
+def _energy_ring() -> QPixmap:
+    return QPixmap(str(Path(__file__).resolve().parent / "assets" / "luma-energy-ring.png"))
+
+
+def status_icon(state: str = "idle", phase: float = 0.0) -> QIcon:
     tones = {
-        "idle": "#64748b",
-        "listening": "#06b6d4",
-        "thinking": "#8b5cf6",
-        "speaking": "#22c55e",
+        "idle": "#A779FF",
+        "listening": "#4DDCFF",
+        "thinking": "#9B80FF",
+        "speaking": "#F067E8",
+        "working": "#F5B84C",
+        "waiting": "#9C99B8",
         "error": "#ef4444",
         "stopped": "#991b1b",
         "offline": "#475569",
@@ -22,12 +32,33 @@ def status_icon(state: str = "idle") -> QIcon:
     pix.fill(Qt.transparent)
     painter = QPainter(pix)
     painter.setRenderHint(QPainter.Antialiasing)
-    painter.setBrush(QColor(tones.get(state, tones["idle"])))
+    color = QColor(tones.get(state, tones["idle"]))
+    halo = QRadialGradient(QPointF(32, 32), 31)
+    halo.setColorAt(0, QColor(color.red(), color.green(), color.blue(), 135 + int(35 * (1 + math.sin(phase)) / 2)))
+    halo.setColorAt(1, QColor(color.red(), color.green(), color.blue(), 0))
     painter.setPen(Qt.NoPen)
-    painter.drawEllipse(8, 8, 48, 48)
-    painter.setBrush(QColor("#ffffff"))
-    painter.drawEllipse(26, 20, 12, 12)
-    painter.drawRoundedRect(25, 33, 14, 15, 7, 7)
+    painter.setBrush(halo)
+    painter.drawEllipse(1, 1, 62, 62)
+    painter.setPen(QPen(color.lighter(160), 3))
+    painter.setBrush(QColor("#0A0D29"))
+    painter.drawEllipse(10, 10, 44, 44)
+    painter.setPen(QPen(color, 2))
+    painter.drawArc(15, 15, 34, 34, 55 * 16, 245 * 16)
+    core = QRadialGradient(QPointF(28, 25), 22)
+    core.setColorAt(0, QColor("#F9F6FF"))
+    core.setColorAt(0.18, color.lighter(170))
+    core.setColorAt(0.58, color)
+    core.setColorAt(1, QColor("#151047"))
+    painter.setPen(Qt.NoPen)
+    painter.setBrush(core)
+    painter.drawEllipse(20, 20, 24, 24)
+    ring = _energy_ring()
+    if not ring.isNull():
+        painter.setOpacity(0.9)
+        painter.translate(32, 32)
+        painter.rotate(9 * math.sin(phase))
+        painter.translate(-32, -32)
+        painter.drawPixmap(4, 4, 56, 56, ring)
     painter.end()
     return QIcon(pix)
 
@@ -78,6 +109,30 @@ class LumaTray(QSystemTrayIcon):
         self.activated.connect(
             lambda reason: open_quick() if reason == QSystemTrayIcon.Trigger else None
         )
+        self._state = "offline"
+        self._phase = 0.0
+        self._reduced_motion = False
+        self._animation = QTimer(self)
+        self._animation.setInterval(150)
+        self._animation.timeout.connect(self._animate)
+
+    def _animate(self) -> None:
+        self._phase = (self._phase + 0.22) % math.tau
+        self.setIcon(status_icon(self._state, self._phase))
+
+    def set_reduced_motion(self, enabled: bool) -> None:
+        self._reduced_motion = bool(enabled)
+        self._sync_animation()
+
+    def _sync_animation(self) -> None:
+        active = self._state in ("listening", "thinking", "speaking", "working")
+        if active and not self._reduced_motion:
+            if not self._animation.isActive():
+                self._animation.start()
+        elif self._animation.isActive() or self._phase:
+            self._animation.stop()
+            self._phase = 0.0
+            self.setIcon(status_icon(self._state))
 
     def apply_status(self, connected: bool, mic_enabled: bool, model_ok: bool,
                      assistant_state: str = "idle", error: str = "",
@@ -85,7 +140,11 @@ class LumaTray(QSystemTrayIcon):
         state = "stopped" if safety_stopped and connected else (assistant_state if connected else "offline")
         if error:
             state = "error"
-        self.setIcon(status_icon(state))
+        if state != self._state:
+            self._state = state
+            self._phase = 0.0
+            self.setIcon(status_icon(state))
+        self._sync_animation()
         self.status_action.setText(
             "● Люма работает" if connected else "● Люма недоступна"
         )
