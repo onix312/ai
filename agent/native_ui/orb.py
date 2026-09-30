@@ -20,7 +20,7 @@ _STATE_COLORS = {
     "idle": QColor("#8B5CF6"),
     "listening": QColor("#43D7FF"),
     "thinking": QColor("#A78BFA"),
-    "speaking": QColor("#58E6B1"),
+    "speaking": QColor("#F067E8"),
     "working": QColor("#F5B84C"),
     "waiting": QColor("#9C99B8"),
     "error": QColor("#F05266"),

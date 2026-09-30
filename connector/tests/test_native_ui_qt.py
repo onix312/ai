@@ -100,6 +100,12 @@ class NativeQtSmokeTests(unittest.TestCase):
             center.nav.setCurrentRow(row)
             self.assertIs(center.stack.currentWidget(), center.pages[key], key)
         center.nav.setCurrentRow(0)
+        center._set_panel_style("compact")
+        self.assertEqual(200, center.sidebar.width())
+        center._set_panel_style("minimal")
+        self.assertTrue(center.status_header.isHidden())
+        center._set_panel_style("glass")
+        self.assertEqual(236, center.sidebar.width())
 
         center.set_home_runtime(
             connected=True,

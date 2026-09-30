@@ -59,6 +59,20 @@ def stylesheet(accent: str = "#8B5CF6") -> str:
         border-radius: 10px;
     }
 
+    QPushButton#panelStyle {
+        background: #141832;
+        border: 1px solid #383D68;
+        border-radius: 10px;
+        color: #C7C1E0;
+        min-height: 30px;
+    }
+
+    QPushButton#panelStyle:checked {
+        background: #302269;
+        border: 1px solid #A77EFF;
+        color: #FFFFFF;
+    }
+
     QWidget#sidebar {
         background: #090E24;
         border-right: 1px solid #59439A;
@@ -249,6 +263,25 @@ def stylesheet(accent: str = "#8B5CF6") -> str:
         color: #ECE9F8;
         font-size: 14px;
         font-weight: 650;
+    }
+
+    QLabel#systemMeterName, QLabel#systemMeterValue {
+        background: transparent;
+        color: #BBB4D9;
+        font-size: 11px;
+    }
+
+    QProgressBar#systemMeter {
+        min-height: 5px;
+        max-height: 5px;
+        border: 0;
+        border-radius: 3px;
+        background: #252951;
+    }
+
+    QProgressBar#systemMeter::chunk {
+        border-radius: 3px;
+        background: qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #43D7FF,stop:1 #B27AFF);
     }
 
     QLabel#opsMetric, QLabel#opsMetricReady, QLabel#opsMetricDanger {

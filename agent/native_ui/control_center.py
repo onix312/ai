@@ -3,7 +3,11 @@ from __future__ import annotations
 
 import html
 import json
+import ctypes
+import shutil
+import sys
 from datetime import date, datetime
+from pathlib import Path
 from typing import Any
 
 from PySide6.QtCore import QSettings, QSize, Qt, QTimer, Signal
@@ -1787,8 +1791,12 @@ class HomePage(QWidget):
 
         hero = GlassCard("violet")
         hero_layout = QHBoxLayout(hero)
-        hero_layout.setContentsMargins(22, 20, 22, 20)
-        hero_layout.setSpacing(20)
+        hero_layout.setContentsMargins(18, 16, 18, 16)
+        hero_layout.setSpacing(14)
+        main_column = QVBoxLayout()
+        main_column.setSpacing(12)
+        hero_top = QHBoxLayout()
+        hero_top.setSpacing(12)
 
         persona = QVBoxLayout()
         persona.setSpacing(6)
@@ -1826,7 +1834,7 @@ class HomePage(QWidget):
             button.setMinimumHeight(38)
             button.clicked.connect(lambda _=False, value=command: self.submitted.emit(value))
             persona.addWidget(button)
-        hero_layout.addLayout(persona, 4)
+        hero_top.addLayout(persona, 4)
 
         orb_column = QVBoxLayout()
         orb_column.setSpacing(2)
@@ -1845,7 +1853,9 @@ class HomePage(QWidget):
         self.state_detail.setWordWrap(True)
         self.state_detail.setMaximumWidth(360)
         orb_column.addWidget(self.state_detail)
-        hero_layout.addLayout(orb_column, 6)
+        hero_top.addLayout(orb_column, 6)
+        main_column.addLayout(hero_top, 1)
+        hero_layout.addLayout(main_column, 7)
 
         telemetry = QVBoxLayout()
         telemetry.setSpacing(10)
@@ -1913,14 +1923,47 @@ class HomePage(QWidget):
         activity_box.addWidget(self.heard_value)
         telemetry.addWidget(activity_card)
 
+        system_card = GlassCard("cyan")
+        system_box = QVBoxLayout(system_card)
+        system_box.setContentsMargins(13, 11, 13, 11)
+        system_box.setSpacing(5)
+        system_title = QLabel("СИСТЕМА")
+        system_title.setObjectName("metricLabel")
+        system_box.addWidget(system_title)
+        self.system_values: dict[str, QLabel] = {}
+        self.system_bars: dict[str, QProgressBar] = {}
+        for key, title in (("cpu", "CPU"), ("ram", "RAM"), ("disk", "Диск")):
+            line = QHBoxLayout()
+            name = QLabel(title)
+            name.setObjectName("systemMeterName")
+            value = QLabel("—")
+            value.setObjectName("systemMeterValue")
+            line.addWidget(name)
+            line.addStretch(1)
+            line.addWidget(value)
+            system_box.addLayout(line)
+            bar = QProgressBar()
+            bar.setObjectName("systemMeter")
+            bar.setRange(0, 100)
+            bar.setValue(0)
+            bar.setTextVisible(False)
+            system_box.addWidget(bar)
+            self.system_values[key] = value
+            self.system_bars[key] = bar
+        telemetry.addWidget(system_card)
+        self._previous_cpu_times: tuple[int, int] | None = None
+        self._system_timer = QTimer(self)
+        self._system_timer.timeout.connect(self._refresh_system_metrics)
+        self._system_timer.start(5000)
+        self._refresh_system_metrics()
+
         self.local_badge = QLabel("LOCAL · OFFLINE READY")
         self.local_badge.setObjectName("localPill")
         self.local_badge.setAlignment(Qt.AlignCenter)
         telemetry.addWidget(self.local_badge)
         telemetry.addStretch(1)
 
-        hero_layout.addLayout(telemetry, 4)
-        root.addWidget(hero, 1)
+        hero_layout.addLayout(telemetry, 3)
 
         action_card = GlassCard()
         action_box = QVBoxLayout(action_card)
@@ -1945,13 +1988,52 @@ class HomePage(QWidget):
             button.clicked.connect(lambda _=False, value=page: self.navigate.emit(value))
             actions.addWidget(button)
         action_box.addLayout(actions)
-        root.addWidget(action_card)
+        main_column.addWidget(action_card)
+        root.addWidget(hero, 1)
 
     def _refresh_clock(self) -> None:
         now = datetime.now()
         weekday = ("Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота", "Воскресенье")
         self.date_value.setText(f"{weekday[now.weekday()]} · {now:%d.%m.%Y}")
         self.time_value.setText(f"{now:%H:%M}")
+
+    def _refresh_system_metrics(self) -> None:
+        values: dict[str, int] = {}
+        if sys.platform == "win32":
+            try:
+                idle, kernel, user = ctypes.c_ulonglong(), ctypes.c_ulonglong(), ctypes.c_ulonglong()
+                if ctypes.windll.kernel32.GetSystemTimes(ctypes.byref(idle), ctypes.byref(kernel), ctypes.byref(user)):
+                    current = (idle.value, kernel.value + user.value)
+                    if self._previous_cpu_times:
+                        idle_delta = current[0] - self._previous_cpu_times[0]
+                        total_delta = current[1] - self._previous_cpu_times[1]
+                        if total_delta > 0:
+                            values["cpu"] = round(100 * (1 - idle_delta / total_delta))
+                    self._previous_cpu_times = current
+
+                class MemoryStatus(ctypes.Structure):
+                    _fields_ = [("length", ctypes.c_ulong), ("load", ctypes.c_ulong),
+                                ("total_physical", ctypes.c_ulonglong), ("available_physical", ctypes.c_ulonglong),
+                                ("total_page", ctypes.c_ulonglong), ("available_page", ctypes.c_ulonglong),
+                                ("total_virtual", ctypes.c_ulonglong), ("available_virtual", ctypes.c_ulonglong),
+                                ("available_extended", ctypes.c_ulonglong)]
+
+                status = MemoryStatus()
+                status.length = ctypes.sizeof(status)
+                if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status)):
+                    values["ram"] = int(status.load)
+            except (AttributeError, OSError, ValueError):
+                pass
+        try:
+            disk = shutil.disk_usage(Path.home().anchor or "/")
+            if disk.total:
+                values["disk"] = round(100 * disk.used / disk.total)
+        except OSError:
+            pass
+        for key, value in values.items():
+            safe = max(0, min(100, value))
+            self.system_values[key].setText(f"{safe}%")
+            self.system_bars[key].setValue(safe)
 
     def _submit_search(self) -> None:
         query = self.search_input.text().strip()
@@ -3168,6 +3250,7 @@ class ControlCenter(QMainWindow):
         sidebar = QWidget()
         sidebar.setObjectName("sidebar")
         sidebar.setFixedWidth(236)
+        self.sidebar = sidebar
         side = QVBoxLayout(sidebar)
         side.setContentsMargins(14, 18, 14, 14)
         side.setSpacing(14)
@@ -3189,6 +3272,7 @@ class ControlCenter(QMainWindow):
         main_layout = QVBoxLayout(main)
         main_layout.setContentsMargins(18, 16, 18, 12)
         main_layout.setSpacing(14)
+        self.main_layout = main_layout
 
         self.status_header = StatusHeader()
         main_layout.addWidget(self.status_header)
@@ -3312,6 +3396,21 @@ class ControlCenter(QMainWindow):
             self.accent_buttons[color] = button
         accent_row.addStretch(1)
         appearance_copy.addLayout(accent_row)
+        appearance_copy.addSpacing(7)
+        appearance_copy.addWidget(QLabel("Стиль панели"))
+        style_row = QHBoxLayout()
+        self.panel_style_buttons: dict[str, QPushButton] = {}
+        for value, label in (
+            ("glass", "Стеклянный"), ("compact", "Компактный"),
+            ("minimal", "Минимал"),
+        ):
+            button = QPushButton(label)
+            button.setObjectName("panelStyle")
+            button.setCheckable(True)
+            button.clicked.connect(lambda _=False, mode=value: self._set_panel_style(mode))
+            style_row.addWidget(button)
+            self.panel_style_buttons[value] = button
+        appearance_copy.addLayout(style_row)
         appearance_box.addLayout(appearance_copy, 1)
         self.motion_toggle = QCheckBox("Уменьшить анимацию")
         self.motion_toggle.toggled.connect(self._set_reduced_motion)
@@ -3543,6 +3642,20 @@ class ControlCenter(QMainWindow):
         self._set_accent(str(QSettings("Luma", "Luma").value("accent", "#8B5CF6")))
         self.motion_toggle.setChecked(QSettings("Luma", "Luma").value("reduced_motion", False, type=bool))
         self._set_reduced_motion(self.motion_toggle.isChecked())
+        self._set_panel_style(str(QSettings("Luma", "Luma").value("panel_style", "glass")))
+
+    def _set_panel_style(self, mode: str) -> None:
+        if mode not in self.panel_style_buttons:
+            mode = "glass"
+        QSettings("Luma", "Luma").setValue("panel_style", mode)
+        for value, button in self.panel_style_buttons.items():
+            button.setChecked(value == mode)
+        widths = {"glass": 236, "compact": 200, "minimal": 176}
+        self.sidebar.setFixedWidth(widths[mode])
+        self.status_header.setVisible(mode != "minimal")
+        margins = (18, 16, 18, 12) if mode == "glass" else (12, 10, 12, 8)
+        self.main_layout.setContentsMargins(*margins)
+        self.main_layout.setSpacing(14 if mode == "glass" else 9)
 
     def _set_accent(self, color: str) -> None:
         if color not in self.accent_buttons:
