@@ -1,11 +1,101 @@
 """Quick Panel в стиле Spotlight/PowerToys Run."""
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Signal
+import math
+
+from PySide6.QtCore import QPointF, Qt, QTimer, Signal
+from PySide6.QtGui import QColor, QFont, QPainter, QPen, QRadialGradient
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QLineEdit, QPushButton, QVBoxLayout, QWidget
 
 from . import theme
 from .components import LumaPortrait
+
+
+class RoundMicButton(QPushButton):
+    """Circular microphone control with a quiet breathing glow."""
+
+    def __init__(self) -> None:
+        super().__init__("")
+        self.setFixedSize(54, 54)
+        self.setToolTip("Включить или выключить микрофон")
+        self._phase = 0.0
+        self._timer = QTimer(self)
+        self._timer.setInterval(50)
+        self._timer.timeout.connect(self._tick)
+        self._timer.start()
+
+    def _tick(self) -> None:
+        if self.isVisible():
+            self._phase = (self._phase + 0.07) % math.tau
+            self.update()
+
+    def paintEvent(self, _event) -> None:  # noqa: N802
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        pulse = 0.5 + 0.5 * math.sin(self._phase)
+        center = QPointF(27, 27)
+        glow = QRadialGradient(center, 27)
+        glow.setColorAt(0.0, QColor(66, 116, 255, 130 + int(45 * pulse)))
+        glow.setColorAt(0.72, QColor(67, 61, 221, 95))
+        glow.setColorAt(1.0, QColor(71, 52, 222, 0))
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(glow)
+        painter.drawEllipse(center, 27, 27)
+        painter.setBrush(QColor("#3158DD"))
+        painter.setPen(QPen(QColor("#B9C8FF"), 2))
+        painter.drawEllipse(center, 21, 21)
+        painter.setPen(QPen(QColor("#FFFFFF"), 2.3, Qt.SolidLine, Qt.RoundCap))
+        painter.setBrush(Qt.NoBrush)
+        painter.drawRoundedRect(23, 17, 8, 17, 4, 4)
+        painter.drawArc(19, 22, 16, 17, 180 * 16, 180 * 16)
+        painter.drawLine(27, 39, 27, 43)
+        painter.drawLine(23, 43, 31, 43)
+
+
+class QuickActionButton(QPushButton):
+    """Readable action tile with a vector icon on every Windows font setup."""
+
+    def __init__(self, title: str, icon: str) -> None:
+        super().__init__("")
+        self.title = title
+        self.icon = icon
+        self.setMinimumHeight(74)
+
+    def paintEvent(self, _event) -> None:  # noqa: N802
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        rect = self.rect().adjusted(1, 1, -1, -1)
+        painter.setBrush(QColor("#24214B" if self.underMouse() else "#181B35"))
+        painter.setPen(QPen(QColor("#9A7CFF" if self.underMouse() else "#35395F"), 1))
+        painter.drawRoundedRect(rect, 10, 10)
+        x = self.width() / 2
+        y = 21
+        painter.setPen(QPen(QColor("#CFBAFF"), 2, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+        painter.setBrush(Qt.NoBrush)
+        if self.icon == "app":
+            painter.drawRoundedRect(int(x - 10), 12, 20, 18, 3, 3)
+            painter.drawLine(int(x), 15, int(x), 27)
+            painter.drawLine(int(x - 6), 21, int(x + 6), 21)
+        elif self.icon == "file":
+            painter.drawLine(int(x - 11), 14, int(x - 2), 14)
+            painter.drawLine(int(x - 2), 14, int(x + 1), 18)
+            painter.drawLine(int(x + 1), 18, int(x + 11), 18)
+            painter.drawLine(int(x - 11), 14, int(x - 11), 29)
+            painter.drawLine(int(x - 11), 29, int(x + 11), 29)
+            painter.drawLine(int(x + 11), 18, int(x + 11), 29)
+        elif self.icon == "music":
+            painter.drawLine(int(x - 1), 12, int(x - 1), 27)
+            painter.drawLine(int(x - 1), 12, int(x + 9), 10)
+            painter.drawLine(int(x + 9), 10, int(x + 9), 24)
+            painter.drawEllipse(int(x - 8), 25, 7, 5)
+            painter.drawEllipse(int(x + 2), 22, 7, 5)
+        else:
+            painter.drawRoundedRect(int(x - 8), 11, 16, 19, 2, 2)
+            painter.drawLine(int(x - 4), 17, int(x + 4), 17)
+            painter.drawLine(int(x - 4), 22, int(x + 2), 22)
+        painter.setPen(QColor("#F1EDFF"))
+        painter.setFont(QFont("Segoe UI", 10))
+        painter.drawText(self.rect().adjusted(6, 39, -6, -4), Qt.AlignCenter, self.title)
 
 
 class QuickPanel(QWidget):
@@ -57,13 +147,6 @@ class QuickPanel(QWidget):
             background:#242044;
             border-color:#6654B8;
         }
-        QPushButton#quickMic {
-            background:#365CDD;
-            border:2px solid #8C9FFF;
-            border-radius:26px;
-            color:white;
-            font-size:23px;
-        }
         """)
         box = QVBoxLayout(card)
         box.setContentsMargins(20, 16, 20, 18)
@@ -102,23 +185,19 @@ class QuickPanel(QWidget):
         box.addWidget(self.answer)
         mic_row = QHBoxLayout()
         mic_row.addStretch(1)
-        mic = QPushButton("🎙")
-        mic.setObjectName("quickMic")
-        mic.setFixedSize(46, 46)
-        mic.setToolTip("Включить или выключить микрофон")
+        mic = RoundMicButton()
         mic.clicked.connect(self.mic_toggle)
         mic_row.addWidget(mic)
         mic_row.addStretch(1)
         box.addLayout(mic_row)
         actions = QHBoxLayout()
         for icon, title, prompt in (
-            ("◫", "Открыть\nприложение", "Открой "),
-            ("▣", "Найти\nфайл", "Найди файл "),
-            ("♫", "Включить\nмузыку", "Включи музыку"),
-            ("✎", "Создать\nзаметку", "Создай заметку "),
+            ("app", "Открыть\nприложение", "Открой "),
+            ("file", "Найти\nфайл", "Найди файл "),
+            ("music", "Включить\nмузыку", "Включи музыку"),
+            ("note", "Создать\nзаметку", "Создай заметку "),
         ):
-            button = QPushButton(f"{icon}\n{title}")
-            button.setMinimumHeight(64)
+            button = QuickActionButton(title, icon)
             button.clicked.connect(lambda _=False, value=prompt: self._pick(value))
             actions.addWidget(button, 1)
         box.addLayout(actions)

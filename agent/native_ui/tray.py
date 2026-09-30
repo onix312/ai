@@ -15,6 +15,8 @@ def status_icon(state: str = "idle") -> QIcon:
         "listening": "#4DDCFF",
         "thinking": "#9B80FF",
         "speaking": "#F067E8",
+        "working": "#F5B84C",
+        "waiting": "#9C99B8",
         "error": "#ef4444",
         "stopped": "#991b1b",
         "offline": "#475569",

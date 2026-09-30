@@ -1930,6 +1930,7 @@ class HomePage(QWidget):
         self.orb.set_state(orb_state)
         self.orb.set_activity(audio_level)
         self.portrait.set_state(orb_state)
+        self.portrait.set_activity(audio_level)
         self.state_title.setText(self.STATE_LABELS.get(clean_state, "Работаю"))
 
         heard_clean = " ".join(str(heard or "").split())[:130]

@@ -89,6 +89,7 @@ class LumaPortrait(QWidget):
     def __init__(self, parent: QWidget | None = None, *, compact: bool = False) -> None:
         super().__init__(parent)
         self._state = "idle"
+        self._audio_level = 0
         self._phase = 0.0
         self._compact = bool(compact)
         self._reduced_motion = False
@@ -108,6 +109,10 @@ class LumaPortrait(QWidget):
         if clean in ("executing", "task"):
             clean = "working"
         self._state = clean if clean in self.STATE_COLORS else "idle"
+        self.update()
+
+    def set_activity(self, level: int = 0) -> None:
+        self._audio_level = max(0, int(level or 0))
         self.update()
 
     def set_reduced_motion(self, enabled: bool) -> None:
@@ -159,6 +164,7 @@ class LumaPortrait(QWidget):
             painter.drawPixmap(orbit, self._energy, QRectF(self._energy.rect()))
             painter.restore()
 
+        if not self._compact:
             painter.setPen(Qt.NoPen)
             for index in range(13):
                 angle = self._phase * (0.45 + index % 3 * 0.13) + index * 2.39996
@@ -179,6 +185,17 @@ class LumaPortrait(QWidget):
             )
             painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
             painter.drawPixmap(QRectF(0, 0, w, h), self._portrait, source)
+
+        if not self._compact and self._state in ("listening", "speaking"):
+            strength = min(1.0, self._audio_level / 7000.0)
+            painter.setPen(QPen(self._with_alpha(color.lighter(140), 145), max(1.0, w * 0.006)))
+            middle = h * 0.49
+            for index in range(17):
+                wave = abs(math.sin(self._phase * 2.2 + index * 0.83))
+                amplitude = h * (0.025 + (0.05 + 0.09 * strength) * wave)
+                x = w * (0.018 + index * 0.013)
+                painter.drawLine(QPointF(x, middle - amplitude), QPointF(x, middle + amplitude))
+                painter.drawLine(QPointF(w - x, middle - amplitude), QPointF(w - x, middle + amplitude))
 
         if not self._compact and not self._energy.isNull():
             painter.save()

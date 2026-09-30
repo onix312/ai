@@ -13,6 +13,7 @@ from PySide6.QtGui import QBrush, QColor, QPainter, QPen, QRadialGradient
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 from .components import LumaPortrait
+from .tray import status_icon
 
 
 _STATE_COLORS = {
@@ -253,14 +254,23 @@ class VoiceOrb(QWidget):
         showcase_row.addWidget(self.portrait)
         states = QVBoxLayout()
         states.setSpacing(8)
-        self.state_labels: dict[str, QLabel] = {}
+        self.state_labels: dict[str, QWidget] = {}
         for key, label in (
             ("listening", "Слушает"), ("thinking", "Думает"),
             ("speaking", "Говорит"), ("working", "Обработка"),
         ):
-            item = QLabel(label)
-            item.setAlignment(Qt.AlignCenter)
+            item = QWidget()
+            item.setObjectName("voiceStateCard")
             item.setMinimumHeight(42)
+            item_row = QHBoxLayout(item)
+            item_row.setContentsMargins(5, 2, 10, 2)
+            item_row.setSpacing(8)
+            icon = QLabel()
+            icon.setPixmap(status_icon(key).pixmap(34, 34))
+            item_row.addWidget(icon)
+            title = QLabel(label)
+            title.setStyleSheet("background:transparent;color:#F4F0FF;font-size:13px;font-weight:700;")
+            item_row.addWidget(title, 1)
             states.addWidget(item)
             self.state_labels[key] = item
         states.addStretch(1)
@@ -288,11 +298,10 @@ class VoiceOrb(QWidget):
         for key, label in self.state_labels.items():
             selected = key == self._state
             border = f"rgb({glow + 45}, {glow + 18}, 255)" if selected else "#34395F"
-            color = "#FFFFFF" if selected else "#A5A1BD"
             background = "#252052" if selected else "#131B39"
             label.setStyleSheet(
-                f"background:{background};color:{color};border:1px solid {border};"
-                "border-radius:11px;font-size:13px;font-weight:700;"
+                f"QWidget#voiceStateCard {{background:{background};border:1px solid {border};"
+                "border-radius:11px;}"
             )
 
     def set_state(self, state: str, auto_hide_ms: int = 0) -> None:
@@ -314,6 +323,7 @@ class VoiceOrb(QWidget):
         self._audio_level = max(0, int(level or 0))
         self._partial = " ".join(str(partial or "").split())[:52]
         self.core.set_activity(self._audio_level)
+        self.portrait.set_activity(self._audio_level)
         if self._state == "listening" and self._partial:
             self.label.setText(self._partial)
         else:
