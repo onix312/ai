@@ -1548,7 +1548,19 @@ class ChatPage(QWidget):
         self.feed = QTextBrowser()
         self.feed.setObjectName("chatFeed")
         self.feed.setOpenExternalLinks(True)
+        self.feed.hide()
         feed_layout.addWidget(self.feed)
+        self.bubble_scroll = QScrollArea()
+        self.bubble_scroll.setObjectName("chatBubbleScroll")
+        self.bubble_scroll.setWidgetResizable(True)
+        self.bubble_scroll.setFrameShape(QFrame.NoFrame)
+        self.bubble_host = QWidget()
+        self.bubble_layout = QVBoxLayout(self.bubble_host)
+        self.bubble_layout.setContentsMargins(14, 18, 14, 18)
+        self.bubble_layout.setSpacing(11)
+        self.bubble_layout.setAlignment(Qt.AlignTop)
+        self.bubble_scroll.setWidget(self.bubble_host)
+        feed_layout.addWidget(self.bubble_scroll)
         self.content.addWidget(feed_card)
 
         conversation.addWidget(self.content, 7)
@@ -1646,10 +1658,51 @@ class ChatPage(QWidget):
             + "".join(html_rows)
             + "</div>"
         )
+        while self.bubble_layout.count():
+            item = self.bubble_layout.takeAt(0)
+            if item.widget() is not None:
+                item.widget().deleteLater()
+        for turn in self._turns:
+            row = QWidget()
+            line = QHBoxLayout(row)
+            line.setContentsMargins(0, 0, 0, 0)
+            line.setSpacing(8)
+            is_user = turn.get("role") == "user"
+            if is_user:
+                line.addStretch(1)
+            else:
+                avatar = LumaOrbCore(compact=True)
+                avatar.setFixedSize(31, 31)
+                avatar.set_reduced_motion(True)
+                line.addWidget(avatar, 0, Qt.AlignTop)
+            bubble = QFrame()
+            bubble.setObjectName("chatBubbleUser" if is_user else "chatBubbleAssistant")
+            text_value = str(turn.get("text") or "")
+            bubble.setFixedWidth(min(450, max(190, 90 + len(text_value) * 6)))
+            body = QVBoxLayout(bubble)
+            body.setContentsMargins(13, 10, 13, 10)
+            body.setSpacing(4)
+            if not is_user:
+                route = self._route_label(turn.get("source", ""))
+                skill = str(turn.get("skill") or "").strip()
+                source_label = QLabel("LUMA" + (f" · {route}" if route else "") + (f" · {skill}" if skill else ""))
+                source_label.setObjectName("chatBubbleMeta")
+                body.addWidget(source_label)
+            message = QLabel(text_value)
+            message.setObjectName("chatBubbleText")
+            message.setTextFormat(Qt.PlainText)
+            message.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            message.setWordWrap(True)
+            body.addWidget(message)
+            line.addWidget(bubble, 0, Qt.AlignTop)
+            if not is_user:
+                line.addStretch(1)
+            self.bubble_layout.addWidget(row)
         self._has_history = bool(self._turns)
         self.content.setCurrentIndex(1 if self._has_history else 0)
-        bar = self.feed.verticalScrollBar()
-        bar.setValue(bar.maximum())
+        QTimer.singleShot(0, lambda: self.bubble_scroll.verticalScrollBar().setValue(
+            self.bubble_scroll.verticalScrollBar().maximum()
+        ))
 
     def set_history(self, turns: list[dict[str, Any]]) -> None:
         self._turns = []

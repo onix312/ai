@@ -79,6 +79,10 @@ class LumaOrbCore(QWidget):
 
     def set_reduced_motion(self, enabled: bool) -> None:
         self._reduced_motion = bool(enabled)
+        if enabled:
+            self._timer.stop()
+        elif not self._timer.isActive():
+            self._timer.start()
         self.update()
 
     def _tick(self) -> None:

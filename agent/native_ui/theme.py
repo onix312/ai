@@ -193,6 +193,36 @@ def stylesheet(accent: str = "#8B5CF6") -> str:
         line-height: 1.35;
     }
 
+    QScrollArea#chatBubbleScroll, QScrollArea#chatBubbleScroll > QWidget > QWidget {
+        background: #0D0F20;
+        border: 0;
+    }
+
+    QFrame#chatBubbleUser {
+        background: #3348B9;
+        border: 1px solid #6684FF;
+        border-radius: 14px;
+    }
+
+    QFrame#chatBubbleAssistant {
+        background: #151B35;
+        border: 1px solid #38406D;
+        border-radius: 14px;
+    }
+
+    QLabel#chatBubbleText {
+        background: transparent;
+        color: #F5F3FF;
+        font-size: 14px;
+    }
+
+    QLabel#chatBubbleMeta {
+        background: transparent;
+        color: #B9A7FF;
+        font-size: 10px;
+        font-weight: 700;
+    }
+
     QLabel#homeClock {
         color: #D7A9FF;
         font-size: 29px;

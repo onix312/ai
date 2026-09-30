@@ -10,7 +10,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QBuffer, QByteArray, QIODevice
 from PySide6.QtGui import QColor, QImage
-from PySide6.QtWidgets import QApplication, QLabel, QLineEdit, QProgressBar, QPushButton
+from PySide6.QtWidgets import QApplication, QFrame, QLabel, QLineEdit, QProgressBar, QPushButton
 
 from agent.native_ui.app import NativeApp
 from agent.native_ui.components import LumaClock, LumaPortrait
@@ -30,9 +30,11 @@ class NativeQtSmokeTests(unittest.TestCase):
         self.assertEqual(chat.content.currentIndex(), 0)
         chat.set_history([{"role": "user", "text": "<b>привет</b>"}])
         self.assertEqual(chat.content.currentIndex(), 1)
+        self.assertEqual("chatBubbleUser", chat.bubble_layout.itemAt(0).widget().findChild(QFrame).objectName())
         self.assertIn("<b>привет</b>", chat.feed.toPlainText())
         self.assertIn("ВЫ", chat.feed.toPlainText())
         chat.append_local("Люма", "Готово", source="model", skill="system.health")
+        self.assertEqual("chatBubbleAssistant", chat.bubble_layout.itemAt(1).widget().findChild(QFrame).objectName())
         visible = chat.feed.toPlainText()
         self.assertIn("LUMA", visible)
         self.assertIn("Готово", visible)
