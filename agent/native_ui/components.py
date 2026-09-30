@@ -275,6 +275,14 @@ class BrandCard(GlassCard):
         layout.setContentsMargins(14, 12, 14, 12)
         layout.setSpacing(10)
 
+        mark = QLabel()
+        mark.setObjectName("brandMark")
+        mark.setFixedSize(30, 30)
+        ring = QPixmap(str(Path(__file__).resolve().parent / "assets" / "luma-energy-ring.png"))
+        if not ring.isNull():
+            mark.setPixmap(ring.scaled(28, 28, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        mark.setAlignment(Qt.AlignCenter)
+
         identity = QVBoxLayout()
         identity.setSpacing(0)
         brand = QLabel("LUMA")
@@ -288,6 +296,7 @@ class BrandCard(GlassCard):
         self.dot.setObjectName("onlineDot")
         self.dot.setFixedSize(12, 12)
 
+        layout.addWidget(mark, 0, Qt.AlignVCenter)
         layout.addLayout(identity, 1)
         layout.addWidget(self.dot, 0, Qt.AlignVCenter)
 

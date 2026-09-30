@@ -68,15 +68,15 @@ class NativeQtSmokeTests(unittest.TestCase):
 
     def test_voice_orb_stays_compact_without_activity(self):
         orb = VoiceOrb()
-        self.assertEqual(orb.height(), 72)
+        self.assertEqual(orb.height(), 64)
         orb.set_live(heard="Проверка", reply="Готово")
-        self.assertEqual(orb.height(), 112)
+        self.assertEqual(orb.height(), 100)
         orb.set_live()
-        self.assertEqual(orb.height(), 72)
+        self.assertEqual(orb.height(), 64)
         orb.set_state("listening")
-        self.assertEqual((orb.width(), orb.height()), (520, 330))
+        self.assertEqual((orb.width(), orb.height()), (560, 350))
         orb.set_state("idle")
-        self.assertEqual((orb.width(), orb.height()), (390, 72))
+        self.assertEqual((orb.width(), orb.height()), (360, 64))
         orb.set_reduced_motion(True)
         self.assertFalse(orb._state_timer.isActive())
         orb.deleteLater()
@@ -99,6 +99,10 @@ class NativeQtSmokeTests(unittest.TestCase):
         self.assertFalse(center.home.portrait._portrait.isNull())
         self.assertFalse(center.home.portrait._energy.isNull())
         self.assertFalse(center.ambient._background.isNull())
+        self.assertEqual("LOCAL · OFFLINE READY", center.sidebar_status.text().replace("●  ", ""))
+        self.assertIsNotNone(center.findChild(QLabel, "themePreviewDark"))
+        self.assertIsNotNone(center.findChild(QLabel, "themePreviewLight"))
+        self.assertIsNotNone(center.findChild(QLabel, "themePreviewSystem"))
         self.assertIsNotNone(center.pages["tasks"].findChild(LumaClock))
         submitted = []
         center.home.submitted.connect(submitted.append)
@@ -107,7 +111,7 @@ class NativeQtSmokeTests(unittest.TestCase):
         self.assertEqual(["Открой загрузки"], submitted)
         self.assertEqual("", center.home.search_input.text())
         center.home.navigate.emit("memory")
-        self.assertEqual(center.nav.currentRow(), 6)
+        self.assertEqual(center.nav.currentRow(), 3)
         center.home.navigate.emit("home")
         self.assertEqual(center.nav.currentRow(), 0)
         for row, (key, _) in enumerate(center.NAV):
@@ -115,11 +119,13 @@ class NativeQtSmokeTests(unittest.TestCase):
             self.assertIs(center.stack.currentWidget(), center.pages[key], key)
         center.nav.setCurrentRow(0)
         center._set_panel_style("compact")
-        self.assertEqual(200, center.sidebar.width())
+        self.assertEqual(164, center.sidebar.width())
+        self.assertFalse(center.status_header.isHidden())
         center._set_panel_style("minimal")
         self.assertTrue(center.status_header.isHidden())
         center._set_panel_style("glass")
-        self.assertEqual(236, center.sidebar.width())
+        self.assertEqual(184, center.sidebar.width())
+        self.assertTrue(center.status_header.isHidden())
 
         center.set_home_runtime(
             connected=True,
@@ -454,6 +460,7 @@ class NativeQtSmokeTests(unittest.TestCase):
     def test_windows_construct_and_accept_state(self):
         orb = VoiceOrb()
         quick = QuickPanel()
+        self.assertEqual(590, quick.width())
         toggles = []
         quick.mic_toggle.connect(lambda: toggles.append(True))
         quick.mic_toggle.emit()
@@ -475,6 +482,8 @@ class NativeQtSmokeTests(unittest.TestCase):
         )
         quick.show_answer("готово")
         center.update_status(True, False, True, True)
+        self.assertIn("LOCAL", center.sidebar_status.text())
+        self.assertIn("READY", center.sidebar_status.text())
         center.set_voice_diagnostics(
             audio_level=900,
             echo_floor=220,
