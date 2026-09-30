@@ -29,6 +29,14 @@ class RoundMicButton(QPushButton):
             self._phase = (self._phase + 0.07) % math.tau
             self.update()
 
+    def set_reduced_motion(self, enabled: bool) -> None:
+        if enabled:
+            self._timer.stop()
+            self._phase = 0.0
+            self.update()
+        elif not self._timer.isActive():
+            self._timer.start()
+
     def paintEvent(self, _event) -> None:  # noqa: N802
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing, True)
@@ -168,9 +176,9 @@ class QuickPanel(QWidget):
         copy.addWidget(subtitle)
         copy.addStretch(1)
         hero.addLayout(copy, 2)
-        portrait = LumaPortrait()
-        portrait.setFixedSize(240, 168)
-        hero.addWidget(portrait, 3, Qt.AlignRight)
+        self.portrait = LumaPortrait()
+        self.portrait.setFixedSize(240, 168)
+        hero.addWidget(self.portrait, 3, Qt.AlignRight)
         box.addLayout(hero)
         row = QHBoxLayout()
         self.input = QLineEdit()
@@ -186,6 +194,7 @@ class QuickPanel(QWidget):
         mic_row = QHBoxLayout()
         mic_row.addStretch(1)
         mic = RoundMicButton()
+        self.mic = mic
         mic.clicked.connect(self.mic_toggle)
         mic_row.addWidget(mic)
         mic_row.addStretch(1)
@@ -202,6 +211,10 @@ class QuickPanel(QWidget):
             actions.addWidget(button, 1)
         box.addLayout(actions)
         root.addWidget(card)
+
+    def set_reduced_motion(self, enabled: bool) -> None:
+        self.mic.set_reduced_motion(enabled)
+        self.portrait.set_reduced_motion(enabled)
 
     def _pick(self, text: str) -> None:
         self.input.setText(text)

@@ -59,6 +59,13 @@ class NativeApp:
             self.restart_ui,
             self.quit,
         )
+        self.center.motion_toggle.toggled.connect(self.tray.set_reduced_motion)
+        self.center.motion_toggle.toggled.connect(self.orb.set_reduced_motion)
+        self.center.motion_toggle.toggled.connect(self.quick.set_reduced_motion)
+        reduced_motion = self.center.motion_toggle.isChecked()
+        self.tray.set_reduced_motion(reduced_motion)
+        self.orb.set_reduced_motion(reduced_motion)
+        self.quick.set_reduced_motion(reduced_motion)
 
         self.quick.submitted.connect(self.send_chat)
         self.center.chat_submitted.connect(self.send_chat)

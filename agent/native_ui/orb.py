@@ -293,6 +293,16 @@ class VoiceOrb(QWidget):
         self._state_phase = (self._state_phase + 0.09) % math.tau
         self._paint_state_labels()
 
+    def set_reduced_motion(self, enabled: bool) -> None:
+        self.core.set_reduced_motion(enabled)
+        self.portrait.set_reduced_motion(enabled)
+        if enabled:
+            self._state_timer.stop()
+            self._state_phase = 0.0
+            self._paint_state_labels()
+        elif not self._state_timer.isActive():
+            self._state_timer.start()
+
     def _paint_state_labels(self) -> None:
         glow = int(80 + 42 * (0.5 + 0.5 * math.sin(self._state_phase)))
         for key, label in self.state_labels.items():

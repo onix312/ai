@@ -17,6 +17,7 @@ from agent.native_ui.components import LumaClock, LumaPortrait
 from agent.native_ui.control_center import ActivityPage, ChatPage, ControlCenter, HomePage, JournalPage, LearningPage, MemoryPage, SkillsPage, TasksPage, TextPage, TodayPage, VoicePage
 from agent.native_ui.orb import LumaOrbCore, VoiceOrb
 from agent.native_ui.quick_panel import QuickPanel
+from agent.native_ui.tray import status_icon
 
 
 class NativeQtSmokeTests(unittest.TestCase):
@@ -74,7 +75,14 @@ class NativeQtSmokeTests(unittest.TestCase):
         self.assertEqual((orb.width(), orb.height()), (520, 330))
         orb.set_state("idle")
         self.assertEqual((orb.width(), orb.height()), (390, 72))
+        orb.set_reduced_motion(True)
+        self.assertFalse(orb._state_timer.isActive())
         orb.deleteLater()
+
+    def test_tray_animation_frames_change_with_state(self):
+        first = status_icon("listening", 0).pixmap(64, 64).toImage()
+        second = status_icon("listening", 1).pixmap(64, 64).toImage()
+        self.assertNotEqual(bytes(first.bits()), bytes(second.bits()))
 
     def test_home_hero_and_orb_accept_live_runtime(self):
         center = ControlCenter()
