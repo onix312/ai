@@ -107,7 +107,7 @@ class NativeQtSmokeTests(unittest.TestCase):
         self.assertEqual(["Открой загрузки"], submitted)
         self.assertEqual("", center.home.search_input.text())
         center.home.navigate.emit("memory")
-        self.assertEqual(center.nav.currentRow(), 6)
+        self.assertEqual(center.nav.currentRow(), 3)
         center.home.navigate.emit("home")
         self.assertEqual(center.nav.currentRow(), 0)
         for row, (key, _) in enumerate(center.NAV):
@@ -116,10 +116,12 @@ class NativeQtSmokeTests(unittest.TestCase):
         center.nav.setCurrentRow(0)
         center._set_panel_style("compact")
         self.assertEqual(164, center.sidebar.width())
+        self.assertFalse(center.status_header.isHidden())
         center._set_panel_style("minimal")
         self.assertTrue(center.status_header.isHidden())
         center._set_panel_style("glass")
         self.assertEqual(184, center.sidebar.width())
+        self.assertTrue(center.status_header.isHidden())
 
         center.set_home_runtime(
             connected=True,
