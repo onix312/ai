@@ -11,9 +11,10 @@ Windows» даже в Windows, а озвучка возвращала текст
   * **честный отказ** — на Linux и macOS функции работают там, где у системы
     есть штатный способ (`/proc`, `espeak`, `xdg-open`), а иначе отвечают
     причиной; агент запускается везде;
-  * **белый список запуска** — `open_target` открывает только известные
-    программы, http(s)-адреса и папки внутри разрешённых корней; произвольный
-    исполняемый файл с аргументами не запускается никогда;
+  * **контролируемый запуск** — `open_target` открывает известные программы,
+    ярлыки реально установленных приложений из Windows Start Menu, http(s)-адреса
+    и папки внутри разрешённых корней; произвольный исполняемый файл с аргументами
+    не запускается никогда;
   * **чистые помощники отдельно** — разбор сочетаний клавиш, выбор окна по
     словам человека, расчёт загрузки процессора сделаны функциями без
     побочных эффектов, чтобы их проверял тест без Windows.
@@ -23,6 +24,7 @@ Windows» даже в Windows, а озвучка возвращала текст
 from __future__ import annotations
 
 import ctypes
+import difflib
 import os
 import pathlib
 import queue
@@ -992,6 +994,152 @@ SITES: dict[str, tuple[str, tuple[str, ...]]] = {
 
 _URL_RE = re.compile(r"^(?:https?://)?(?:[a-z0-9-]+\.)+[a-z]{2,}(?:[/:?#]\S*)?$", re.IGNORECASE)
 
+_START_MENU_EXTENSIONS = {".lnk", ".url", ".appref-ms"}
+_START_MENU_NOISE = (
+    "uninstall", "удалить", "readme", "license", "лиценз", "help", "справк",
+    "documentation", "документац", "website", "сайт", "repair", "update",
+)
+
+
+def start_menu_roots() -> tuple[str, ...]:
+    """Standard per-user and all-users Start Menu program roots on Windows."""
+    rows = []
+    appdata = os.environ.get("APPDATA", "")
+    programdata = os.environ.get("PROGRAMDATA", "")
+    if appdata:
+        rows.append(os.path.join(appdata, "Microsoft", "Windows", "Start Menu", "Programs"))
+    if programdata:
+        rows.append(os.path.join(programdata, "Microsoft", "Windows", "Start Menu", "Programs"))
+    return tuple(rows)
+
+
+def start_menu_apps(roots: tuple[str, ...] = ()) -> list[dict[str, str]]:
+    """Installed apps visible in Start Menu, without resolving shortcut targets."""
+    found: dict[str, dict[str, str]] = {}
+    for raw_root in roots or start_menu_roots():
+        root = pathlib.Path(str(raw_root or "")).expanduser()
+        if not root.is_dir():
+            continue
+        try:
+            candidates = root.rglob("*")
+        except OSError:
+            continue
+        for path in candidates:
+            try:
+                if not path.is_file() or path.suffix.casefold() not in _START_MENU_EXTENSIONS:
+                    continue
+            except OSError:
+                continue
+            title = path.stem.strip()
+            normalized = _norm(title)
+            if len(normalized) < 2 or any(noise in normalized for noise in _START_MENU_NOISE):
+                continue
+            key = normalized
+            row = {"title": title[:160], "target": str(path), "source": "start_menu"}
+            # Per-user root is visited first and should win identical names.
+            found.setdefault(key, row)
+    return sorted(found.values(), key=lambda row: _norm(row["title"]))
+
+
+_RU_LATIN = str.maketrans({
+    "а": "a", "б": "b", "в": "v", "г": "g", "д": "d", "е": "e", "ё": "e",
+    "ж": "zh", "з": "z", "и": "i", "й": "y", "к": "k", "л": "l", "м": "m",
+    "н": "n", "о": "o", "п": "p", "р": "r", "с": "s", "т": "t", "у": "u",
+    "ф": "f", "х": "h", "ц": "ts", "ч": "ch", "ш": "sh", "щ": "shch",
+    "ы": "y", "э": "e", "ю": "yu", "я": "ya", "ь": "", "ъ": "",
+})
+
+
+def _latinize(text: str) -> str:
+    return _norm(text).translate(_RU_LATIN)
+
+
+def _installed_app_queries(target: str) -> list[str]:
+    clean = re.sub(
+        r"^(?:открой|запусти|включи)\s+(?:(?:приложение|программу)\s+)?",
+        "", _norm(target),
+    ).strip()
+    if not clean:
+        return []
+    queries = [clean]
+    for key, hints in WINDOW_WORDS.items():
+        if clean == key or clean.startswith(key + " "):
+            queries.extend(hints)
+    latin = _latinize(clean)
+    if latin and latin != clean:
+        queries.append(latin)
+    out = []
+    for query in queries:
+        normalized = _norm(query)
+        if normalized and normalized not in out:
+            out.append(normalized)
+    return out
+
+
+def _installed_app_score(query: str, title: str) -> int:
+    wanted = _norm(query)
+    candidate = _norm(title)
+    if not wanted or not candidate:
+        return 0
+    wanted = re.sub(
+        r"^(?:открой|запусти|включи)\s+(?:(?:приложение|программу)\s+)?", "", wanted
+    ).strip()
+    if not wanted:
+        return 0
+    if candidate == wanted:
+        return 200
+    wanted_words = [word for word in re.split(r"[^0-9a-zа-я]+", wanted) if len(word) >= 2]
+    candidate_words = [word for word in re.split(r"[^0-9a-zа-я]+", candidate) if len(word) >= 2]
+    # Vendor-prefixed canonical names such as "Google Chrome" and
+    # "Microsoft Edge" normally end with the requested product name, while
+    # variants such as "Chrome Beta" start with it.
+    if len(wanted_words) == 1:
+        word = wanted_words[0]
+        if candidate_words and candidate_words[-1] == word:
+            return 180
+        if candidate_words and candidate_words[0] == word:
+            return 150
+        if word in candidate_words:
+            return 160
+    if candidate.startswith(wanted + " ") or candidate.startswith(wanted + "-"):
+        return 140
+    if wanted_words and all(any(part.startswith(word) or word.startswith(part)
+                                for part in candidate_words) for word in wanted_words):
+        return 100 + min(20, sum(len(word) for word in wanted_words))
+    if len(wanted) >= 4 and wanted in candidate:
+        return 70
+    if len(wanted) >= 4:
+        best_ratio = max(
+            (difflib.SequenceMatcher(None, wanted, token).ratio() for token in candidate_words),
+            default=0.0,
+        )
+        if best_ratio >= 0.78:
+            return 45 + int(best_ratio * 20)
+    return 0
+
+
+def resolve_installed_app(target: str, roots: tuple[str, ...] = ()) -> dict[str, str] | None:
+    """Resolve a Start Menu app only when there is one clear best match."""
+    queries = _installed_app_queries(target)
+    if not queries:
+        return None
+    ranked = []
+    for index, row in enumerate(start_menu_apps(roots)):
+        score = max((_installed_app_score(query, row["title"]) for query in queries), default=0)
+        if score:
+            ranked.append((score, -len(_norm(row["title"])), -index, row))
+    if not ranked:
+        return None
+    ranked.sort(reverse=True)
+    best_score = ranked[0][0]
+    best = [item for item in ranked if item[0] == best_score]
+    if len(best) > 1 and _norm(best[0][3]["title"]) != _norm(best[1][3]["title"]):
+        return None
+    # Fuzzy phonetic matches need a visible margin over the runner-up.
+    if best_score < 100 and len(ranked) > 1 and best_score - ranked[1][0] < 5:
+        return None
+    return dict(ranked[0][3])
+
 
 def resolve_app(target: str) -> tuple[str, dict[str, Any]] | None:
     """Программа из белого списка по словам человека. Чистая функция."""
@@ -1033,7 +1181,7 @@ def _windows_app_path(app: dict[str, Any]) -> str:
 
 
 def launch_plan(target: str, panel_url: str = "", roots: tuple[str, ...] = (),
-                platform: str = sys.platform) -> tuple[dict[str, Any], str]:
+                platform: str = sys.platform, app_roots: tuple[str, ...] = ()) -> tuple[dict[str, Any], str]:
     """Что именно будет открыто — без запуска. Чистая часть `open_target` для тестов."""
     text = str(target or "").strip()
     if not text:
@@ -1061,6 +1209,15 @@ def launch_plan(target: str, panel_url: str = "", roots: tuple[str, ...] = (),
     url = resolve_site(text)
     if url:
         return {"kind": "url", "title": url, "target": url}, ""
+    if platform.startswith("win"):
+        installed = resolve_installed_app(text, app_roots)
+        if installed:
+            return {
+                "kind": "shortcut",
+                "title": installed["title"],
+                "target": installed["target"],
+                "source": installed["source"],
+            }, ""
     path = pathlib.Path(os.path.expanduser(text))
     try:
         resolved = path.resolve()
@@ -1077,8 +1234,9 @@ def launch_plan(target: str, panel_url: str = "", roots: tuple[str, ...] = (),
                                                               ".msi", ".com", ".scr", ".js", ".sh"):
             return {}, "Исполняемые файлы помощник не запускает — только документы и папки"
         return {"kind": "path", "title": resolved.name or str(resolved), "target": str(resolved)}, ""
-    return {}, (f"«{text}» нет в списке программ помощника. Могу открыть: "
-                + ", ".join(spec["title"] for spec in APPS.values()) + ", сайт по адресу или папку")
+    return {}, (f"«{text}» не нашла среди известных"
+                + (" и установленных программ Windows" if platform.startswith("win") else " программ")
+                + ". Могу открыть сайт по адресу или папку из разрешённых.")
 
 
 def open_url(url: str) -> tuple[bool, str]:
@@ -1120,6 +1278,13 @@ def open_target(target: str, panel_url: str = "", roots: tuple[str, ...] = ()) -
                 if not shutil.which(opener):
                     return {}, f"Нет {opener} — папку открыть нечем"
                 _spawn([opener, plan["target"]])
+        elif plan["kind"] == "shortcut":
+            if not IS_WINDOWS:
+                return {}, "Ярлыки Start Menu открываются только в Windows"
+            shortcut = pathlib.Path(str(plan.get("target") or ""))
+            if shortcut.suffix.casefold() not in _START_MENU_EXTENSIONS or not shortcut.is_file():
+                return {}, "Ярлык установленной программы больше не найден"
+            os.startfile(str(shortcut))  # type: ignore[attr-defined]
         elif plan["kind"] == "exe":
             path = _windows_app_path(APPS[plan["app"]])
             if not path:
