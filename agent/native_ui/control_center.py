@@ -160,7 +160,6 @@ class TextPage(QWidget):
 
 
 class TodayPage(QWidget):
-    """Reference-style personal dashboard."""
     """Personal daily dashboard backed by Personal.overview()."""
 
     refresh_requested = Signal()
@@ -450,7 +449,6 @@ class TodayPage(QWidget):
 
 
 class LearningPage(QWidget):
-    """Reference-style learning workspace."""
     """Workspace for explicit lessons, unknown phrases, aliases and habit insights."""
 
     refresh_requested = Signal()
@@ -767,7 +765,6 @@ class LearningPage(QWidget):
 
 
 class JournalPage(QWidget):
-    """Reference-style journal workspace."""
     """Read-only audit timeline of actual provider/skill executions."""
 
     refresh_requested = Signal()
@@ -920,7 +917,6 @@ class JournalPage(QWidget):
 
 
 class MemoryPage(QWidget):
-    """Reference-style memory / knowledge page."""
     """Long-term memory map with explicit pin/forget controls."""
 
     refresh_requested = Signal()
@@ -1411,7 +1407,6 @@ class SkillsPage(QWidget):
 
 
 class ChatPage(QWidget):
-    """Reference-style conversation page."""
     submitted = Signal(str)
     clear_requested = Signal()
     mic_toggle = Signal()
@@ -1837,7 +1832,6 @@ class ChatPage(QWidget):
 
 
 class HomePage(QWidget):
-    """Reference-style main control-center page."""
     submitted = Signal(str)
     navigate = Signal(str)
 
@@ -2052,10 +2046,14 @@ class HomePage(QWidget):
         action_box.addWidget(self.search_input)
         actions = QHBoxLayout()
         for label, page in (
-            ("◈  Разговор", "chat"),
+            ("◌  Чат", "chat"),
+            ("◇  Сегодня", "today"),
+            ("□  Задачи", "tasks"),
+            ("▣  Память", "memory"),
+            ("⌘  Приложения", "skills"),
+            ("⌁  Активность", "activity"),
             ("◉  Голос", "voice"),
-            ("◌  Память", "memory"),
-            ("⬡  Приложения", "skills"),
+            ("⚙  Настройки", "settings"),
         ):
             button = QPushButton(label)
             button.setObjectName("suggestion")
@@ -2216,7 +2214,6 @@ class HomePage(QWidget):
 
 
 class VoicePage(QWidget):
-    """Reference-style Luma voice page."""
     tts_save = Signal(str, str, str)
     tts_reset = Signal()
     tts_test = Signal()
@@ -2498,7 +2495,6 @@ class VoicePage(QWidget):
 
 
 class ActivityPage(QWidget):
-    """Reference-style activity / automation page."""
     refresh_requested = Signal()
 
     PHASES = {
@@ -2842,7 +2838,6 @@ class ActivityPage(QWidget):
 
 
 class TasksPage(QWidget):
-    """Reference-style planner page."""
     decision = Signal(str, bool)
     command = Signal(int, str)
     plan_preview = Signal(str)
@@ -3298,15 +3293,15 @@ class ControlCenter(QMainWindow):
     pronunciation_delete = Signal(str)
 
     NAV = [
-        ("home", "✦  Главная"),
-        ("chat", "◈  Разговор"),
-        ("voice", "◉  Голос"),
-        ("today", "◇  Сегодня"),
-        ("tasks", "✓  Задачи"),
+        ("home", "⌂  Главная"),
+        ("chat", "◌  Чат"),
+        ("tasks", "□  Задачи"),
+        ("memory", "▣  Память"),
+        ("skills", "⌘  Приложения"),
         ("activity", "⌁  Активность"),
-        ("memory", "◌  Память"),
+        ("voice", "◉  Голос и TTS"),
+        ("today", "◇  Сегодня"),
         ("learning", "✦  Обучение"),
-        ("skills", "⬡  Приложения"),
         ("journal", "≋  Журнал"),
         ("settings", "⚙  Настройки"),
     ]
@@ -3357,6 +3352,7 @@ class ControlCenter(QMainWindow):
 
         self.status_header = StatusHeader()
         self.status_header.setMaximumHeight(54)
+        self.status_header.hide()
         main_layout.addWidget(self.status_header)
 
         self.stack = QStackedWidget()
@@ -3714,6 +3710,7 @@ class ControlCenter(QMainWindow):
 
         self.footer = QLabel("● подключение…")
         self.footer.setObjectName("footer")
+        self.footer.hide()
         outer.addWidget(self.footer)
 
         self.nav.currentRowChanged.connect(self._change)
@@ -3735,7 +3732,7 @@ class ControlCenter(QMainWindow):
             button.setChecked(value == mode)
         widths = {"glass": 184, "compact": 164, "minimal": 148}
         self.sidebar.setFixedWidth(widths[mode])
-        self.status_header.setVisible(mode != "minimal")
+        self.status_header.setVisible(mode == "compact")
         margins = (10, 10, 10, 8) if mode == "glass" else (8, 8, 8, 6)
         self.main_layout.setContentsMargins(*margins)
         self.main_layout.setSpacing(10 if mode == "glass" else 8)
@@ -3751,7 +3748,7 @@ class ControlCenter(QMainWindow):
 
     def _settings_tab_changed(self, index: int) -> None:
         if index == 1:
-            self.nav.setCurrentRow(2)
+            self.nav.setCurrentRow(6)
         elif index == 2:
             self.settings_scroll.ensureWidgetVisible(self.persona_title)
         elif index == 3:
