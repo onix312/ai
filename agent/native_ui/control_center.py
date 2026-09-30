@@ -1454,9 +1454,9 @@ class ChatPage(QWidget):
         head.addWidget(clear)
         layout.addLayout(head)
 
-        live_card = GlassCard("violet")
-        live_card.setObjectName("chatLiveCard")
-        live_row = QHBoxLayout(live_card)
+        self.live_card = GlassCard("violet")
+        self.live_card.setObjectName("chatLiveCard")
+        live_row = QHBoxLayout(self.live_card)
         live_row.setContentsMargins(10, 6, 12, 6)
         live_row.setSpacing(10)
         self.live_portrait = LumaPortrait(compact=True)
@@ -1475,7 +1475,8 @@ class ChatPage(QWidget):
         self.live_orb = LumaOrbCore(compact=True)
         self.live_orb.setFixedSize(46, 46)
         live_row.addWidget(self.live_orb, 0, Qt.AlignVCenter)
-        layout.addWidget(live_card)
+        layout.addWidget(self.live_card)
+        self.live_card.hide()
 
         self.trace_card = GlassCard()
         trace_box = QVBoxLayout(self.trace_card)
@@ -1812,6 +1813,7 @@ class ChatPage(QWidget):
                           skill: str = "", detail: str = "", task_id: int = 0,
                           audio_level: int = 0) -> None:
         clean_phase = str(phase or "idle").casefold()
+        self.live_card.setVisible(clean_phase not in {"idle", "done"})
         orb_state = {
             "executing": "working",
             "task": "working",
@@ -3483,6 +3485,7 @@ class ControlCenter(QMainWindow):
         sl.addWidget(self.appearance_tabs)
 
         appearance = GlassCard("violet")
+        appearance.setMinimumHeight(270)
         appearance_box = QHBoxLayout(appearance)
         appearance_box.setContentsMargins(16, 13, 16, 13)
         appearance_copy = QVBoxLayout()
@@ -3535,6 +3538,7 @@ class ControlCenter(QMainWindow):
         self.motion_toggle.toggled.connect(lambda enabled: self._set_reduced_motion(not enabled))
         appearance_box.addWidget(self.motion_toggle)
         sl.addWidget(appearance)
+        sl.addSpacing(70)
 
         runtime_card = GlassCard("cyan")
         runtime_box = QVBoxLayout(runtime_card)
