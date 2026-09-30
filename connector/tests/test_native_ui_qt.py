@@ -452,6 +452,11 @@ class NativeQtSmokeTests(unittest.TestCase):
         quick.mic_toggle.connect(lambda: toggles.append(True))
         quick.mic_toggle.emit()
         self.assertEqual([True], toggles)
+        settings_requests = []
+        quick.open_settings.connect(lambda: settings_requests.append(True))
+        quick.open_settings.emit()
+        self.assertEqual([True], settings_requests)
+        self.assertRegex(quick.clock.text(), r"^\d{2}:\d{2}$")
         center = ControlCenter()
 
         orb.set_state("thinking")

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import math
 
-from PySide6.QtCore import QPointF, Qt, QTimer, Signal
+from PySide6.QtCore import QPointF, Qt, QTime, QTimer, Signal
 from PySide6.QtGui import QColor, QFont, QPainter, QPen, QRadialGradient
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QLineEdit, QPushButton, QVBoxLayout, QWidget
 
@@ -109,6 +109,7 @@ class QuickActionButton(QPushButton):
 class QuickPanel(QWidget):
     submitted = Signal(str)
     mic_toggle = Signal()
+    open_settings = Signal()
 
     def __init__(self) -> None:
         super().__init__()
@@ -144,6 +145,14 @@ class QuickPanel(QWidget):
             font-weight:800;
             letter-spacing:1px;
         }
+        QPushButton#quickChrome {
+            background:transparent;
+            border:0;
+            color:#C8C3E2;
+            font-size:19px;
+            padding:0;
+        }
+        QPushButton#quickChrome:hover { color:#FFFFFF; }
         QPushButton {
             background:#181B35;
             color:#D8D4E8;
@@ -160,12 +169,28 @@ class QuickPanel(QWidget):
         box.setContentsMargins(20, 16, 20, 18)
         box.setSpacing(8)
         header = QHBoxLayout()
-        brand = QLabel("✦  LUMA")
-        brand.setObjectName("quickBrand")
-        header.addWidget(brand)
+        self.clock = QLabel()
+        self.clock.setObjectName("quickBrand")
+        header.addWidget(self.clock)
         header.addStretch(1)
-        header.addWidget(QLabel("БЫСТРАЯ ПАНЕЛЬ  ·  Esc — закрыть"))
+        header.addWidget(QLabel("LUMA"))
+        settings_button = QPushButton("⚙")
+        settings_button.setObjectName("quickChrome")
+        settings_button.setFixedSize(30, 30)
+        settings_button.setToolTip("Открыть настройки Люмы")
+        settings_button.clicked.connect(self.open_settings)
+        header.addWidget(settings_button)
+        close_button = QPushButton("×")
+        close_button.setObjectName("quickChrome")
+        close_button.setFixedSize(30, 30)
+        close_button.setToolTip("Закрыть быструю панель")
+        close_button.clicked.connect(self.hide)
+        header.addWidget(close_button)
         box.addLayout(header)
+        self._clock_timer = QTimer(self)
+        self._clock_timer.timeout.connect(self._refresh_clock)
+        self._clock_timer.start(15000)
+        self._refresh_clock()
         hero = QHBoxLayout()
         copy = QVBoxLayout()
         greeting = QLabel("Привет!\nЯ LUMA")
@@ -216,6 +241,9 @@ class QuickPanel(QWidget):
         self.mic.set_reduced_motion(enabled)
         self.portrait.set_reduced_motion(enabled)
 
+    def _refresh_clock(self) -> None:
+        self.clock.setText(QTime.currentTime().toString("HH:mm"))
+
     def _pick(self, text: str) -> None:
         self.input.setText(text)
         if text.endswith(" "):
@@ -229,6 +257,7 @@ class QuickPanel(QWidget):
             self.submitted.emit(text)
 
     def show_centered(self) -> None:
+        self._refresh_clock()
         screen = self.screen()
         if screen:
             geo = screen.availableGeometry()

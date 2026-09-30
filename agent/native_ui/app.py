@@ -68,6 +68,7 @@ class NativeApp:
         self.quick.set_reduced_motion(reduced_motion)
 
         self.quick.submitted.connect(self.send_chat)
+        self.quick.open_settings.connect(self._open_quick_settings)
         self.center.chat_submitted.connect(self.send_chat)
         self.center.refresh_page.connect(self.refresh_page)
         self.center.clear_chat.connect(self.clear_chat)
@@ -786,6 +787,11 @@ class NativeApp:
         self.center.raise_()
         self.center.activateWindow()
         self.refresh_history()
+
+    def _open_quick_settings(self) -> None:
+        self.quick.hide()
+        self.open_center()
+        self.center.nav.setCurrentRow(len(self.center.NAV) - 1)
 
     def _show_error(self, message: str) -> None:
         self.state.set_error(message)
