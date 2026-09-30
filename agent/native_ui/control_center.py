@@ -6,12 +6,12 @@ import json
 from datetime import date, datetime
 from typing import Any
 
-from PySide6.QtCore import QSettings, Qt, QTimer, Signal
-from PySide6.QtGui import QPixmap
+from PySide6.QtCore import QSettings, QSize, Qt, QTimer, Signal
+from PySide6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDoubleSpinBox, QFrame, QHBoxLayout, QLabel, QLineEdit,
     QListWidget, QListWidgetItem, QMainWindow, QProgressBar, QPushButton,
-    QScrollArea, QSpinBox, QStackedWidget, QTabBar, QTextBrowser, QVBoxLayout, QWidget,
+    QScrollArea, QSizePolicy, QSpinBox, QStackedWidget, QTabBar, QTextBrowser, QToolButton, QVBoxLayout, QWidget,
 )
 
 from .components import AmbientCanvas, BrandCard, GlassCard, LumaClock, LumaPortrait, StatusHeader
@@ -21,6 +21,48 @@ from . import theme
 
 def _pretty(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, indent=2, default=str)
+
+
+def _capability_icon(kind: str) -> QIcon:
+    pixmap = QPixmap(40, 40)
+    pixmap.fill(Qt.transparent)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.Antialiasing, True)
+    painter.setPen(QPen(QColor("#B9D4FF"), 2.1, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+    painter.setBrush(Qt.NoBrush)
+    if kind == "app":
+        for x in (8, 23):
+            for y in (8, 23):
+                painter.drawRoundedRect(x, y, 10, 10, 2, 2)
+    elif kind == "files":
+        painter.drawLine(6, 13, 18, 13)
+        painter.drawLine(18, 13, 22, 17)
+        painter.drawLine(22, 17, 34, 17)
+        painter.drawLine(6, 13, 6, 31)
+        painter.drawLine(6, 31, 34, 31)
+        painter.drawLine(34, 17, 34, 31)
+    elif kind == "system":
+        painter.drawRoundedRect(5, 8, 30, 21, 2, 2)
+        painter.drawLine(20, 29, 20, 34)
+        painter.drawLine(14, 34, 26, 34)
+    elif kind == "browser":
+        painter.drawEllipse(7, 7, 26, 26)
+        painter.drawEllipse(15, 7, 10, 26)
+        painter.drawLine(7, 20, 33, 20)
+    elif kind == "assistant":
+        for x, y in ((9, 11), (27, 8), (20, 29)):
+            painter.drawEllipse(x - 3, y - 3, 6, 6)
+        painter.drawLine(12, 11, 24, 8)
+        painter.drawLine(11, 14, 18, 26)
+        painter.drawLine(25, 11, 21, 26)
+    else:
+        painter.drawRoundedRect(8, 14, 24, 17, 3, 3)
+        painter.drawRect(12, 6, 16, 10)
+        painter.drawLine(12, 31, 12, 35)
+        painter.drawLine(12, 35, 28, 35)
+        painter.drawLine(28, 31, 28, 35)
+    painter.end()
+    return QIcon(pixmap)
 
 
 class TextPage(QWidget):
@@ -940,10 +982,6 @@ class MemoryPage(QWidget):
         self.search.setPlaceholderText("Найти в памяти: человек, проект, предпочтение, факт…")
         self.search.textChanged.connect(self._render)
         filters.addWidget(self.search, 1)
-        self.kind_filter = QComboBox()
-        self.kind_filter.addItem("Все типы", "")
-        self.kind_filter.currentIndexChanged.connect(self._render)
-        filters.addWidget(self.kind_filter)
         self.origin_filter = QComboBox()
         self.origin_filter.addItem("Все источники", "")
         for key, label in self.ORIGIN_LABELS.items():
@@ -951,6 +989,18 @@ class MemoryPage(QWidget):
         self.origin_filter.currentIndexChanged.connect(self._render)
         filters.addWidget(self.origin_filter)
         root.addLayout(filters)
+
+        self.kind_tabs = QTabBar()
+        self.kind_tabs.setObjectName("appearanceTabs")
+        self.kind_tabs.setExpanding(True)
+        for label, kind in (
+            ("Всё", ""), ("Заметки", "note"), ("Факты", "fact"),
+            ("Предпочтения", "preference"), ("Профиль", "profile"),
+        ):
+            index = self.kind_tabs.addTab(label)
+            self.kind_tabs.setTabData(index, kind)
+        self.kind_tabs.currentChanged.connect(self._render)
+        root.addWidget(self.kind_tabs)
 
         note = QLabel(
             "MEMORY LAYERS · working context → episodic events → semantic facts → user model. "
@@ -995,17 +1045,6 @@ class MemoryPage(QWidget):
     def set_payload(self, payload: dict[str, Any]) -> None:
         self._payload = dict(payload or {})
         rows = [row for row in list(self._payload.get("memories") or []) if isinstance(row, dict)]
-        kinds = sorted({str(row.get("kind") or "fact") for row in rows})
-        current = str(self.kind_filter.currentData() or "")
-        self.kind_filter.blockSignals(True)
-        self.kind_filter.clear()
-        self.kind_filter.addItem("Все типы", "")
-        for kind in kinds:
-            self.kind_filter.addItem(self.KIND_LABELS.get(kind, kind), kind)
-        index = self.kind_filter.findData(current)
-        self.kind_filter.setCurrentIndex(index if index >= 0 else 0)
-        self.kind_filter.blockSignals(False)
-
         self.total_metric.setText(str(len(rows)))
         self.pinned_metric.setText(str(sum(1 for row in rows if row.get("pinned"))))
         self.model_metric.setText(str(sum(
@@ -1018,7 +1057,7 @@ class MemoryPage(QWidget):
 
     def _matches(self, row: dict[str, Any]) -> bool:
         needle = " ".join(self.search.text().casefold().split())
-        wanted_kind = str(self.kind_filter.currentData() or "")
+        wanted_kind = str(self.kind_tabs.tabData(self.kind_tabs.currentIndex()) or "")
         wanted_origin = str(self.origin_filter.currentData() or "")
         if wanted_kind and str(row.get("kind") or "") != wanted_kind:
             return False
@@ -1193,20 +1232,25 @@ class SkillsPage(QWidget):
         root.addLayout(metrics)
 
         self.group_filter = ""
-        self.group_tiles: list[QPushButton] = []
+        self.group_tiles: list[QToolButton] = []
         for row_items in (
-            (("◫", "Приложения", "app"), ("▣", "Работа с файлами", "files"),
-             ("▤", "Управление ПК", "system")),
-            (("◎", "Интернет и поиск", "browser"), ("⌘", "Сценарии", "assistant"),
-             ("◈", "Печать", "printer")),
+            (("Приложения", "app"), ("Работа с файлами", "files"),
+             ("Управление ПК", "system")),
+            (("Интернет и поиск", "browser"), ("Сценарии", "assistant"),
+             ("Печать", "printer")),
         ):
             tiles = QHBoxLayout()
-            for icon, label, group in row_items:
-                button = QPushButton(f"{icon}\n{label}")
+            for label, group in row_items:
+                button = QToolButton()
+                button.setText(label)
+                button.setIcon(_capability_icon(group))
+                button.setIconSize(QSize(32, 32))
+                button.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
                 button.setObjectName("capabilityTile")
                 button.setProperty("group", group)
                 button.setCheckable(True)
-                button.setMinimumHeight(70)
+                button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+                button.setMinimumHeight(84)
                 button.clicked.connect(lambda _=False, value=group: self._select_group(value))
                 self.group_tiles.append(button)
                 tiles.addWidget(button, 1)
@@ -3530,8 +3574,11 @@ class ControlCenter(QMainWindow):
     def _change(self, row: int) -> None:
         if row < 0:
             return
-        self.stack.setCurrentIndex(row)
         key = self.nav.item(row).data(Qt.UserRole)
+        page = self.pages.get(str(key))
+        if page is None:
+            return
+        self.stack.setCurrentWidget(page)
         if key not in ("home", "chat", "voice"):
             self.refresh_page.emit(str(key))
 

@@ -625,7 +625,7 @@ def stylesheet(accent: str = "#8B5CF6") -> str:
         border-color: #6654B8;
     }
 
-    QPushButton#capabilityTile {
+    QToolButton#capabilityTile {
         background: qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #17264A,stop:1 #10172E);
         border: 1px solid #405891;
         border-radius: 12px;
@@ -634,7 +634,7 @@ def stylesheet(accent: str = "#8B5CF6") -> str:
         font-weight: 700;
     }
 
-    QPushButton#capabilityTile:hover, QPushButton#capabilityTile:checked {
+    QToolButton#capabilityTile:hover, QToolButton#capabilityTile:checked {
         background: #28236A;
         border: 1px solid #AA80FF;
     }

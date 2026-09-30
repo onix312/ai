@@ -96,6 +96,10 @@ class NativeQtSmokeTests(unittest.TestCase):
         self.assertEqual(center.nav.currentRow(), 6)
         center.home.navigate.emit("home")
         self.assertEqual(center.nav.currentRow(), 0)
+        for row, (key, _) in enumerate(center.NAV):
+            center.nav.setCurrentRow(row)
+            self.assertIs(center.stack.currentWidget(), center.pages[key], key)
+        center.nav.setCurrentRow(0)
 
         center.set_home_runtime(
             connected=True,
@@ -188,17 +192,23 @@ class NativeQtSmokeTests(unittest.TestCase):
                 "observed_count": 1,
             }]
         })
+        page.kind_tabs.setCurrentIndex(1)
+        self.assertFalse(page.host.itemAt(0).widget().findChildren(QPushButton))
+        page.kind_tabs.setCurrentIndex(3)
+        self.assertEqual("preference", page.kind_tabs.tabData(page.kind_tabs.currentIndex()))
+        self.assertTrue(any(button.objectName() == "memoryPin" for button in page.host.itemAt(0).widget().findChildren(QPushButton)))
         pins = []
         forgotten = []
         page.pin_requested.connect(lambda memory_id, value: pins.append((memory_id, value)))
         page.forget_requested.connect(lambda memory_id: forgotten.append(memory_id))
 
+        current_card = page.host.itemAt(0).widget()
         pin = next(
-            button for button in page.findChildren(QPushButton)
+            button for button in current_card.findChildren(QPushButton)
             if button.objectName() == "memoryPin"
         )
         forget = next(
-            button for button in page.findChildren(QPushButton)
+            button for button in current_card.findChildren(QPushButton)
             if button.objectName() == "danger" and button.text() == "Забыть"
         )
         pin.click()
