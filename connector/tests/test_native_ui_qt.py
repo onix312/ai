@@ -92,6 +92,10 @@ class NativeQtSmokeTests(unittest.TestCase):
         center.home._submit_search()
         self.assertEqual(["Открой загрузки"], submitted)
         self.assertEqual("", center.home.search_input.text())
+        center.home.navigate.emit("memory")
+        self.assertEqual(center.nav.currentRow(), 6)
+        center.home.navigate.emit("home")
+        self.assertEqual(center.nav.currentRow(), 0)
 
         center.set_home_runtime(
             connected=True,

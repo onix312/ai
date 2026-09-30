@@ -179,6 +179,28 @@ def stylesheet(accent: str = "#8B5CF6") -> str:
         line-height: 1.35;
     }
 
+    QLabel#homeClock {
+        color: #D7A9FF;
+        font-size: 29px;
+        font-weight: 800;
+    }
+
+    QPushButton#heroAction {
+        background: #1A1B43;
+        border: 1px solid #6C59B4;
+        border-radius: 11px;
+        color: #F1EDFF;
+        font-size: 13px;
+        font-weight: 650;
+        padding: 6px 10px;
+        text-align: left;
+    }
+
+    QPushButton#heroAction:hover {
+        background: #342A72;
+        border-color: #BDA4FF;
+    }
+
     QFrame#portraitFrame {
         background: #15152F;
         border: 1px solid #4B4380;

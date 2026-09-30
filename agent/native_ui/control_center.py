@@ -3,10 +3,10 @@ from __future__ import annotations
 
 import html
 import json
-from datetime import date
+from datetime import date, datetime
 from typing import Any
 
-from PySide6.QtCore import QSettings, Qt, Signal
+from PySide6.QtCore import QSettings, Qt, QTimer, Signal
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDoubleSpinBox, QFrame, QHBoxLayout, QLabel, QLineEdit,
@@ -1720,6 +1720,7 @@ class ChatPage(QWidget):
 
 class HomePage(QWidget):
     submitted = Signal(str)
+    navigate = Signal(str)
 
     STATE_LABELS = {
         "idle": "Готова",
@@ -1771,6 +1772,16 @@ class HomePage(QWidget):
         persona.addWidget(self.persona_badge, 0, Qt.AlignLeft)
 
         persona.addStretch(1)
+        for label, command in (
+            ("✓  Что у меня сегодня", "Что у меня сегодня?"),
+            ("▣  Открыть загрузки", "Открой загрузки"),
+            ("◇  Активные задачи", "Покажи активные задачи"),
+        ):
+            button = QPushButton(label)
+            button.setObjectName("heroAction")
+            button.setMinimumHeight(38)
+            button.clicked.connect(lambda _=False, value=command: self.submitted.emit(value))
+            persona.addWidget(button)
         hero_layout.addLayout(persona, 4)
 
         orb_column = QVBoxLayout()
@@ -1794,6 +1805,22 @@ class HomePage(QWidget):
 
         telemetry = QVBoxLayout()
         telemetry.setSpacing(10)
+
+        clock_card = GlassCard("violet")
+        clock_box = QVBoxLayout(clock_card)
+        clock_box.setContentsMargins(14, 12, 14, 12)
+        clock_box.setSpacing(2)
+        self.date_value = QLabel()
+        self.date_value.setObjectName("muted")
+        self.time_value = QLabel()
+        self.time_value.setObjectName("homeClock")
+        clock_box.addWidget(self.date_value)
+        clock_box.addWidget(self.time_value)
+        telemetry.addWidget(clock_card)
+        self._clock_timer = QTimer(self)
+        self._clock_timer.timeout.connect(self._refresh_clock)
+        self._clock_timer.start(15000)
+        self._refresh_clock()
 
         voice_card = GlassCard("cyan")
         voice_box = QVBoxLayout(voice_card)
@@ -1863,18 +1890,24 @@ class HomePage(QWidget):
         self.search_input.returnPressed.connect(self._submit_search)
         action_box.addWidget(self.search_input)
         actions = QHBoxLayout()
-        for text in (
-            "Что у меня сегодня?",
-            "Открой загрузки",
-            "Что ты умеешь?",
-            "Покажи активные задачи",
+        for label, page in (
+            ("◈  Разговор", "chat"),
+            ("◉  Голос", "voice"),
+            ("◌  Память", "memory"),
+            ("⬡  Приложения", "skills"),
         ):
-            button = QPushButton(text)
+            button = QPushButton(label)
             button.setObjectName("suggestion")
-            button.clicked.connect(lambda _=False, value=text: self.submitted.emit(value))
+            button.clicked.connect(lambda _=False, value=page: self.navigate.emit(value))
             actions.addWidget(button)
         action_box.addLayout(actions)
         root.addWidget(action_card)
+
+    def _refresh_clock(self) -> None:
+        now = datetime.now()
+        weekday = ("Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота", "Воскресенье")
+        self.date_value.setText(f"{weekday[now.weekday()]} · {now:%d.%m.%Y}")
+        self.time_value.setText(f"{now:%H:%M}")
 
     def _submit_search(self) -> None:
         query = self.search_input.text().strip()
@@ -3120,6 +3153,7 @@ class ControlCenter(QMainWindow):
 
         self.home = HomePage()
         self.home.submitted.connect(self.chat_submitted)
+        self.home.navigate.connect(self._open_page)
         self.pages["home"] = self.home
         self.stack.addWidget(self.home)
 
@@ -3499,6 +3533,12 @@ class ControlCenter(QMainWindow):
         key = self.nav.item(row).data(Qt.UserRole)
         if key not in ("home", "chat", "voice"):
             self.refresh_page.emit(str(key))
+
+    def _open_page(self, page: str) -> None:
+        for row, (key, _) in enumerate(self.NAV):
+            if key == page:
+                self.nav.setCurrentRow(row)
+                return
 
     def set_pronunciation_payload(self, payload: dict[str, Any]) -> None:
         items = payload.get("items") if isinstance(payload.get("items"), dict) else {}
