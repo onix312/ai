@@ -160,6 +160,7 @@ class TextPage(QWidget):
 
 
 class TodayPage(QWidget):
+    """Reference-style personal dashboard."""
     """Personal daily dashboard backed by Personal.overview()."""
 
     refresh_requested = Signal()
@@ -167,6 +168,7 @@ class TodayPage(QWidget):
 
     def __init__(self) -> None:
         super().__init__()
+        self.setObjectName("todayPage")
         self._payload: dict[str, Any] = {}
         root = QVBoxLayout(self)
         root.setContentsMargins(2, 2, 2, 2)
@@ -448,6 +450,7 @@ class TodayPage(QWidget):
 
 
 class LearningPage(QWidget):
+    """Reference-style learning workspace."""
     """Workspace for explicit lessons, unknown phrases, aliases and habit insights."""
 
     refresh_requested = Signal()
@@ -455,6 +458,7 @@ class LearningPage(QWidget):
 
     def __init__(self) -> None:
         super().__init__()
+        self.setObjectName("learningPage")
         self._payload: dict[str, Any] = {}
         root = QVBoxLayout(self)
         root.setContentsMargins(2, 2, 2, 2)
@@ -763,12 +767,14 @@ class LearningPage(QWidget):
 
 
 class JournalPage(QWidget):
+    """Reference-style journal workspace."""
     """Read-only audit timeline of actual provider/skill executions."""
 
     refresh_requested = Signal()
 
     def __init__(self) -> None:
         super().__init__()
+        self.setObjectName("journalPage")
         self._payload: dict[str, Any] = {}
         root = QVBoxLayout(self)
         root.setContentsMargins(2, 2, 2, 2)
@@ -914,6 +920,7 @@ class JournalPage(QWidget):
 
 
 class MemoryPage(QWidget):
+    """Reference-style memory / knowledge page."""
     """Long-term memory map with explicit pin/forget controls."""
 
     refresh_requested = Signal()
@@ -936,6 +943,7 @@ class MemoryPage(QWidget):
 
     def __init__(self) -> None:
         super().__init__()
+        self.setObjectName("memoryPage")
         self._payload: dict[str, Any] = {}
         root = QVBoxLayout(self)
         root.setContentsMargins(2, 2, 2, 2)
@@ -1192,6 +1200,7 @@ class SkillsPage(QWidget):
 
     def __init__(self) -> None:
         super().__init__()
+        self.setObjectName("skillsPage")
         self._payload: dict[str, Any] = {}
         root = QVBoxLayout(self)
         root.setContentsMargins(2, 2, 2, 2)
@@ -1402,18 +1411,20 @@ class SkillsPage(QWidget):
 
 
 class ChatPage(QWidget):
+    """Reference-style conversation page."""
     submitted = Signal(str)
     clear_requested = Signal()
     mic_toggle = Signal()
 
     def __init__(self) -> None:
         super().__init__()
+        self.setObjectName("chatPage")
         self._turns: list[dict[str, str]] = []
         self._has_history = False
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(2, 2, 2, 2)
-        layout.setSpacing(12)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(9)
 
         head = QHBoxLayout()
         title_box = QVBoxLayout()
@@ -1430,8 +1441,9 @@ class ChatPage(QWidget):
         layout.addLayout(head)
 
         live_card = GlassCard("violet")
+        live_card.setObjectName("chatLiveCard")
         live_row = QHBoxLayout(live_card)
-        live_row.setContentsMargins(12, 9, 14, 9)
+        live_row.setContentsMargins(10, 6, 12, 6)
         live_row.setSpacing(10)
         self.live_portrait = LumaPortrait(compact=True)
         self.live_portrait.setFixedSize(42, 50)
@@ -1501,7 +1513,7 @@ class ChatPage(QWidget):
         portrait_box.setContentsMargins(8, 12, 8, 14)
         portrait_box.addStretch(1)
         self.welcome_portrait = LumaPortrait()
-        self.welcome_portrait.setMinimumSize(190, 270)
+        self.welcome_portrait.setMinimumSize(230, 320)
         portrait_box.addWidget(self.welcome_portrait, 0, Qt.AlignCenter)
         persona = QLabel("LUMA · ВСЕГДА РЯДОМ")
         persona.setObjectName("heroKicker")
@@ -1825,6 +1837,7 @@ class ChatPage(QWidget):
 
 
 class HomePage(QWidget):
+    """Reference-style main control-center page."""
     submitted = Signal(str)
     navigate = Signal(str)
 
@@ -1843,14 +1856,16 @@ class HomePage(QWidget):
 
     def __init__(self) -> None:
         super().__init__()
+        self.setObjectName("homePage")
         root = QVBoxLayout(self)
-        root.setContentsMargins(2, 2, 2, 2)
-        root.setSpacing(14)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(10)
 
         hero = GlassCard("violet")
+        hero.setObjectName("homeHero")
         hero_layout = QHBoxLayout(hero)
-        hero_layout.setContentsMargins(18, 16, 18, 16)
-        hero_layout.setSpacing(14)
+        hero_layout.setContentsMargins(14, 12, 14, 12)
+        hero_layout.setSpacing(10)
         main_column = QVBoxLayout()
         main_column.setSpacing(12)
         hero_top = QHBoxLayout()
@@ -1897,7 +1912,7 @@ class HomePage(QWidget):
         orb_column = QVBoxLayout()
         orb_column.setSpacing(2)
         self.portrait = LumaPortrait()
-        self.portrait.setMinimumSize(280, 340)
+        self.portrait.setMinimumSize(340, 390)
         orb_column.addWidget(self.portrait, 1, Qt.AlignCenter)
         self.orb = LumaOrbCore(compact=True)
         orb_column.addWidget(self.orb, 0, Qt.AlignCenter)
@@ -2024,9 +2039,10 @@ class HomePage(QWidget):
         hero_layout.addLayout(telemetry, 3)
 
         action_card = GlassCard()
+        action_card.setObjectName("homeActions")
         action_box = QVBoxLayout(action_card)
-        action_box.setContentsMargins(16, 13, 16, 13)
-        action_box.setSpacing(10)
+        action_box.setContentsMargins(13, 10, 13, 10)
+        action_box.setSpacing(8)
         action_title = QLabel("Быстрые действия")
         action_title.setObjectName("sectionTitle")
         action_box.addWidget(action_title)
@@ -2200,6 +2216,7 @@ class HomePage(QWidget):
 
 
 class VoicePage(QWidget):
+    """Reference-style Luma voice page."""
     tts_save = Signal(str, str, str)
     tts_reset = Signal()
     tts_test = Signal()
@@ -2210,6 +2227,7 @@ class VoicePage(QWidget):
 
     def __init__(self) -> None:
         super().__init__()
+        self.setObjectName("voicePage")
         root = QVBoxLayout(self)
         root.setContentsMargins(2, 2, 2, 2)
         root.setSpacing(14)
@@ -2480,6 +2498,7 @@ class VoicePage(QWidget):
 
 
 class ActivityPage(QWidget):
+    """Reference-style activity / automation page."""
     refresh_requested = Signal()
 
     PHASES = {
@@ -2495,6 +2514,7 @@ class ActivityPage(QWidget):
 
     def __init__(self) -> None:
         super().__init__()
+        self.setObjectName("activityPage")
         self._payload: dict[str, Any] = {}
         layout = QVBoxLayout(self)
 
@@ -2822,6 +2842,7 @@ class ActivityPage(QWidget):
 
 
 class TasksPage(QWidget):
+    """Reference-style planner page."""
     decision = Signal(str, bool)
     command = Signal(int, str)
     plan_preview = Signal(str)
@@ -2832,6 +2853,7 @@ class TasksPage(QWidget):
 
     def __init__(self) -> None:
         super().__init__()
+        self.setObjectName("tasksPage")
         self.layout = QVBoxLayout(self)
         head = QHBoxLayout()
         title = QLabel("Задачи")
@@ -2904,7 +2926,8 @@ class TasksPage(QWidget):
         content = QHBoxLayout()
         content.setSpacing(12)
         clock_card = GlassCard("violet")
-        clock_card.setFixedWidth(242)
+        clock_card.setObjectName("plannerRail")
+        clock_card.setFixedWidth(228)
         clock_box = QVBoxLayout(clock_card)
         clock_box.setContentsMargins(14, 18, 14, 18)
         clock_box.addWidget(QLabel("ПЛАНИРОВЩИК"))
@@ -3291,8 +3314,8 @@ class ControlCenter(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("Люма")
-        self.setMinimumSize(980, 680)
-        self.resize(1180, 780)
+        self.setMinimumSize(1080, 700)
+        self.resize(1400, 820)
         root = AmbientCanvas()
         root.setObjectName("shellRoot")
         self.ambient = root
@@ -3307,11 +3330,11 @@ class ControlCenter(QMainWindow):
 
         sidebar = QWidget()
         sidebar.setObjectName("sidebar")
-        sidebar.setFixedWidth(236)
+        sidebar.setFixedWidth(184)
         self.sidebar = sidebar
         side = QVBoxLayout(sidebar)
-        side.setContentsMargins(14, 18, 14, 14)
-        side.setSpacing(14)
+        side.setContentsMargins(10, 12, 10, 10)
+        side.setSpacing(8)
 
         self.brand_card = BrandCard()
         side.addWidget(self.brand_card)
@@ -3328,11 +3351,12 @@ class ControlCenter(QMainWindow):
         main = QWidget()
         main.setObjectName("mainContent")
         main_layout = QVBoxLayout(main)
-        main_layout.setContentsMargins(18, 16, 18, 12)
-        main_layout.setSpacing(14)
+        main_layout.setContentsMargins(10, 10, 10, 8)
+        main_layout.setSpacing(10)
         self.main_layout = main_layout
 
         self.status_header = StatusHeader()
+        self.status_header.setMaximumHeight(54)
         main_layout.addWidget(self.status_header)
 
         self.stack = QStackedWidget()
@@ -3709,12 +3733,12 @@ class ControlCenter(QMainWindow):
         QSettings("Luma", "Luma").setValue("panel_style", mode)
         for value, button in self.panel_style_buttons.items():
             button.setChecked(value == mode)
-        widths = {"glass": 236, "compact": 200, "minimal": 176}
+        widths = {"glass": 184, "compact": 164, "minimal": 148}
         self.sidebar.setFixedWidth(widths[mode])
         self.status_header.setVisible(mode != "minimal")
-        margins = (18, 16, 18, 12) if mode == "glass" else (12, 10, 12, 8)
+        margins = (10, 10, 10, 8) if mode == "glass" else (8, 8, 8, 6)
         self.main_layout.setContentsMargins(*margins)
-        self.main_layout.setSpacing(14 if mode == "glass" else 9)
+        self.main_layout.setSpacing(10 if mode == "glass" else 8)
 
     def _set_accent(self, color: str) -> None:
         if color not in self.accent_buttons:
