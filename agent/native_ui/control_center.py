@@ -3847,7 +3847,7 @@ class ControlCenter(QMainWindow):
             palette.setColor(QPalette.Highlight, QColor("#413583"))
             palette.setColor(QPalette.HighlightedText, QColor("#FFFFFF"))
             view.setPalette(palette)
-            view.setStyleSheet("QListView { background: #101225; color: #F0EEFA; border: 1px solid #49466F; }"
+            view.setStyleSheet("QListView { background-color:#101225; color:#F0EEFA; border:1px solid #49466F; }"
                                "QListView::item { min-height: 30px; padding: 5px 9px; }"
                                "QListView::item:selected { background: #413583; color: #FFFFFF; }")
         for scroll in self.findChildren(QScrollArea):
