@@ -14,9 +14,9 @@ from .components import LumaPortrait
 class RoundMicButton(QPushButton):
     """Circular microphone control with a quiet breathing glow."""
 
-    def __init__(self) -> None:
+    def __init__(self, size: int = 54) -> None:
         super().__init__("")
-        self.setFixedSize(54, 54)
+        self.setFixedSize(size, size)
         self.setToolTip("Включить или выключить микрофон")
         self._phase = 0.0
         self._timer = QTimer(self)
@@ -40,6 +40,7 @@ class RoundMicButton(QPushButton):
     def paintEvent(self, _event) -> None:  # noqa: N802
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing, True)
+        painter.scale(self.width() / 54, self.height() / 54)
         pulse = 0.5 + 0.5 * math.sin(self._phase)
         center = QPointF(27, 27)
         glow = QRadialGradient(center, 27)

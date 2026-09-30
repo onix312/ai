@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
 
 from .components import AmbientCanvas, BrandCard, GlassCard, LumaClock, LumaPortrait, StatusHeader
 from .orb import LumaOrbCore
+from .quick_panel import RoundMicButton
 from . import theme
 
 
@@ -1403,6 +1404,7 @@ class SkillsPage(QWidget):
 class ChatPage(QWidget):
     submitted = Signal(str)
     clear_requested = Signal()
+    mic_toggle = Signal()
 
     def __init__(self) -> None:
         super().__init__()
@@ -1575,6 +1577,9 @@ class ChatPage(QWidget):
         self.input.setPlaceholderText("Спроси Люму или скажи, что сделать…")
         self.input.returnPressed.connect(self._submit)
         composer_row.addWidget(self.input, 1)
+        microphone = RoundMicButton(40)
+        microphone.clicked.connect(self.mic_toggle)
+        composer_row.addWidget(microphone)
         send = QPushButton("Отправить")
         send.setObjectName("primary")
         send.clicked.connect(self._submit)
@@ -3340,6 +3345,7 @@ class ControlCenter(QMainWindow):
         self.stack.addWidget(self.home)
 
         self.chat = ChatPage()
+        self.chat.mic_toggle.connect(self.mic_toggle)
         self.chat.submitted.connect(self.chat_submitted)
         self.chat.clear_requested.connect(self.clear_chat)
         self.pages["chat"] = self.chat
@@ -3735,6 +3741,8 @@ class ControlCenter(QMainWindow):
         for widget in self.findChildren(LumaPortrait):
             widget.set_reduced_motion(enabled)
         for widget in self.findChildren(LumaOrbCore):
+            widget.set_reduced_motion(enabled)
+        for widget in self.findChildren(RoundMicButton):
             widget.set_reduced_motion(enabled)
 
     def _change(self, row: int) -> None:

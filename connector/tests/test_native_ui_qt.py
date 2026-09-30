@@ -92,6 +92,10 @@ class NativeQtSmokeTests(unittest.TestCase):
         self.assertIsInstance(center.pages["voice"], VoicePage)
         self.assertIsInstance(center.home.orb, LumaOrbCore)
         self.assertIsInstance(center.home.portrait, LumaPortrait)
+        mic_events = []
+        center.mic_toggle.connect(lambda: mic_events.append(True))
+        center.chat.mic_toggle.emit()
+        self.assertEqual([True], mic_events)
         self.assertFalse(center.home.portrait._portrait.isNull())
         self.assertFalse(center.home.portrait._energy.isNull())
         self.assertFalse(center.ambient._background.isNull())
