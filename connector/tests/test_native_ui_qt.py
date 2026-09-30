@@ -460,6 +460,7 @@ class NativeQtSmokeTests(unittest.TestCase):
     def test_windows_construct_and_accept_state(self):
         orb = VoiceOrb()
         quick = QuickPanel()
+        self.assertEqual(590, quick.width())
         toggles = []
         quick.mic_toggle.connect(lambda: toggles.append(True))
         quick.mic_toggle.emit()
@@ -481,6 +482,8 @@ class NativeQtSmokeTests(unittest.TestCase):
         )
         quick.show_answer("готово")
         center.update_status(True, False, True, True)
+        self.assertIn("LOCAL", center.sidebar_status.text())
+        self.assertIn("READY", center.sidebar_status.text())
         center.set_voice_diagnostics(
             audio_level=900,
             echo_floor=220,
