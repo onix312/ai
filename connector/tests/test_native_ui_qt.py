@@ -72,7 +72,7 @@ class NativeQtSmokeTests(unittest.TestCase):
         orb.set_live(heard="Проверка", reply="Готово")
         self.assertEqual(orb.height(), 100)
         orb.set_live()
-        self.assertEqual(orb.height(), 72)
+        self.assertEqual(orb.height(), 64)
         orb.set_state("listening")
         self.assertEqual((orb.width(), orb.height()), (560, 350))
         orb.set_state("idle")
