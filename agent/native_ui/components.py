@@ -119,7 +119,9 @@ class LumaPortrait(QWidget):
 
     def _tick(self) -> None:
         if self.isVisible() and self._state not in ("stopped",):
-            self._phase = (self._phase + 0.045) % 6.283185307
+            speed = {"listening": 0.075, "thinking": 0.095, "speaking": 0.11,
+                     "working": 0.065, "idle": 0.035}.get(self._state, 0.035)
+            self._phase = (self._phase + speed) % 6.283185307
             self.update()
 
     @staticmethod
@@ -150,9 +152,21 @@ class LumaPortrait(QWidget):
         orbit = QRectF(0, h * 0.03, w, h * 0.94)
         if not self._compact and not self._energy.isNull():
             painter.save()
+            painter.translate(cx, h * 0.5)
+            painter.rotate(4.0 * math.sin(self._phase * 0.45))
+            painter.translate(-cx, -h * 0.5)
             painter.setOpacity(0.70 + 0.10 * pulse)
             painter.drawPixmap(orbit, self._energy, QRectF(self._energy.rect()))
             painter.restore()
+
+            painter.setPen(Qt.NoPen)
+            for index in range(13):
+                angle = self._phase * (0.45 + index % 3 * 0.13) + index * 2.39996
+                x = cx + math.cos(angle) * w * (0.36 + index % 4 * 0.025)
+                y = h * 0.51 + math.sin(angle) * h * (0.35 + index % 3 * 0.018)
+                radius = 1.0 + (index % 3) * 0.65 + pulse * 0.4
+                painter.setBrush(self._with_alpha(color.lighter(150), 95 + index % 4 * 30))
+                painter.drawEllipse(QPointF(x, y), radius, radius)
 
         if not self._portrait.isNull():
             # Crop a little of the wide artwork in compact placements so the face remains legible.
@@ -169,6 +183,9 @@ class LumaPortrait(QWidget):
         if not self._compact and not self._energy.isNull():
             painter.save()
             painter.setClipRect(QRectF(0, h * 0.62, w, h * 0.38))
+            painter.translate(cx, h * 0.5)
+            painter.rotate(-3.0 * math.sin(self._phase * 0.55))
+            painter.translate(-cx, -h * 0.5)
             painter.setOpacity(0.45 + 0.10 * pulse)
             painter.drawPixmap(orbit, self._energy, QRectF(self._energy.rect()))
             painter.restore()
