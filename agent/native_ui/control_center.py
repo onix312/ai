@@ -1912,15 +1912,15 @@ class HomePage(QWidget):
         persona.addWidget(self.persona_badge, 0, Qt.AlignLeft)
 
         persona.addStretch(1)
-        for label, command in (
-            ("✓  Что у меня сегодня", "Что у меня сегодня?"),
-            ("▣  Открыть загрузки", "Открой загрузки"),
-            ("◇  Активные задачи", "Покажи активные задачи"),
+        for label, page in (
+            ("✓  Новая задача", "tasks"),
+            ("▣  Открыть приложение", "skills"),
+            ("□  Управление ПК", "skills"),
         ):
             button = QPushButton(label)
             button.setObjectName("heroAction")
             button.setMinimumHeight(38)
-            button.clicked.connect(lambda _=False, value=command: self.submitted.emit(value))
+            button.clicked.connect(lambda _=False, value=page: self.navigate.emit(value))
             persona.addWidget(button)
         hero_top.addLayout(persona, 4)
 
@@ -2066,20 +2066,21 @@ class HomePage(QWidget):
         self.search_input.returnPressed.connect(self._submit_search)
         action_box.addWidget(self.search_input)
         actions = QHBoxLayout()
-        for label, page in (
-            ("◌  Чат", "chat"),
-            ("◇  Сегодня", "today"),
-            ("□  Задачи", "tasks"),
-            ("▣  Память", "memory"),
-            ("⌘  Приложения", "skills"),
-            ("⌁  Активность", "activity"),
-            ("◉  Голос", "voice"),
-            ("⚙  Настройки", "settings"),
+        for label, command in (
+            ("♫\nМузыка", "Включи музыку"),
+            ("▣\nДисплей", "Открой настройки дисплея"),
+            ("◖\nГромкость", "Покажи управление громкостью"),
+            ("⌗\nСкриншот", "Сделай скриншот"),
+            ("◷\nТаймер", "Поставь таймер на 10 минут"),
+            ("▤\nЗаметка", "Создай заметку"),
+            ("Aa\nПеревод", "Переведи"),
+            ("▦\nКалендарь", "Что у меня сегодня?"),
         ):
             button = QPushButton(label)
             button.setObjectName("suggestion")
-            button.clicked.connect(lambda _=False, value=page: self.navigate.emit(value))
-            actions.addWidget(button)
+            button.setMinimumHeight(52)
+            button.clicked.connect(lambda _=False, value=command: self.submitted.emit(value))
+            actions.addWidget(button, 1)
         action_box.addLayout(actions)
         main_column.addWidget(action_card)
         root.addWidget(hero, 1)
