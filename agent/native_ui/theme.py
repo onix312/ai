@@ -1096,6 +1096,80 @@ def stylesheet(accent: str = "#8B5CF6") -> str:
         padding: 4px 12px;
         font-size: 9px;
     }
+    QLabel#brandMark {
+        background: transparent;
+        border: 0;
+    }
+
+    QLabel#sidebarStatus {
+        background: rgba(13, 26, 52, 220);
+        color: #73E7C4;
+        border: 1px solid #2C5B59;
+        border-radius: 8px;
+        padding: 6px 7px;
+        font-size: 8px;
+        font-weight: 800;
+        letter-spacing: 1px;
+    }
+
+    QLabel#themePreviewDark,
+    QLabel#themePreviewLight,
+    QLabel#themePreviewSystem {
+        border-radius: 9px;
+        padding: 8px;
+        font-size: 10px;
+        font-weight: 750;
+    }
+
+    QLabel#themePreviewDark {
+        background: qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #241445,stop:1 #0A1535);
+        color: #FFFFFF;
+        border: 1px solid #A479FF;
+    }
+
+    QLabel#themePreviewLight {
+        background: #D8D9E8;
+        color: #36334A;
+        border: 1px solid #8586A2;
+    }
+
+    QLabel#themePreviewSystem {
+        background: qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #161C39,stop:0.5 #161C39,stop:0.51 #D9DBE7,stop:1 #D9DBE7);
+        color: #AFA9FF;
+        border: 1px solid #59618C;
+    }
+
+    QWidget#memoryPage QLineEdit,
+    QWidget#skillsPage QLineEdit {
+        min-height: 28px;
+        border-radius: 9px;
+    }
+
+    QWidget#memoryPage QTabBar#appearanceTabs::tab {
+        min-width: 76px;
+    }
+
+    QWidget#tasksPage QFrame#plannerRail {
+        background: rgba(9, 15, 37, 238);
+        border: 1px solid #5965AE;
+    }
+
+    QWidget#settingsSurface {
+        background: rgba(7, 12, 31, 225);
+        border: 1px solid #384579;
+        border-radius: 11px;
+    }
+
+    QWidget#settingsSurface QLabel#pageTitle {
+        font-size: 20px;
+    }
+
+    QWidget#settingsSurface QCheckBox::indicator {
+        width: 34px;
+        height: 17px;
+        border-radius: 8px;
+    }
+
     """
     if accent != "#8B5CF6":
         for source in ("#8B5CF6", "#9A70FF", "#AB88FF", "#7D63E6", "#6654B8"):
