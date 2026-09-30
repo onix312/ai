@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from pathlib import Path
 
 from PySide6.QtCore import QPointF, Qt
 from PySide6.QtGui import QAction, QColor, QIcon, QPainter, QPen, QPixmap, QRadialGradient
@@ -42,6 +43,10 @@ def status_icon(state: str = "idle") -> QIcon:
     painter.setPen(Qt.NoPen)
     painter.setBrush(core)
     painter.drawEllipse(20, 20, 24, 24)
+    ring = QPixmap(str(Path(__file__).resolve().parent / "assets" / "luma-energy-ring.png"))
+    if not ring.isNull():
+        painter.setOpacity(0.9)
+        painter.drawPixmap(4, 4, 56, 56, ring)
     painter.end()
     return QIcon(pix)
 

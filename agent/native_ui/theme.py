@@ -20,8 +20,8 @@ COLORS = {
 }
 
 
-def stylesheet() -> str:
-    return """
+def stylesheet(accent: str = "#8B5CF6") -> str:
+    css = """
     QMainWindow {
         background: #070816;
     }
@@ -37,6 +37,26 @@ def stylesheet() -> str:
 
     QWidget#settingsSurface {
         background: rgba(8, 11, 29, 178);
+    }
+
+    QTabBar#appearanceTabs {
+        background: #0F142D;
+        border: 1px solid #36355E;
+        border-radius: 12px;
+    }
+
+    QTabBar#appearanceTabs::tab {
+        background: transparent;
+        color: #B8B2D2;
+        min-height: 30px;
+        padding: 5px 12px;
+    }
+
+    QTabBar#appearanceTabs::tab:selected {
+        background: #302269;
+        color: #FFFFFF;
+        border: 1px solid #9A70FF;
+        border-radius: 10px;
     }
 
     QWidget#sidebar {
@@ -644,3 +664,7 @@ def stylesheet() -> str:
         font-size: 11px;
     }
     """
+    if accent != "#8B5CF6":
+        for source in ("#8B5CF6", "#9A70FF", "#AB88FF", "#7D63E6", "#6654B8"):
+            css = css.replace(source, accent)
+    return css

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QEasingCurve, QPointF, Property, QPropertyAnimation, QRectF, Qt, QTimer
+from PySide6.QtCore import QEasingCurve, QPointF, Property, QPropertyAnimation, QRectF, Qt, QTime, QTimer
 from PySide6.QtGui import QBrush, QColor, QPainter, QPen, QPixmap, QRadialGradient
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
@@ -93,6 +93,7 @@ class LumaPortrait(QWidget):
         self._compact = bool(compact)
         self._reduced_motion = False
         self._portrait = QPixmap(str(Path(__file__).resolve().parent / "assets" / "luma-portrait.png"))
+        self._energy = QPixmap(str(Path(__file__).resolve().parent / "assets" / "luma-energy-ring.png"))
         self.setAttribute(Qt.WA_TranslucentBackground, True)
         self.setMinimumSize(108, 132)
         if compact:
@@ -146,6 +147,13 @@ class LumaPortrait(QWidget):
         painter.setBrush(QBrush(halo))
         painter.drawEllipse(QPointF(cx, h * 0.48), w * 0.49, h * 0.48)
 
+        orbit = QRectF(0, h * 0.03, w, h * 0.94)
+        if not self._compact and not self._energy.isNull():
+            painter.save()
+            painter.setOpacity(0.70 + 0.10 * pulse)
+            painter.drawPixmap(orbit, self._energy, QRectF(self._energy.rect()))
+            painter.restore()
+
         if not self._portrait.isNull():
             # Crop a little of the wide artwork in compact placements so the face remains legible.
             inset = 0.1 if self._compact else 0.0
@@ -158,9 +166,63 @@ class LumaPortrait(QWidget):
             painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
             painter.drawPixmap(QRectF(0, 0, w, h), self._portrait, source)
 
+        if not self._compact and not self._energy.isNull():
+            painter.save()
+            painter.setClipRect(QRectF(0, h * 0.62, w, h * 0.38))
+            painter.setOpacity(0.45 + 0.10 * pulse)
+            painter.drawPixmap(orbit, self._energy, QRectF(self._energy.rect()))
+            painter.restore()
+
         painter.setBrush(Qt.NoBrush)
         painter.setPen(QPen(self._with_alpha(color, 120 + int(60 * pulse)), max(1.0, w * 0.012)))
         painter.drawEllipse(QRectF(w * 0.06, h * 0.12, w * 0.88, h * 0.76))
+
+
+class LumaClock(QWidget):
+    """Orbital clock for the task planner."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._energy = QPixmap(str(Path(__file__).resolve().parent / "assets" / "luma-energy-ring.png"))
+        self.setFixedSize(210, 210)
+        self._timer = QTimer(self)
+        self._timer.timeout.connect(self.update)
+        self._timer.start(30000)
+
+    def paintEvent(self, _event) -> None:  # noqa: N802
+        import math
+
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
+        if not self._energy.isNull():
+            painter.setOpacity(0.82)
+            painter.drawPixmap(QRectF(0, 0, 210, 210), self._energy, QRectF(self._energy.rect()))
+            painter.setOpacity(1.0)
+
+        center = QPointF(105, 96)
+        painter.setBrush(QColor(8, 13, 35, 205))
+        painter.setPen(QPen(QColor("#82B9FF"), 2))
+        painter.drawEllipse(center, 57, 57)
+        for mark in range(12):
+            angle = math.tau * mark / 12 - math.pi / 2
+            start = QPointF(center.x() + math.cos(angle) * 47, center.y() + math.sin(angle) * 47)
+            end = QPointF(center.x() + math.cos(angle) * 53, center.y() + math.sin(angle) * 53)
+            painter.setPen(QPen(QColor("#CAB4FF"), 2))
+            painter.drawLine(start, end)
+
+        now = QTime.currentTime()
+        hour_angle = math.tau * ((now.hour() % 12) + now.minute() / 60) / 12 - math.pi / 2
+        minute_angle = math.tau * now.minute() / 60 - math.pi / 2
+        painter.setPen(QPen(QColor("#E7D9FF"), 4, Qt.SolidLine, Qt.RoundCap))
+        painter.drawLine(center, QPointF(center.x() + math.cos(hour_angle) * 29,
+                                         center.y() + math.sin(hour_angle) * 29))
+        painter.setPen(QPen(QColor("#63DFFF"), 3, Qt.SolidLine, Qt.RoundCap))
+        painter.drawLine(center, QPointF(center.x() + math.cos(minute_angle) * 43,
+                                         center.y() + math.sin(minute_angle) * 43))
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QColor("#F9F6FF"))
+        painter.drawEllipse(center, 4, 4)
 
 
 class GlassCard(QFrame):

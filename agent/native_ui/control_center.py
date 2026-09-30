@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import html
 import json
+from datetime import date
 from typing import Any
 
 from PySide6.QtCore import QSettings, Qt, Signal
@@ -10,10 +11,10 @@ from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDoubleSpinBox, QFrame, QHBoxLayout, QLabel, QLineEdit,
     QListWidget, QListWidgetItem, QMainWindow, QProgressBar, QPushButton,
-    QScrollArea, QSpinBox, QStackedWidget, QTextBrowser, QVBoxLayout, QWidget,
+    QScrollArea, QSpinBox, QStackedWidget, QTabBar, QTextBrowser, QVBoxLayout, QWidget,
 )
 
-from .components import AmbientCanvas, BrandCard, GlassCard, LumaPortrait, StatusHeader
+from .components import AmbientCanvas, BrandCard, GlassCard, LumaClock, LumaPortrait, StatusHeader
 from .orb import LumaOrbCore
 from . import theme
 
@@ -2682,7 +2683,23 @@ class TasksPage(QWidget):
         self.host = QVBoxLayout(self.host_widget)
         self.host.setAlignment(Qt.AlignTop)
         scroll.setWidget(self.host_widget)
-        self.layout.addWidget(scroll, 1)
+        content = QHBoxLayout()
+        content.setSpacing(12)
+        clock_card = GlassCard("violet")
+        clock_card.setFixedWidth(242)
+        clock_box = QVBoxLayout(clock_card)
+        clock_box.setContentsMargins(14, 18, 14, 18)
+        clock_box.addWidget(QLabel("ПЛАНИРОВЩИК"))
+        clock = LumaClock()
+        clock_box.addWidget(clock, 0, Qt.AlignCenter)
+        today_label = QLabel(date.today().strftime("%d.%m.%Y"))
+        today_label.setObjectName("metricValueSmall")
+        today_label.setAlignment(Qt.AlignCenter)
+        clock_box.addWidget(today_label)
+        clock_box.addStretch(1)
+        content.addWidget(clock_card)
+        content.addWidget(scroll, 1)
+        self.layout.addLayout(content, 1)
         self.set_payload({})
 
     def _preview_plan(self) -> None:
@@ -2741,12 +2758,9 @@ class TasksPage(QWidget):
 
         if not plans and not replans and not tasks and not pending and not notifications:
             empty = GlassCard("violet")
-            empty.setMaximumHeight(230)
-            row = QHBoxLayout(empty)
-            row.setContentsMargins(22, 18, 22, 18)
-            orb = LumaOrbCore()
-            orb.setFixedSize(160, 160)
-            row.addWidget(orb)
+            empty.setMaximumHeight(170)
+            row = QVBoxLayout(empty)
+            row.setContentsMargins(20, 18, 20, 18)
             copy = QVBoxLayout()
             heading = QLabel("Здесь появятся твои задачи")
             heading.setObjectName("sectionTitle")
@@ -2757,7 +2771,11 @@ class TasksPage(QWidget):
             hint.setWordWrap(True)
             copy.addWidget(hint)
             copy.addStretch(1)
-            row.addLayout(copy, 1)
+            row.addLayout(copy)
+            start = QPushButton("Новая задача")
+            start.setObjectName("primary")
+            start.clicked.connect(self.goal_input.setFocus)
+            row.addWidget(start, 0, Qt.AlignLeft)
             self.host.addWidget(empty)
             return
         if plans:
@@ -3188,6 +3206,13 @@ class ControlCenter(QMainWindow):
         subtitle.setWordWrap(True)
         sl.addWidget(subtitle)
 
+        self.appearance_tabs = QTabBar()
+        self.appearance_tabs.setObjectName("appearanceTabs")
+        self.appearance_tabs.setExpanding(True)
+        for label in ("Внешний вид", "Голос", "Поведение", "Интеграции"):
+            self.appearance_tabs.addTab(label)
+        sl.addWidget(self.appearance_tabs)
+
         appearance = GlassCard("violet")
         appearance_box = QHBoxLayout(appearance)
         appearance_box.setContentsMargins(16, 13, 16, 13)
@@ -3196,6 +3221,18 @@ class ControlCenter(QMainWindow):
         appearance_title.setObjectName("sectionTitle")
         appearance_copy.addWidget(appearance_title)
         appearance_copy.addWidget(QLabel("Тёмная тема · фиолетовый и синий свет"))
+        accent_row = QHBoxLayout()
+        accent_row.addWidget(QLabel("Цвет акцента"))
+        self.accent_buttons: dict[str, QPushButton] = {}
+        for color in ("#8B5CF6", "#F05BCA", "#4E8DFF", "#43D7FF", "#42D9C8", "#F5B84C"):
+            button = QPushButton("")
+            button.setFixedSize(28, 28)
+            button.setToolTip(color)
+            button.clicked.connect(lambda _=False, value=color: self._set_accent(value))
+            accent_row.addWidget(button)
+            self.accent_buttons[color] = button
+        accent_row.addStretch(1)
+        appearance_copy.addLayout(accent_row)
         appearance_box.addLayout(appearance_copy, 1)
         self.motion_toggle = QCheckBox("Уменьшить анимацию")
         self.motion_toggle.toggled.connect(self._set_reduced_motion)
@@ -3236,6 +3273,7 @@ class ControlCenter(QMainWindow):
         sl.addWidget(voice_link)
 
         persona_title = QLabel("Характер Люмы")
+        self.persona_title = persona_title
         persona_title.setObjectName("sectionTitle")
         sl.addWidget(persona_title)
         self.persona_boxes: dict[str, QComboBox] = {}
@@ -3393,6 +3431,7 @@ class ControlCenter(QMainWindow):
         self.events_view.setPlainText("Событий пока нет.")
         sl.addWidget(self.events_view)
         providers_title = QLabel("Подключения")
+        self.providers_title = providers_title
         providers_title.setObjectName("sectionTitle")
         sl.addWidget(providers_title)
         self.providers_view = QTextBrowser()
@@ -3404,6 +3443,7 @@ class ControlCenter(QMainWindow):
         settings_scroll.setWidgetResizable(True)
         settings_scroll.setFrameShape(QFrame.NoFrame)
         settings_scroll.setWidget(settings)
+        self.settings_scroll = settings_scroll
         self.pages["settings"] = settings_scroll
         self.stack.addWidget(settings_scroll)
 
@@ -3420,8 +3460,29 @@ class ControlCenter(QMainWindow):
         self.setStyleSheet(theme.stylesheet())
         for scroll in self.findChildren(QScrollArea):
             scroll.viewport().setStyleSheet("background: transparent;")
+        self.appearance_tabs.currentChanged.connect(self._settings_tab_changed)
+        self._set_accent(str(QSettings("Luma", "Luma").value("accent", "#8B5CF6")))
         self.motion_toggle.setChecked(QSettings("Luma", "Luma").value("reduced_motion", False, type=bool))
         self._set_reduced_motion(self.motion_toggle.isChecked())
+
+    def _set_accent(self, color: str) -> None:
+        if color not in self.accent_buttons:
+            color = "#8B5CF6"
+        QSettings("Luma", "Luma").setValue("accent", color)
+        self.setStyleSheet(theme.stylesheet(color))
+        for value, button in self.accent_buttons.items():
+            border = "#FFFFFF" if value == color else "#35395F"
+            button.setStyleSheet(f"background:{value};border:2px solid {border};border-radius:14px;")
+
+    def _settings_tab_changed(self, index: int) -> None:
+        if index == 1:
+            self.nav.setCurrentRow(2)
+        elif index == 2:
+            self.settings_scroll.ensureWidgetVisible(self.persona_title)
+        elif index == 3:
+            self.settings_scroll.ensureWidgetVisible(self.providers_title)
+        else:
+            self.settings_scroll.verticalScrollBar().setValue(0)
 
     def _set_reduced_motion(self, enabled: bool) -> None:
         QSettings("Luma", "Luma").setValue("reduced_motion", bool(enabled))

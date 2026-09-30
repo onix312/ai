@@ -13,7 +13,7 @@ from PySide6.QtGui import QColor, QImage
 from PySide6.QtWidgets import QApplication, QLabel, QLineEdit, QProgressBar, QPushButton
 
 from agent.native_ui.app import NativeApp
-from agent.native_ui.components import LumaPortrait
+from agent.native_ui.components import LumaClock, LumaPortrait
 from agent.native_ui.control_center import ActivityPage, ChatPage, ControlCenter, HomePage, JournalPage, LearningPage, MemoryPage, SkillsPage, TasksPage, TextPage, TodayPage, VoicePage
 from agent.native_ui.orb import LumaOrbCore, VoiceOrb
 from agent.native_ui.quick_panel import QuickPanel
@@ -70,6 +70,10 @@ class NativeQtSmokeTests(unittest.TestCase):
         self.assertEqual(orb.height(), 112)
         orb.set_live()
         self.assertEqual(orb.height(), 72)
+        orb.set_state("listening")
+        self.assertEqual((orb.width(), orb.height()), (520, 330))
+        orb.set_state("idle")
+        self.assertEqual((orb.width(), orb.height()), (390, 72))
         orb.deleteLater()
 
     def test_home_hero_and_orb_accept_live_runtime(self):
@@ -79,7 +83,9 @@ class NativeQtSmokeTests(unittest.TestCase):
         self.assertIsInstance(center.home.orb, LumaOrbCore)
         self.assertIsInstance(center.home.portrait, LumaPortrait)
         self.assertFalse(center.home.portrait._portrait.isNull())
+        self.assertFalse(center.home.portrait._energy.isNull())
         self.assertFalse(center.ambient._background.isNull())
+        self.assertIsNotNone(center.pages["tasks"].findChild(LumaClock))
         submitted = []
         center.home.submitted.connect(submitted.append)
         center.home.search_input.setText("Открой загрузки")
@@ -414,6 +420,10 @@ class NativeQtSmokeTests(unittest.TestCase):
     def test_windows_construct_and_accept_state(self):
         orb = VoiceOrb()
         quick = QuickPanel()
+        toggles = []
+        quick.mic_toggle.connect(lambda: toggles.append(True))
+        quick.mic_toggle.emit()
+        self.assertEqual([True], toggles)
         center = ControlCenter()
 
         orb.set_state("thinking")

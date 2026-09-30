@@ -10,6 +10,7 @@ from .components import LumaPortrait
 
 class QuickPanel(QWidget):
     submitted = Signal(str)
+    mic_toggle = Signal()
 
     def __init__(self) -> None:
         super().__init__()
@@ -56,10 +57,17 @@ class QuickPanel(QWidget):
             background:#242044;
             border-color:#6654B8;
         }
+        QPushButton#quickMic {
+            background:#365CDD;
+            border:2px solid #8C9FFF;
+            border-radius:26px;
+            color:white;
+            font-size:23px;
+        }
         """)
         box = QVBoxLayout(card)
         box.setContentsMargins(20, 16, 20, 18)
-        box.setSpacing(14)
+        box.setSpacing(8)
         header = QHBoxLayout()
         brand = QLabel("✦  LUMA")
         brand.setObjectName("quickBrand")
@@ -78,7 +86,7 @@ class QuickPanel(QWidget):
         copy.addStretch(1)
         hero.addLayout(copy, 2)
         portrait = LumaPortrait()
-        portrait.setFixedSize(240, 185)
+        portrait.setFixedSize(240, 168)
         hero.addWidget(portrait, 3, Qt.AlignRight)
         box.addLayout(hero)
         row = QHBoxLayout()
@@ -90,7 +98,18 @@ class QuickPanel(QWidget):
         self.answer = QLabel("")
         self.answer.setWordWrap(True)
         self.answer.setStyleSheet("color:#E7E3F3; font-size:14px; background:transparent;")
+        self.answer.hide()
         box.addWidget(self.answer)
+        mic_row = QHBoxLayout()
+        mic_row.addStretch(1)
+        mic = QPushButton("🎙")
+        mic.setObjectName("quickMic")
+        mic.setFixedSize(46, 46)
+        mic.setToolTip("Включить или выключить микрофон")
+        mic.clicked.connect(self.mic_toggle)
+        mic_row.addWidget(mic)
+        mic_row.addStretch(1)
+        box.addLayout(mic_row)
         actions = QHBoxLayout()
         for icon, title, prompt in (
             ("◫", "Открыть\nприложение", "Открой "),
@@ -99,7 +118,7 @@ class QuickPanel(QWidget):
             ("✎", "Создать\nзаметку", "Создай заметку "),
         ):
             button = QPushButton(f"{icon}\n{title}")
-            button.setMinimumHeight(72)
+            button.setMinimumHeight(64)
             button.clicked.connect(lambda _=False, value=prompt: self._pick(value))
             actions.addWidget(button, 1)
         box.addLayout(actions)
@@ -132,9 +151,11 @@ class QuickPanel(QWidget):
         self.input.setEnabled(not busy)
         if busy:
             self.answer.setText("Думаю…")
+            self.answer.show()
 
     def show_answer(self, text: str) -> None:
         self.answer.setText(text)
+        self.answer.setVisible(bool(text))
 
     def keyPressEvent(self, event) -> None:
         if event.key() == Qt.Key_Escape:

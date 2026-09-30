@@ -244,10 +244,29 @@ class VoiceOrb(QWidget):
         row.addLayout(text, 1)
         root.addLayout(row)
 
-        self.portrait = LumaPortrait(self)
-        self.portrait.setFixedSize(265, 205)
-        root.addWidget(self.portrait, 0, Qt.AlignCenter)
-        self.portrait.hide()
+        self.showcase = QWidget(self)
+        showcase_row = QHBoxLayout(self.showcase)
+        showcase_row.setContentsMargins(8, 0, 12, 10)
+        showcase_row.setSpacing(4)
+        self.portrait = LumaPortrait(self.showcase)
+        self.portrait.setFixedSize(290, 245)
+        showcase_row.addWidget(self.portrait)
+        states = QVBoxLayout()
+        states.setSpacing(8)
+        self.state_labels: dict[str, QLabel] = {}
+        for key, label in (
+            ("listening", "Слушает"), ("thinking", "Думает"),
+            ("speaking", "Говорит"), ("working", "Обработка"),
+        ):
+            item = QLabel(label)
+            item.setAlignment(Qt.AlignCenter)
+            item.setMinimumHeight(42)
+            states.addWidget(item)
+            self.state_labels[key] = item
+        states.addStretch(1)
+        showcase_row.addLayout(states, 1)
+        root.addWidget(self.showcase)
+        self.showcase.hide()
 
         self._hide_timer = QTimer(self)
         self._hide_timer.setSingleShot(True)
@@ -255,10 +274,20 @@ class VoiceOrb(QWidget):
 
     def set_state(self, state: str, auto_hide_ms: int = 0) -> None:
         clean = str(state or "idle").casefold()
+        if clean in ("executing", "task"):
+            clean = "working"
         self._state = clean if clean in self.LABELS else "idle"
         self.core.set_state(self._state)
         self.portrait.set_state(self._state)
-        self.portrait.setVisible(self._state in ("listening", "thinking", "speaking"))
+        self.showcase.setVisible(self._state in ("listening", "thinking", "speaking", "working"))
+        for key, label in self.state_labels.items():
+            selected = key == self._state
+            border = "#A987FF" if selected else "#34395F"
+            color = "#FFFFFF" if selected else "#A5A1BD"
+            label.setStyleSheet(
+                f"background:#131B39;color:{color};border:1px solid {border};"
+                "border-radius:11px;font-size:13px;font-weight:700;"
+            )
         self._resize_for_state()
         self.label.setText(f"Люма · {self.LABELS[self._state]}")
         self.show_near_bottom()
@@ -309,10 +338,13 @@ class VoiceOrb(QWidget):
 
     def _resize_for_state(self) -> None:
         target_height = (
-            280 if self._state in ("listening", "thinking", "speaking")
+            330 if self._state in ("listening", "thinking", "speaking", "working")
             else 112 if self.context_label.text() or self.reply_label.text()
             else 72
         )
+        target_width = 520 if target_height == 330 else 390
+        if self.width() != target_width:
+            self.setFixedWidth(target_width)
         if self.height() != target_height:
             self.setFixedHeight(target_height)
             if self.isVisible():

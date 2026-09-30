@@ -49,6 +49,7 @@ class NativeApp:
 
         self.orb = VoiceOrb()
         self.quick = QuickPanel()
+        self.quick.mic_toggle.connect(self.toggle_mic)
         self.center = ControlCenter()
         self.tray = LumaTray(
             self.open_quick,
