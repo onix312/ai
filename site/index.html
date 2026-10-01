@@ -559,24 +559,36 @@
 <!-- ================================================== ЗАКАЗЫ -->
 <section class="view" id="view-orders">
  <div class="view-head">
-  <div><span class="eyebrow">Продажи и производство</span><h1>Заказы</h1><p id="orders_sub">Загружаем заказы…</p></div>
+  <div><span class="eyebrow">От заявки до выдачи</span><h1>Заказы</h1><p id="orders_sub">Загружаем рабочую доску…</p></div>
   <div class="head-actions">
-   <button class="btn" id="orders_export" type="button">Экспорт CSV</button>
-   <button class="btn" id="orders_statuses" type="button">Статусы</button>
-   <button class="btn" id="orders_wishes" type="button" title="Хотелки клиентов: что просили, что нашли">♥ Хотелки <span class="tag" id="orders_wishes_tag" hidden></span></button>
    <button class="btn primary" id="orders_new" type="button">+ Новый заказ</button>
+   <details class="view-options">
+    <summary class="btn">Ещё ▾</summary>
+    <div class="view-options-pop">
+     <button class="btn ghost" id="orders_wishes" type="button" title="Хотелки клиентов: что просили, что нашли">♥ Хотелки <span class="tag" id="orders_wishes_tag" hidden></span></button>
+     <button class="btn ghost" id="orders_statuses" type="button">Статусы и этапы</button>
+     <button class="btn ghost" id="orders_export" type="button">↓ Экспорт CSV</button>
+    </div>
+   </details>
   </div>
  </div>
- <div class="toolbar">
-  <div class="search-box"><input id="orders_search" type="search" placeholder="Изделие, клиент, номер, файл…" aria-label="Поиск заказов"></div>
+ <div class="v19-orders-pulse" id="orders_pulse" role="group" aria-label="Быстрые виды заказов">
+  <button type="button" class="on" data-order-pulse="all"><span>В работе</span><b id="orders_pulse_all">0</b></button>
+  <button type="button" data-order-pulse="hot"><span>Горят</span><b id="orders_pulse_hot">0</b></button>
+  <button type="button" data-order-pulse="ready"><span>Готовы</span><b id="orders_pulse_ready">0</b></button>
+  <button type="button" data-order-pulse="debt"><span>Ждём оплату</span><b id="orders_pulse_debt">0</b></button>
+  <button type="button" data-order-pulse="stale"><span>Забыты 7+ дн.</span><b id="orders_pulse_stale">0</b></button>
+ </div>
+ <div class="toolbar v19-orders-toolbar">
+  <div class="search-box"><input id="orders_search" type="search" placeholder="Номер, изделие или клиент…" aria-label="Поиск заказов"></div>
   <select id="orders_preset" title="Сохранённый вид доски"><option value="all">Все заказы</option></select>
   <button class="btn sm ghost" id="orders_preset_del" type="button" title="Удалить этот вид" hidden>✕</button>
-  <select id="orders_filter_status"><option value="">Все статусы</option></select>
   <div class="seg" id="orders_view"><button data-mode="kanban" class="on">Канбан</button><button data-mode="table">Таблица</button></div>
-  <div class="seg" id="orders_box" role="group" aria-label="Доска или архив" title="Архив — снятые с доски заказы: данные, платежи и история на месте"><button type="button" data-box="" class="on">На доске</button><button type="button" data-box="archived">⌸ В архиве</button></div>
   <details class="orders-more-filters" id="orders_more_filters">
-   <summary class="btn sm">Доп. фильтры</summary>
+   <summary class="btn sm">Фильтры и архив</summary>
    <div class="orders-more-filter-grid">
+    <label>Статус <select id="orders_filter_status"><option value="">Все статусы</option></select></label>
+    <div><span>Доска</span><div class="seg" id="orders_box" role="group" aria-label="Доска или архив" title="Архив — снятые с доски заказы: данные, платежи и история на месте"><button type="button" data-box="" class="on">На доске</button><button type="button" data-box="archived">В архиве</button></div></div>
     <label>Ниша <select id="orders_filter_niche"><option value="">Все ниши</option></select></label>
     <label>Порядок <select id="orders_sort" title="Порядок заказов"><option value="new">Сначала новые</option><option value="due">По сроку</option><option value="debt">По долгу</option><option value="stale">Забытые сверху</option></select></label>
     <div><span>Канал продаж</span><div class="seg" id="orders_chan" role="group" aria-label="Канал продаж"><button type="button" data-chan="" class="on">Все каналы</button><button type="button" data-chan="telegram"><i data-icon="telegram">✈</i> Telegram</button><button type="button" data-chan="no-tg">Без TG</button></div></div>
@@ -628,18 +640,25 @@
 <!-- ================================================== ФИНАНСЫ -->
 <section class="view" id="view-finance">
  <div class="view-head">
-  <div><span class="eyebrow">Автоматический учёт</span><h1>Финансы</h1><p>Доходы и расходы пишутся сами: по завершённым печатям и закрытым заказам.</p></div>
+  <div><span class="eyebrow">Деньги · прибыль · обязательства</span><h1>Финансы</h1><p>Сколько есть сейчас, сколько должны и что требует решения.</p></div>
   <div class="head-actions">
    <div class="seg" id="fin_period"><button data-days="7">7</button><button data-days="30" class="on">30</button><button data-days="90">90</button><button data-days="365">365</button></div>
-   <button class="btn" id="fin_export_tx" type="button">↓ CSV</button>
-   <button class="btn" id="fin_month_close" type="button"><i data-icon="page">🧾</i> Закрыть месяц</button>
    <button class="btn primary" id="fin_add" type="button">+ Проводка</button>
+   <details class="view-options">
+    <summary class="btn">Ещё ▾</summary>
+    <div class="view-options-pop">
+     <button class="btn ghost" id="fin_month_close" type="button"><i data-icon="page">🧾</i> Закрыть месяц</button>
+     <button class="btn ghost" id="fin_export_tx" type="button">↓ Экспорт проводок CSV</button>
+     <a class="btn ghost" href="/bank.html">Банк →</a>
+     <a class="btn ghost" href="/sbp.html">СБП →</a>
+    </div>
+   </details>
   </div>
  </div>
  <div class="seg tabs" id="fin_tabs">
-  <button data-pane="cash" class="on">Касса и долги</button>
-  <button data-pane="profit">Прибыль</button>
-  <button data-pane="reports">Отчёты</button>
+  <button data-pane="cash" class="on">Деньги сейчас</button>
+  <button data-pane="profit">Прибыль и P&amp;L</button>
+  <button data-pane="reports">Налоги и отчёты</button>
  </div>
 
  <!-- ---------------------------------------------------------- обзор -->
@@ -688,29 +707,46 @@
 <!-- -------------------------------------------------------- налоги -->
   <!-- ------------------------------------------------- кассы и долги -->
  <div class="pane on" id="finpane-cash">
-  <div class="kpi-grid" id="cash_kpis"></div>
-  <div class="grid g-2-1">
-   <div class="card">
-    <div class="card-head"><div><h2>Кассы и счета</h2><p>Где физически лежат деньги</p></div><button class="btn sm" id="acc_add2" type="button">+ Касса</button></div>
-    <div id="cash_accounts"></div>
+  <div class="kpi-grid v19-fin-kpis" id="cash_kpis"></div>
+  <div class="grid g-2-1 v19-fin-control">
+   <div class="card v19-fin-attention-card">
+    <div class="card-head"><div><span class="eyebrow">Контроль</span><h2>Требует решения</h2><p>Просрочки, обязательства и расхождения — сначала важное</p></div></div>
+    <div id="fin_attention"><div class="empty compact"><span>Проверяем деньги и долги…</span></div></div>
    </div>
-   <div class="card">
-    <div class="card-head"><div><h2>Постоянные расходы</h2><p>Начисляются сами каждый месяц</p></div><button class="btn sm" id="fix_add2" type="button">+ Расход</button></div>
-    <div id="cash_fixed"></div>
+   <div class="card v19-fin-summary-card">
+    <div class="card-head"><div><span class="eyebrow">Период</span><h2>Результат бизнеса</h2><p id="fin_result_sub">Текущий месяц и выбранный период</p></div></div>
+    <div id="fin_result"></div>
    </div>
   </div>
-  <div class="card" style="margin-top:16px">
-   <div class="card-head">
-    <div><h2>Касса стеллажа (магазин)</h2><p>Деньги от продаж со стеллажа лежат в кассе магазина — отмечайте, сколько забрали</p></div>
-    <button class="btn sm primary" id="shelf_cash_collect" type="button">Забрали из магазина</button>
-   </div>
-   <div class="kpi-grid" id="shelf_cash_kpis"></div>
-   <div id="shelf_cash_list" style="margin-top:12px"></div>
-  </div>
-  <div class="card" style="margin-top:16px">
-   <div class="card-head"><div><h2>Долги клиентов</h2><p>Заказы, по которым деньги получены не полностью</p></div></div>
+
+  <div class="card v19-fin-debts" style="margin-top:16px">
+   <div class="card-head"><div><h2>Дебиторка</h2><p>Клиенты, от которых ещё должны прийти деньги</p></div></div>
    <div class="table-wrap"><table class="data"><thead><tr><th>Заказ</th><th>Клиент</th><th class="right">Цена</th><th class="right">Оплачено</th><th class="right">Долг</th><th class="right">Дней</th><th></th></tr></thead><tbody id="debt_tbody"></tbody></table></div>
   </div>
+
+  <details class="card v19-fin-details" style="margin-top:16px">
+   <summary><div><h2>Источники денег и настройки учёта</h2><p>Кассы, счета, постоянные расходы и касса Стеллажа</p></div><span class="chip outline">подробнее</span></summary>
+   <div class="v19-fin-details-body">
+    <div class="grid g-2-1">
+     <div class="card">
+      <div class="card-head"><div><h2>Кассы и счета</h2><p>Где физически лежат деньги</p></div><button class="btn sm" id="acc_add2" type="button">+ Касса</button></div>
+      <div id="cash_accounts"></div>
+     </div>
+     <div class="card">
+      <div class="card-head"><div><h2>Постоянные расходы</h2><p>Начисляются сами каждый месяц</p></div><button class="btn sm" id="fix_add2" type="button">+ Расход</button></div>
+      <div id="cash_fixed"></div>
+     </div>
+    </div>
+    <div class="card" style="margin-top:16px">
+     <div class="card-head">
+      <div><h2>Касса Стеллажа</h2><p>Физические деньги розничной точки и выемки</p></div>
+      <button class="btn sm primary" id="shelf_cash_collect" type="button">Забрали из магазина</button>
+     </div>
+     <div class="kpi-grid" id="shelf_cash_kpis"></div>
+     <div id="shelf_cash_list" style="margin-top:12px"></div>
+    </div>
+   </div>
+  </details>
  </div>
 
  <!-- -------------------------------------------------------- отчёты -->
