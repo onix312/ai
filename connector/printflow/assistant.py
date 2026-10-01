@@ -1368,6 +1368,25 @@ def agent_chat(db: Database, text: str, session: str = "main",
     return payload
 
 
+def agent_confirm_action(db: Database, action_id: str, confirmed: bool,
+                         timeout: float = 30.0) -> dict[str, Any]:
+    """Confirm or reject one pending Luma action through the agent gate."""
+    state = agent_status(db)
+    if not state.get("available"):
+        return {"ok": False, "reason": state.get("reason") or "Агент недоступен"}
+    clean_id = str(action_id or "").strip()
+    if not clean_id or len(clean_id) > 160:
+        return {"ok": False, "reason": "Некорректный id подтверждения"}
+    ok, payload, reason = _post_json(
+        f"{state['url']}/action/confirm",
+        {"id": clean_id, "confirmed": bool(confirmed)},
+        timeout=timeout,
+    )
+    if not ok or not isinstance(payload, dict):
+        return {"ok": False, "reason": f"Агент не ответил: {reason}"}
+    return payload
+
+
 def _call_agent_skill(db: Database, name: str, params: dict[str, Any],
                       timeout: float = 30.0) -> dict[str, Any]:
     """Вызвать навык агента по loopback (Авито, ТГ). Возвращает ответ агента."""
