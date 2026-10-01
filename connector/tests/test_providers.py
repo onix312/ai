@@ -153,7 +153,7 @@ class PanelClientV19Tests(unittest.TestCase):
                 action, {"id": "o1", "payment_action": "debt"}, confirmed=True)
 
         self.assertTrue(calls[0][1]["handoff_confirmed"])
-        self.assertTrue(calls[0][1]["confirmed"])
+        self.assertNotIn("confirmed", calls[0][1])
 
 class ProviderImplementationTests(unittest.TestCase):
     def test_printflow_provider_preserves_panel_action_confirmation_metadata(self):
