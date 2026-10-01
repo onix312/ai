@@ -246,7 +246,12 @@ class JournalTests(unittest.TestCase):
         found = {(r["method"], r["path"]) for r in router.reference()
                  if r["path"].startswith("/api/assistant")}
         self.assertEqual({("GET", "/api/assistant/agent"),
-                          # 18.21: мозг помощника — разговор, память, контекст.
+                          ("GET", "/api/assistant/actions/v19"),
+                          # v19: Nozza rail → Luma full reasoning + canonical confirmation.
+                          ("POST", "/api/assistant/luma"),
+                          ("POST", "/api/assistant/luma/confirm"),
+                          ("POST", "/api/assistant/ui-context"),
+                          # 18.21 legacy brain remains compatibility fallback.
                           ("POST", "/api/assistant/chat"),
                           ("GET", "/api/assistant/memory"),
                           ("POST", "/api/assistant/memory"),
