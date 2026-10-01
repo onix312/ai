@@ -1342,7 +1342,7 @@ def agent_skills(db: Database) -> dict[str, Any]:
 
 def agent_chat(db: Database, text: str, session: str = "main",
                plan: dict[str, Any] | None = None, timeout: float = 25.0,
-               request_id: str = "") -> dict[str, Any]:
+               request_id: str = "", mode: str = "pc") -> dict[str, Any]:
     """Фраза агенту компьютера (18.21): он понимает команды ПК своими правилами.
 
     `mode="pc"` — агент отвечает только на то, что понял как команду компьютеру,
@@ -1352,8 +1352,14 @@ def agent_chat(db: Database, text: str, session: str = "main",
     state = agent_status(db)
     if not state.get("available"):
         return {"ok": False, "handled": False, "reason": state.get("reason") or "Агент недоступен"}
-    body: dict[str, Any] = {"text": str(text or "")[:1000], "session": f"panel-{session}"[:40], "mode": "pc",
-                            "contract_version": 1, "request_id": request_id}
+    chat_mode = "full" if str(mode or "").strip().casefold() == "full" else "pc"
+    body: dict[str, Any] = {
+        "text": str(text or "")[:1000],
+        "session": f"panel-{session}"[:40],
+        "mode": chat_mode,
+        "contract_version": 1,
+        "request_id": request_id,
+    }
     if plan:
         body["plan"] = plan
     ok, payload, reason = _post_json(f"{state['url']}/chat", body, timeout=timeout)
