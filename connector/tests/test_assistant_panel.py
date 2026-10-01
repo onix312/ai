@@ -103,8 +103,8 @@ class ActionCatalogTests(unittest.TestCase):
                 self.assertIsInstance(action["confirm"], bool, name)
                 self.assertTrue(action["doc"], name)
 
-    def test_money_and_print_actions_require_confirmation(self):
-        """Правило репозитория: подтверждение — только для денег и печати."""
+    def test_business_critical_actions_require_confirmation(self):
+        """v19: подтверждаем деньги, физические действия и критичные изменения учёта."""
         confirmed = set(assistant.CONFIRMED_ACTIONS)
         for name in ("printer_command", "job_start", "job_cancel", "order_save",
                      "order_status", "order_fulfill", "shelf_sale", "settings_save",
