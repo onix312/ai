@@ -1287,6 +1287,89 @@ class Shelf:
                 "item": self.db.one("SELECT * FROM shelf_items WHERE id=?",
                                     (item["id"],))}
 
+    def transfer_to_stock(self, item_id: str, warehouse_id: str, qty: float,
+                          note: str = "") -> dict:
+        """Переместить готовый товар со стеллажа обратно на учётный склад.
+
+        Стеллаж остаётся отдельным retail-регистром, но перенос выполняется
+        атомарно: shelf_moves уменьшается вместе с зоной витрины stock_moves,
+        а склад-получатель получает встречный приход. Зарезервированные на
+        витрине штуки переносить нельзя.
+        """
+        item = self.db.one(
+            "SELECT * FROM shelf_items WHERE id=? AND active=1", (item_id,))
+        if not item:
+            raise ValueError("Позиция стеллажа не найдена")
+        nom = self._linked_nomenclature(item)
+        if not nom:
+            raise ValueError(
+                "Позиция не связана с номенклатурой — сначала привяжите товар")
+        warehouse = self.db.one(
+            "SELECT * FROM warehouses WHERE id=? AND archived=0", (warehouse_id,))
+        if not warehouse:
+            raise ValueError("Склад-получатель не найден")
+        if str(warehouse.get("kind") or "") == "shelf":
+            raise ValueError("Стеллаж нельзя выбрать складом-получателем")
+
+        unit = str(nom.get("unit") or "шт")
+        piece_unit = unit in ("шт", "шт.", "piece", "pcs")
+        qty = num(qty)
+        if qty <= 0:
+            raise ValueError("Перемещать нужно больше нуля")
+        if piece_unit and abs(qty - round(qty)) > 1e-9:
+            raise ValueError("Штучные товары перемещаются целыми штуками")
+        qty = float(round(qty)) if piece_unit else round(qty, 3)
+
+        physical = self._qty(item_id)
+        if physical < qty - 1e-9:
+            raise ValueError(
+                f"На стеллаже только {round(physical, 3)} {unit}, "
+                f"а переместить просят {round(qty, 3)} {unit}")
+
+        from .stock import Stock
+        stock = Stock(self.db)
+        zone = stock.shelf_warehouse()
+        if not zone:
+            raise ValueError("Не настроена складская зона стеллажа")
+        variant_id = str(item.get("variant_id") or "").strip()
+        free = stock.free(nom["id"], zone, variant_id)
+        if free < qty - 1e-9:
+            raise ValueError(
+                f"На витрине свободно {round(free, 3)} {unit}; "
+                "остальное зарезервировано")
+
+        unit_cost = stock.avg_cost(nom["id"], zone, variant_id) \
+            or num(item.get("cost_per_unit"))
+        cost = round(unit_cost * qty, 2)
+        move_note = (note or
+                     f"перемещение со стеллажа на {warehouse.get('name') or warehouse_id}").strip()
+
+        with self.db.transaction():
+            shelf_move = self._move(
+                item_id, "transfer_out", -qty, note=move_note)
+            shelf_leg = self._register_leg(
+                item, "move", -qty, move_note, unit_cost=unit_cost)
+            stock_leg = stock.add_move(
+                nom["id"], warehouse_id, qty, cost, doc_kind="move",
+                variant_id=variant_id, note=move_note)
+
+        self.db.add_event(
+            "shelf", "Перемещение со стеллажа на склад",
+            f"{item.get('name') or nom.get('name') or ''} −{round(qty)} шт",
+            data={
+                "item_id": item_id, "nom_id": nom["id"],
+                "variant_id": variant_id, "warehouse_id": warehouse_id,
+                "qty": qty, "cost": cost,
+                "shelf_register_move_id": (shelf_leg or {}).get("id") or "",
+                "warehouse_move_id": (stock_leg or {}).get("id") or "",
+            })
+        return {
+            "ok": True, "qty": qty, "cost": cost,
+            "move": shelf_move, "register_move": shelf_leg,
+            "warehouse_move": stock_leg,
+            "item": self.item(item_id),
+        }
+
     def create_item_from_stock(self, data: dict, nom_id: str, warehouse_id: str,
                                qty: float, variant_id: str = "") -> dict:
         """Новая позиция стеллажа сразу с готовым товаром со склада.
