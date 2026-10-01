@@ -662,6 +662,110 @@
     .v19-fin-attention .btn { grid-column: 2; }
   }
 
+  /* Orders: lifecycle pulse above the board, advanced filtering out of the way. */
+  .v19-orders-pulse {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(120px,1fr));
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+  .v19-orders-pulse button {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 9px;
+    min-width: 0;
+    padding: 10px 11px;
+    border: 1px solid var(--line);
+    border-radius: 11px;
+    background: var(--panel);
+    color: var(--text-2);
+    font: inherit;
+    cursor: pointer;
+    transition: border-color .14s var(--ease), background .14s var(--ease), transform .14s var(--ease);
+  }
+  .v19-orders-pulse button:hover {
+    transform: translateY(-1px);
+    border-color: var(--line-strong);
+  }
+  .v19-orders-pulse button.on {
+    border-color: var(--pf-accent-line);
+    background: var(--pf-accent-soft);
+    color: var(--text);
+  }
+  .v19-orders-pulse button.alert {
+    border-color: color-mix(in srgb, var(--bad) 46%, var(--line));
+  }
+  .v19-orders-pulse button.warn:not(.on) {
+    border-color: color-mix(in srgb, var(--warn) 32%, var(--line));
+  }
+  .v19-orders-pulse button span {
+    overflow: hidden;
+    font-size: 11.5px;
+    font-weight: 620;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  .v19-orders-pulse button b {
+    min-width: 24px;
+    color: var(--text);
+    font-size: 15px;
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+  }
+
+  .v19-orders-toolbar {
+    position: sticky;
+    top: 70px;
+    z-index: 15;
+    margin-bottom: 12px;
+    padding: 7px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: color-mix(in srgb, var(--panel) 94%, transparent);
+    backdrop-filter: blur(10px);
+  }
+  .v19-orders-toolbar .search-box {
+    flex: 1 1 280px;
+    min-width: 210px;
+  }
+  .v19-orders-toolbar #orders_preset {
+    min-width: 170px;
+  }
+  .v19-orders-toolbar .orders-more-filters {
+    margin-left: auto;
+  }
+  body.pf-v19 #view-orders .orders-more-filter-grid {
+    min-width: min(670px, calc(100vw - 80px));
+  }
+  body.pf-v19 #view-orders .kanban {
+    padding-top: 2px;
+  }
+  body.pf-v19 #view-orders .kan-col {
+    background: color-mix(in srgb, var(--panel-2) 60%, transparent);
+  }
+  body.pf-v19 #view-orders .ocard {
+    background: var(--panel);
+  }
+
+  @media (max-width: 1050px) {
+    .v19-orders-pulse {
+      grid-template-columns: repeat(5, minmax(108px,1fr));
+      overflow-x: auto;
+      padding-bottom: 2px;
+    }
+    .v19-orders-pulse button { min-width: 118px; }
+  }
+  @media (max-width: 760px) {
+    .v19-orders-toolbar { position: static; }
+    .v19-orders-toolbar #orders_preset { flex: 1 1 150px; }
+    .v19-orders-toolbar .orders-more-filters { margin-left: 0; }
+    body.pf-v19 #view-orders .orders-more-filter-grid {
+      min-width: 0;
+      width: min(92vw, 520px);
+    }
+  }
+
   /* Persistent AI rail. */
   .pf-ai-rail {
     position: fixed;
