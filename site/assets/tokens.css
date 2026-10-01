@@ -1,4 +1,4 @@
-/* PrintFlow 17.0 — единый файл дизайн-токенов.
+/* PrintFlow 19.0 — единый файл дизайн-токенов.
    Палитра, геометрия, тени, типографика и компонентные токены всей панели.
    Подключается ПЕРВЫМ (до app.css / theme.css / more.css): остальные файлы
    ссылаются на эти переменные. Тёмная тема — тот же набор токенов через
@@ -29,31 +29,30 @@
   --fw-bold: 700;
   --fw-heavy: 850;
 
-  /* фирменная палитра */
-  --accent: #4f46e5;
-  --accent-2: #7c3aed;
+  /* PrintFlow 19: тёплая нейтральная база + контрастный фиолетовый */
+  --accent: #6d28d9;
+  --accent-2: #8b5cf6;
   --accent-ink: #ffffff;
-  --accent-soft: rgba(79, 70, 229, .10);
-  --accent-line: rgba(79, 70, 229, .28);
-  --accent-glow: rgba(79, 70, 229, .18);
+  --accent-soft: rgba(109, 40, 217, .10);
+  --accent-line: rgba(109, 40, 217, .27);
+  --accent-glow: rgba(109, 40, 217, .18);
 
   /* поверхности */
-  --bg: #f5f7fb;
-  /* лёгкий «воздух» сверху: две едва заметные акцентные засветки */
+  --bg: #f6f1ea;
   --bg-grad:
-    radial-gradient(1200px 500px at 12% -10%, rgba(79, 70, 229, .07), transparent 64%),
-    radial-gradient(1000px 460px at 108% 2%, rgba(124, 58, 237, .06), transparent 60%);
-  --panel: #ffffff;
-  --panel-2: #f8fafc;            /* мягкая подложка внутри карточек */
-  --panel-3: #edf2f7;            /* ховеры, заполнения */
-  --line: #e4e9f1;
-  --line-soft: #edf1f6;
-  --line-strong: #d5deea;
+    radial-gradient(1200px 520px at 10% -12%, rgba(139, 92, 246, .09), transparent 64%),
+    radial-gradient(900px 420px at 108% 0%, rgba(190, 150, 105, .08), transparent 62%);
+  --panel: #fffdf9;
+  --panel-2: #f8f2ea;            /* тёплая подложка внутри карточек */
+  --panel-3: #eee5da;            /* ховеры, заполнения */
+  --line: #e2d7ca;
+  --line-soft: #ece3d9;
+  --line-strong: #d3c4b4;
 
   /* текст */
-  --text: #182230;
-  --text-2: #3e4c5f;
-  --muted: #617186;
+  --text: #29211d;
+  --text-2: #4f433d;
+  --muted: #766960;
 
   /* статусы */
   --ok: #116e55;
@@ -81,23 +80,24 @@
 
 html[data-theme="dark"] {
   color-scheme: dark;
-  --accent: #a3a0ff;
-  --accent-2: #8b5cf6;
-  --accent-ink: #0c121b;
-  --accent-soft: #30325a;
-  --accent-line: #595ca0;
-  --accent-glow: rgba(163, 160, 255, .25);
-  --bg: #0c121b;
-  --bg-grad: none;
-  --panel: #16212e;
-  --panel-2: #1c2938;
-  --panel-3: #26384a;
-  --line: #2d4052;
-  --line-soft: #263747;
-  --line-strong: #4b6175;
-  --text: #f2f6fb;
-  --text-2: #d4deea;
-  --muted: #a0b2c5;
+  --accent: #c4a5ff;
+  --accent-2: #a78bfa;
+  --accent-ink: #17110f;
+  --accent-soft: #382a49;
+  --accent-line: #73558e;
+  --accent-glow: rgba(196, 165, 255, .24);
+  --bg: #171310;
+  --bg-grad:
+    radial-gradient(1000px 460px at 12% -12%, rgba(139, 92, 246, .10), transparent 64%);
+  --panel: #211b18;
+  --panel-2: #29211d;
+  --panel-3: #362b25;
+  --line: #43362f;
+  --line-soft: #382e29;
+  --line-strong: #5a493f;
+  --text: #f7efe7;
+  --text-2: #ded0c5;
+  --muted: #ad9c90;
   --ok: #55d1a6;
   --ok-soft: #143d37;
   --warn: #ffc375;
