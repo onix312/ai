@@ -62,10 +62,27 @@ class FinanceV19Tests(unittest.TestCase):
         self.assertIn("focus === 'debts'", self.js)
         self.assertNotIn("/api/assistant", self.js)
 
+    def test_money_channels_are_visible_in_one_finance_surface(self):
+        view = self._view()
+        self.assertIn('class="card v19-fin-sources"', view)
+        self.assertIn('id="fin_sources"', view)
+        self.assertIn('id="fin_sources_refresh"', view)
+        self.assertIn("get('/api/bank/state')", self.js)
+        self.assertIn("get('/api/sbp/state')", self.js)
+        self.assertIn("get('/api/cashier/sessions')", self.js)
+        self.assertIn("function renderMoneySources()", self.js)
+
+    def test_money_channel_pending_items_join_financial_attention(self):
+        self.assertIn("moneySources.bank.pending_review", self.js)
+        self.assertIn("moneySources.sbp.pending", self.js)
+        self.assertIn("'sources'", self.js)
+        self.assertIn(".v19-fin-sources", self.js)
+
     def test_finance_layout_is_responsive(self):
         self.assertIn(".v19-fin-kpis", self.css)
         self.assertIn(".v19-fin-attention", self.css)
         self.assertIn(".v19-fin-details", self.css)
+        self.assertIn(".v19-fin-source-grid", self.css)
         self.assertIn("@media (max-width: 980px)", self.css)
         self.assertIn("@media (max-width: 600px)", self.css)
 

@@ -3544,9 +3544,9 @@ function bind() {
     const btn = e.target.closest('[data-set-shortcut]');
     if (!btn) return;
     selectSettingsPane(btn.dataset.setShortcut);
-    const tabs = $('set_tabs');
-    if (tabs && typeof tabs.scrollIntoView === 'function') {
-      tabs.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    const pane = $('setpane-' + settingsPane);
+    if (pane && typeof pane.scrollIntoView === 'function') {
+      pane.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
   });
   const settingsHost = $('view-settings');
@@ -3756,14 +3756,14 @@ async function renderTour() {
     el.innerHTML = `<div class="notice" style="margin-bottom:8px"><span>🎬</span><span>Демо активно: виртуальный принтер и демо-данные работают. Откат вернёт базу из копии ${esc(st.backup || '')}.</span></div>`
       + `<button class="btn danger wide" type="button" id="tour_stop">■ Завершить tour и вернуть мои данные</button>`;
     on('tour_stop', 'click', async () => {
-      if (!confirmDanger('Завершить NOZZA tour? Приложение перезапустится с исходной базой.')) return;
+      if (!confirmDanger('Завершить PrintFlow tour? Приложение перезапустится с исходной базой.')) return;
       try { const r = await post('/api/tour/stop', {}); toast('Tour завершён', r.message || 'Перезапуск…'); }
       catch (e) { fail(e); }
     });
     return;
   }
   el.innerHTML = `<p class="muted" style="font-size:12.5px;margin-bottom:8px">Покажите PrintFlow гостю: симулятор P1S печатает, заказы и полка живые, но всё — демо-данные. Завершение одной кнопкой откатывает базу.</p>`
-    + `<button class="btn primary wide" type="button" id="tour_start">▶ Запустить NOZZA tour</button>`;
+    + `<button class="btn primary wide" type="button" id="tour_start">▶ Запустить PrintFlow tour</button>`;
   on('tour_start', 'click', async () => {
     try { const r = await post('/api/tour/start', {}); toast('Tour запущен', r.job_started ? 'Виртуальная печать стартовала' : 'Демо-данные готовы'); renderSettings(); }
     catch (e) { fail(e); }
