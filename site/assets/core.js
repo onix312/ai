@@ -1441,11 +1441,11 @@ document.addEventListener('keydown', (e) => {
 });
 const STOCK_TABS = [
   { id: 'products', label: 'Товары', icon: '📦' },
-  { id: 'batches', label: 'Партии', icon: '🖨' },
-  { id: 'documents', label: 'Документы', icon: '📋' },
-  { id: 'warehouses', label: 'Склады', icon: '🏬' },
   { id: 'shelf', label: 'Стеллаж', icon: '🏷' },
   { id: 'inventory', label: 'Пластик', icon: '🧶' },
+  { id: 'batches', label: 'Партии', icon: '🖨' },
+  { id: 'warehouses', label: 'Склады', icon: '🏬' },
+  { id: 'documents', label: 'Операции', icon: '📋' },
 ];
 const STOCK_IDS = new Set(STOCK_TABS.map((t) => t.id));
 
