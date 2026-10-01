@@ -545,6 +545,42 @@ ACTIONS: dict[str, dict[str, Any]] = {
     "search": {"title": "Поиск по цеху", "method": "GET", "path": "/api/search",
                "params": ("q",), "confirm": False,
                "doc": "Заказы, клиенты, катушки одним поиском."},
+    "stock": {"title": "Остатки по складам", "method": "GET", "path": "/api/stock",
+              "params": (), "confirm": False,
+              "doc": "Свободные и фактические остатки номенклатуры по складам."},
+    "warehouses": {"title": "Склады", "method": "GET", "path": "/api/warehouses",
+                   "params": (), "confirm": False,
+                   "doc": "Активные склады и retail-зоны PrintFlow."},
+    "debts": {"title": "Дебиторка", "method": "GET", "path": "/api/debts",
+              "params": (), "confirm": False,
+              "doc": "Клиенты с долгом и суммы к получению."},
+    "client_rfm": {"title": "RFM клиентов", "method": "GET", "path": "/api/clients/rfm",
+                   "params": (), "confirm": False,
+                   "doc": "Сегменты клиентов по давности, частоте и выручке."},
+    "shelf_forecast": {"title": "Прогноз стеллажа", "method": "GET",
+                       "path": "/api/shelf/forecast", "params": ("days",),
+                       "confirm": False,
+                       "doc": "Какие позиции закончатся при текущем темпе продаж."},
+    "frozen_capital": {"title": "Замороженный капитал", "method": "GET",
+                       "path": "/api/nomenclature/frozen-capital", "params": (),
+                       "confirm": False,
+                       "doc": "Деньги, замороженные в остатках готовой продукции."},
+    "filament_forecast": {"title": "Прогноз пластика", "method": "GET",
+                          "path": "/api/nomenclature/filament-forecast", "params": (),
+                          "confirm": False,
+                          "doc": "Потребность в материалах по производственному плану."},
+    "anomalies": {"title": "Аномалии производства", "method": "GET",
+                  "path": "/api/analytics/anomalies", "params": (),
+                  "confirm": False,
+                  "doc": "Отклонения производства, требующие внимания владельца."},
+    "smart_queue": {"title": "Умная очередь", "method": "GET",
+                    "path": "/api/analytics/smart-queue", "params": (),
+                    "confirm": False,
+                    "doc": "Рекомендации по очереди печати и загрузке парка."},
+    "cash_daily": {"title": "Деньги по дням", "method": "GET",
+                   "path": "/api/cash-daily", "params": (),
+                   "confirm": False,
+                   "doc": "Дневной денежный поток для оперативного анализа."},
     # --- станок: печать, поэтому только через «Подтвердить»
     "printer_command": {"title": "Команда станку", "method": "POST",
                         "path": "/api/printer/command",
@@ -573,6 +609,22 @@ ACTIONS: dict[str, dict[str, Any]] = {
     "shelf_sale": {"title": "Продажа с полки", "method": "POST",
                    "path": "/api/shelf/sale", "params": ("item_id", "qty"),
                    "confirm": True, "doc": "Быстрая продажа позиции стеллажа."},
+    "shelf_transfer_in": {"title": "Перенести на стеллаж", "method": "POST",
+                          "path": "/api/shelf/transfer",
+                          "params": ("nom_id", "warehouse_id", "qty", "item_id",
+                                     "note", "variant_id"),
+                          "confirm": True,
+                          "doc": "Явное перемещение готового товара со склада в retail-регистр."},
+    "shelf_transfer_out": {"title": "Вернуть со стеллажа на склад", "method": "POST",
+                           "path": "/api/shelf/transfer-to-stock",
+                           "params": ("item_id", "warehouse_id", "qty", "note"),
+                           "confirm": True,
+                           "doc": "Явное обратное перемещение из retail-регистра на склад."},
+    "shelf_inventory": {"title": "Инвентаризация стеллажа", "method": "POST",
+                        "path": "/api/shelf/inventory",
+                        "params": ("item_id", "actual", "note"),
+                        "confirm": True,
+                        "doc": "Зафиксировать фактический остаток позиции и расхождение."},
     "settings_save": {"title": "Изменить настройки", "method": "POST",
                       "path": "/api/settings", "params": ("patch",),
                       "confirm": True,
@@ -583,12 +635,64 @@ ACTIONS: dict[str, dict[str, Any]] = {
 # физический станок. Чтение в журнал не пишется вовсе — иначе лента утонет.
 CONFIRMED_ACTIONS = tuple(name for name, action in ACTIONS.items() if action["confirm"])
 
+# v19: UI и Luma получают не только URL, но и бизнес-смысл действия.
+# Метаданные не дают модели дополнительных прав: исполнение по-прежнему
+# использует только ACTIONS, а confirmation берётся с сервера.
+_ACTION_DOMAIN = {
+    "park": "production", "pult": "production", "queue": "production",
+    "plan": "production", "printer_command": "production",
+    "job_start": "production", "job_cancel": "production",
+    "orders": "orders", "order_save": "orders", "order_status": "orders",
+    "order_fulfill": "orders", "messages": "customers", "clients": "customers",
+    "client_rfm": "customers", "finance": "finance", "insights": "analytics",
+    "debts": "finance", "cash_daily": "finance", "anomalies": "analytics",
+    "smart_queue": "analytics", "stock": "inventory", "warehouses": "inventory",
+    "frozen_capital": "inventory", "filament_forecast": "inventory",
+    "shelf": "retail", "shelf_forecast": "retail", "shelf_sale": "retail",
+    "shelf_transfer_in": "retail", "shelf_transfer_out": "retail",
+    "shelf_inventory": "retail", "diagnostics": "system",
+    "settings_save": "system", "search": "global",
+}
+_ACTION_REVERSIBLE = {
+    "printer_command": False, "job_start": False, "job_cancel": False,
+    "order_fulfill": False, "shelf_sale": False,
+    "settings_save": True, "order_save": True, "order_status": True,
+    "shelf_transfer_in": True, "shelf_transfer_out": True,
+    "shelf_inventory": True,
+}
+_ACTION_VERIFY = {
+    "printer_command": "printer_state",
+    "job_start": "job_state",
+    "job_cancel": "job_state",
+    "order_save": "order_readback",
+    "order_status": "order_readback",
+    "order_fulfill": "order_readback",
+    "shelf_sale": "shelf_readback",
+    "shelf_transfer_in": "shelf_and_stock_readback",
+    "shelf_transfer_out": "shelf_and_stock_readback",
+    "shelf_inventory": "shelf_and_stock_readback",
+    "settings_save": "settings_readback",
+}
+
+
+def action_contract(name: str, action: dict[str, Any]) -> dict[str, Any]:
+    """Stable v19 business contract consumed by Nozza/Luma and the new panel."""
+    method = str(action.get("method") or "GET").upper()
+    confirm = bool(action.get("confirm"))
+    return {
+        "domain": _ACTION_DOMAIN.get(name, "global"),
+        "risk": "read" if method == "GET" else ("physical" if name.startswith(("printer_", "job_")) else "write"),
+        "reversible": bool(_ACTION_REVERSIBLE.get(name, method == "GET")),
+        "verification": _ACTION_VERIFY.get(name, "readback" if method == "GET" else "audit"),
+        "confirm": confirm,
+    }
+
 
 def actions_payload() -> list[dict[str, Any]]:
     """Каталог для панели: без внутренних полей, с явным признаком подтверждения."""
     return [{"id": name, "title": action["title"], "method": action["method"],
              "path": action["path"], "params": list(action["params"]),
-             "confirm": bool(action["confirm"]), "doc": action["doc"]}
+             "doc": action["doc"], **action_contract(name, action)}
             for name, action in ACTIONS.items()]
 
 
@@ -685,7 +789,8 @@ _CATALOG_RE = re.compile(
     r"пауз|возобнов|продолж|запусти|отмен|продай|выдай|смени статус|"
     r"останови|стоп|сохрани|поставь|"
     r"парк|станк|принтер|печат|заказ|долг|касс|полк|стеллаж|"
-    r"очеред|план|клиент|финанс|пульт|диагност|настройк",
+    r"очеред|план|клиент|финанс|пульт|диагност|настройк|склад|остат|витрин|"
+    r"прогноз|аномал|очередь|дебитор|rfm",
     re.IGNORECASE)
 
 # В веб идут только действительно свежие факты. «Сегодня», «сейчас», «курс»,
