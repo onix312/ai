@@ -843,24 +843,34 @@
  <div class="view-head">
   <div><span class="eyebrow">Номенклатура · учёт 3.0</span><h1>Товары</h1><p>Модель, остаток по складам, цены и экономика — одной карточкой.</p></div>
   <div class="head-actions">
-   <select id="prod_warehouse" title="Склад"><option value="">Все склады</option></select>
-   <button class="btn" id="prod_recalc" type="button" title="Пересчитать цены от себестоимости">↻ Цены</button>
    <button class="btn" id="prod_plan_btn" type="button">⚑ План пополнения</button>
-   <button class="btn" id="prod_sale_btn" type="button">💰 Продажа</button>
    <button class="btn primary" id="prod_add" type="button">+ Товар</button>
+   <details class="view-options">
+    <summary class="btn">Ещё ▾</summary>
+    <div class="view-options-pop">
+     <button class="btn ghost" id="prod_sale_btn" type="button">💰 Ручная продажа</button>
+     <button class="btn ghost" id="prod_recalc" type="button" title="Пересчитать цены от себестоимости">↻ Пересчитать цены</button>
+    </div>
+   </details>
   </div>
  </div>
  <div class="kpi-grid" id="prod_kpis"></div>
- <div class="toolbar">
+ <div class="toolbar v19-products-toolbar">
   <div class="search-box"><input id="prod_search" type="search" placeholder="Название, артикул, код, штрихкод…"></div>
+  <select id="prod_warehouse" title="Склад"><option value="">Все склады</option></select>
   <select id="prod_group"><option value="">Все группы</option></select>
   <select id="prod_kind"><option value="">Все виды</option><option value="product">Товар</option><option value="semi">Полуфабрикат</option><option value="kit">Комплект</option><option value="material">Материал</option><option value="service">Услуга</option><option value="showcase">Для магазина</option></select>
   <select id="prod_status"><option value="">Любой статус</option><option value="low">Мало</option><option value="empty">Кончился</option><option value="dead">Мёртвый сток</option><option value="unprofitable">Убыточные</option></select>
   <select id="prod_sort" title="Сортировка плиток"><option value="">Порядок по умолчанию</option><option value="margin">По марже</option><option value="sold7">По продажам 7 дн.</option><option value="days">Кончается первым</option><option value="price">По цене</option></select>
-  <button class="btn sm ghost" id="prod_shelf3d" type="button" title="Витрина-полка в перспективе (В59)"><i data-icon="bag">📦</i> Полка 3D</button>
-  <select class="btn sm ghost" id="prod_season" title="Сезон витрины — лента на публичных страницах (В67)" style="height:32px"><option value="none">Без сезона</option><option value="newyear">Новый год</option><option value="spring">8 Марта</option><option value="autumn">Осень</option></select>
-  <button class="btn sm ghost" id="prod_shop_eye" type="button" title="Плитки как их видит покупатель в боте: фото, цена, скрытые"><i data-icon="eye">👁</i> Витрина</button>
   <div class="seg" id="prod_view"><button data-mode="cards" class="on">Плитки</button><button data-mode="table">Таблица</button></div>
+  <details class="v19-prod-merch">
+   <summary class="btn sm">Витрина ▾</summary>
+   <div class="v19-prod-merch-pop">
+    <button class="btn sm ghost" id="prod_shelf3d" type="button" title="Витрина-полка в перспективе (В59)"><i data-icon="bag">📦</i> Полка 3D</button>
+    <select class="btn sm ghost" id="prod_season" title="Сезон витрины — лента на публичных страницах (В67)"><option value="none">Без сезона</option><option value="newyear">Новый год</option><option value="spring">8 Марта</option><option value="autumn">Осень</option></select>
+    <button class="btn sm ghost" id="prod_shop_eye" type="button" title="Плитки как их видит покупатель в боте: фото, цена, скрытые"><i data-icon="eye">👁</i> Как видит покупатель</button>
+   </div>
+  </details>
  </div>
  <div class="toolbar-alerts" id="prod_warn_badge" hidden></div>
  <div class="prod-grid" id="prod_grid"></div>
