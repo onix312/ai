@@ -343,9 +343,27 @@ class Shelf:
         if not data.get("id"):
             data["id"] = uid("shf")
         item_id = str(data["id"])
+        existing = None if new else self.db.one(
+            "SELECT * FROM shelf_items WHERE id=?", (item_id,))
+        if not new and not existing:
+            raise ValueError("Позиция стеллажа не найдена")
         if not str(data.get("name") or "").strip():
             raise ValueError("Укажите название позиции")
         data["name"] = str(data["name"]).strip()[:200]
+
+        # v19: остаток — результат движений, а не редактируемое свойство карточки.
+        # Старые клиенты всё ещё могут прислать qty при сохранении. Для существующей
+        # позиции разрешаем только то же значение и выбрасываем поле из upsert.
+        # Новую позицию создаём с нулём, а запрошенный стартовый остаток ниже
+        # оформляем отдельным inventory-движением — история остаётся проверяемой.
+        qty_supplied = "qty" in data
+        requested_qty = round(num(data.pop("qty", 0)), 2) if qty_supplied else 0.0
+        if existing is not None and qty_supplied:
+            current_qty = round(num(existing.get("qty")), 2)
+            if abs(requested_qty - current_qty) > 1e-9:
+                raise ValueError(
+                    "Остаток нельзя менять в карточке. Используйте приход, "
+                    "перемещение или инвентаризацию.")
 
         # Если позиция выбрана из старого каталога, сразу запоминаем canonical id.
         # Штрихкод при этом остаётся «живым»: пока в полке он пуст, берём его из
@@ -404,21 +422,51 @@ class Shelf:
 
         if new:
             data.setdefault("created_at", now_iso())
+            data["qty"] = 0.0
         data["updated_at"] = now_iso()
-        for key in ("qty", "price", "cost_per_unit", "min_qty", "tag_old_price"):
+        for key in ("price", "cost_per_unit", "min_qty", "tag_old_price"):
             if key in data:
                 data[key] = round(num(data[key]), 2)
         if "tag_old_price" in data:
             data["tag_old_price"] = max(0.0, data["tag_old_price"])
         row = self.db.upsert("shelf_items", data)
+
+        # Совместимость старых импортов: стартовый остаток новой позиции
+        # принимаем, но проводим как отдельную инвентаризационную операцию.
+        if new and requested_qty:
+            if requested_qty < 0:
+                raise ValueError("Начальный остаток не может быть отрицательным")
+            note = "Начальный остаток позиции"
+            with self.db.transaction():
+                self._move(item_id, "inventory", requested_qty, note=note)
+                self._register_leg(row, "inventory", requested_qty, note,
+                                   unit_cost=num(row.get("cost_per_unit")),
+                                   check_free=False)
+            row = self.db.one("SELECT * FROM shelf_items WHERE id=?", (item_id,)) or row
+
         self.db.add_event("shelf", "Позиция стеллажа создана" if new else "Позиция стеллажа изменена",
                           row.get("name") or "", data={"item_id": row["id"]})
         return self._with_cashier_data(row)
 
     def delete_item(self, item_id: str) -> None:
+        """Архивировать позицию, сохранив продажи, движения и ссылки аудита."""
         if not item_id:
             raise ValueError("Не указана позиция")
-        self.db.delete("shelf_items", item_id)
+        item = self.db.one("SELECT * FROM shelf_items WHERE id=?", (item_id,))
+        if not item:
+            raise ValueError("Позиция стеллажа не найдена")
+        if num(item.get("qty")):
+            raise ValueError(
+                "Нельзя архивировать позицию с остатком. Сначала перенесите, "
+                "спишите или проинвентаризируйте товар.")
+        with self.db.transaction():
+            self.db.execute(
+                "UPDATE shelf_items SET active=0, updated_at=? WHERE id=?",
+                (now_iso(), item_id))
+            self.db.execute("DELETE FROM shelf_group_members WHERE item_id=?", (item_id,))
+        self.db.add_event(
+            "shelf", "Позиция стеллажа архивирована",
+            item.get("name") or "", data={"item_id": item_id})
 
     # ------------------------------------------------------------ движения
     def moves(self, item_id: str = "", limit: int = 100) -> list[dict]:
@@ -885,7 +933,14 @@ class Shelf:
         qty = sum(num(i["qty"]) for i in items)
         value = sum(num(i["stock_value"]) for i in items)
         sold7 = sum(num(i["sold_7"]) for i in items)
-        sold7_money = sum(num(i["sold_7"]) * num(i["price"]) for i in items)
+        since7 = (datetime.now() - timedelta(days=SALE_DAYS)).isoformat()
+        money_row = self.db.one(
+            "SELECT COALESCE(SUM(-qty*price),0) v FROM shelf_moves"
+            " WHERE kind IN ('sale','online') AND qty<0"
+            " AND COALESCE(undone,0)=0 AND at>=?", (since7,)) or {}
+        # v19: историческая выручка берётся из фактических строк продаж,
+        # а не из количества, умноженного на сегодняшнюю цену карточки.
+        sold7_money = num(money_row.get("v"))
         dead = [i for i in items if i["dead"]]
         low = [i for i in items if i["low"]]
         plan = sum(int(num(i["plan_qty"])) for i in items)
