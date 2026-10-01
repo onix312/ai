@@ -50,7 +50,7 @@
    <button class="nav-link pf-ai-nav" id="pf_ai_nav" type="button" data-find="printflow ai помощник ассистент модель ollama разговор голос действия" aria-expanded="false"><span class="pf-ai-nav-orb" aria-hidden="true"></span><span>PrintFlow AI</span><span class="tag live">AI</span></button>
   </div>
   <div class="nav-group">
-   <details class="nav-more" id="nav_more"><summary class="nav-group-title">Все разделы</summary>
+   <details class="nav-more" id="nav_more"><summary class="nav-group-title">Инструменты и система</summary>
     <div class="nav-more-section">
      <a class="nav-link nav-link-ext" href="/control.html" data-find="пульт цеха телефон планшет парк принтеров очередь ams камера киоск"><span class="ic" data-icon="layout">▤</span><span>Пульт цеха</span><small>страница →</small></a>
      <a class="nav-link" href="#conveyor" data-view="conveyor" data-find="конвейер farmloop farm loop снятие детали серия цикл допуск датчик камера автоматика"><span class="ic" data-icon="refresh">↻</span>Конвейер</a>
@@ -58,12 +58,10 @@
      <a class="nav-link" href="#calc" data-view="calc" data-find="калькулятор цена себестоимость наценка"><span class="ic" data-icon="calculator">⌁</span>Калькулятор</a>
      <a class="nav-link" href="#niches" data-view="niches" data-find="ниша гипотеза спрос конверсия прибыль тест"><span class="ic" data-icon="target">◫</span>Ниши</a>
      <a class="nav-link nav-link-featured" href="#print" data-view="print" data-find="печать формы ценники стикеры наклейки таблички визитки гарантия отчёт бланк штрихкод бумага"><span class="ic" data-icon="page">▤</span>Печатные формы</a>
-     <a class="nav-link nav-link-ext" href="/sbp.html" data-find="сбп входящие qr платёж оплата банк"><span class="ic" data-icon="qr">▦</span>СБП · входящие</a>
-     <a class="nav-link nav-link-ext" href="/cashier.html" data-find="касса мобильная продажа телефон чек выручка"><span class="ic" data-icon="cart">🛒</span>Мобильная касса</a>
-     <a class="nav-link nav-link-ext" href="/bank.html" data-find="банк поступления выписка сопоставление"><span class="ic" data-icon="bank">▤</span>Банк</a>
      <a class="nav-link" href="#clientbot" data-view="clientbot" data-find="клиентский бот telegram покупатель витрина заказ статус каталог"><span class="ic" data-icon="send">✈</span>Клиент-бот</a>
      <a class="nav-link" href="#library" data-view="library" data-find="библиотека инструкция faq помощь материалы чеклист"><span class="ic" data-icon="book">▤</span>Библиотека</a>
      <a class="nav-link" href="#pages" data-view="pages" data-find="страницы хаб касса трек полка tv ярлыки ценники ссылки qr телефоны lan"><span class="ic" data-icon="grid">▦</span>Страницы</a>
+     <a class="nav-link" href="#system-map" data-view="system-map" data-find="карта системы graph функции модули возможности ai схема"><span class="ic" data-icon="hexagon">◆</span>Карта системы</a>
      <a class="nav-link" href="#settings" data-view="settings" data-find="настройки налог тема облако telegram тариф данные касса сбп банк"><span class="ic" data-icon="sliders">⚙</span>Настройки</a>
     </div>
    </details>
@@ -535,6 +533,12 @@
   <div><span class="eyebrow">Производство</span><h1>Очередь печати</h1><p>Общая очередь на весь парк: задания стартуют вручную или автоматически.</p></div>
   <div class="head-actions"><label class="check"><span class="switch"><input type="checkbox" id="queue_auto"><i></i></span>Автозапуск</label><button class="btn" id="queue_next" type="button">▶ Запустить следующее</button><button class="btn primary" id="queue_add" type="button">+ Задание</button></div>
  </div>
+ <div class="v19-queue-pulse" id="queue_pulse" role="group" aria-label="Состояние очереди">
+  <button type="button" class="on" data-queue-pulse="all"><span>Всего</span><b id="queue_pulse_all">0</b></button>
+  <button type="button" data-queue-pulse="active"><span>Печатаются</span><b id="queue_pulse_active">0</b></button>
+  <button type="button" data-queue-pulse="queued"><span>Ожидают</span><b id="queue_pulse_queued">0</b></button>
+  <button type="button" data-queue-pulse="unassigned"><span>Без принтера</span><b id="queue_pulse_unassigned">0</b></button>
+ </div>
  <div class="toolbar queue-toolbar">
   <div class="search-box"><input id="queue_search" type="search" placeholder="Задание, файл, принтер, заказ…" autocomplete="off"></div>
   <div class="seg" id="queue_search_mode" role="group" aria-label="Где искать">
@@ -634,7 +638,7 @@
   <div><h2>База клиентов</h2><p>Фильтруйте сегменты или найдите человека по имени, контакту и компании.</p></div>
   <div class="toolbar"><div class="search-box"><input id="customers_search" type="search" placeholder="Имя, телефон, мессенджер…" aria-label="Найти клиента"></div></div>
  </div>
- <div class="table-wrap customers-table"><table class="data"><thead><tr><th>Клиент</th><th>Связь</th><th class="right">Заказов</th><th class="right">Выручка</th><th>Последний заказ</th><th>Сегмент</th><th>NOZZA 8.5</th></tr></thead><tbody id="customers_tbody"></tbody></table></div>
+ <div class="table-wrap customers-table"><table class="data"><thead><tr><th>Клиент</th><th>Связь</th><th class="right">Заказов</th><th class="right">Выручка</th><th>Последний заказ</th><th>Сегмент</th><th>Кабинет</th></tr></thead><tbody id="customers_tbody"></tbody></table></div>
 </section>
 
 <!-- ================================================== ФИНАНСЫ -->
@@ -716,6 +720,16 @@
    <div class="card v19-fin-summary-card">
     <div class="card-head"><div><span class="eyebrow">Период</span><h2>Результат бизнеса</h2><p id="fin_result_sub">Текущий месяц и выбранный период</p></div></div>
     <div id="fin_result"></div>
+   </div>
+  </div>
+
+  <div class="card v19-fin-sources" style="margin-top:16px">
+   <div class="card-head">
+    <div><span class="eyebrow">Каналы денег</span><h2>Банк, СБП и касса</h2><p>Сверка входящих и состояние кассы без перехода между отдельными экранами.</p></div>
+    <button class="btn sm ghost" id="fin_sources_refresh" type="button">↻</button>
+   </div>
+   <div class="v19-fin-source-grid" id="fin_sources">
+    <div class="v19-fin-source skel"></div><div class="v19-fin-source skel"></div><div class="v19-fin-source skel"></div>
    </div>
   </div>
 
@@ -4013,6 +4027,42 @@
  </div>
 </section>
 
+<section class="view" id="view-system-map">
+ <div class="view-head">
+  <div><span class="eyebrow">Архитектура продукта · функции</span><h1>Карта системы</h1><p>Все основные контуры PrintFlow и то, как локальный AI работает с каждым из них.</p></div>
+  <div class="head-actions"><button class="btn" id="system_map_ai" type="button">Открыть PrintFlow AI</button></div>
+ </div>
+
+ <div class="v19-map-root">
+  <div class="v19-map-core">
+   <span class="pf-brand-mark" aria-hidden="true"></span>
+   <div><b>PrintFlow</b><small>единый источник состояния производства</small></div>
+   <span class="v19-map-core-ai">AI через весь контур</span>
+  </div>
+
+  <div class="v19-map-grid">
+   <a class="v19-map-node primary" href="#dashboard" data-view="dashboard"><span class="v19-map-kicker">01 · управление</span><b>Сегодня</b><p>Состояние цеха, срочные действия, сроки, KPI и AI-брифинг.</p><small>AI: объяснить день · найти проблему · предложить следующий шаг</small></a>
+   <a class="v19-map-node primary" href="#orders" data-view="orders"><span class="v19-map-kicker">02 · продажи</span><b>Заказы</b><p>Заявка → оценка → оплата → производство → выдача → aftercare.</p><small>AI: найти заказ · объяснить статус · подготовить/выполнить действие</small></a>
+   <a class="v19-map-node primary" href="#printers" data-view="printers"><span class="v19-map-kicker">03 · производство</span><b>Принтеры</b><p>Парк, печать, камера, AMS, preflight, телеметрия, ТО и recovery.</p><small>AI: диагностика · pause/resume/stop с policy · контекст станка</small></a>
+   <a class="v19-map-node primary" href="#queue" data-view="queue"><span class="v19-map-kicker">04 · производство</span><b>Очередь</b><p>Приоритеты, назначение станка, запуск, журнал и история задания.</p><small>AI: объяснить очередь · найти блокировку · управлять заданиями</small></a>
+   <a class="v19-map-node primary" href="#products" data-view="products"><span class="v19-map-kicker">05 · учёт</span><b>Склад</b><p>Номенклатура, склады, стеллаж, катушки, резервы, движение и закупки.</p><small>AI: остатки · перемещения · инвентаризация · дефицит материалов</small></a>
+   <a class="v19-map-node primary" href="#customers" data-view="customers"><span class="v19-map-kicker">06 · CRM</span><b>Клиенты</b><p>История заказов, контакты, сегменты, B2B, документы и aftercare.</p><small>AI: история клиента · поиск · подготовка ответа и следующего шага</small></a>
+   <a class="v19-map-node primary" href="#finance" data-view="finance"><span class="v19-map-kicker">07 · деньги</span><b>Финансы</b><p>Кассы, банк, СБП, долги, P&amp;L, налоги, отчёты и закрытие месяца.</p><small>AI: объяснить цифры · найти долг/аномалию · подготовить действие</small></a>
+   <a class="v19-map-node" href="#calc" data-view="calc"><span class="v19-map-kicker">08 · экономика</span><b>Калькулятор и ниши</b><p>Себестоимость, цена, прибыль/час и проверка товарных гипотез.</p><small>AI: расчёт и объяснение исходных данных</small></a>
+   <a class="v19-map-node" href="#print" data-view="print"><span class="v19-map-kicker">09 · инструменты</span><b>Печатные формы</b><p>Ценники, этикетки, QR, листовки, документы и материалы для точки.</p><small>AI: выбрать форму · подготовить данные и текст</small></a>
+   <a class="v19-map-node" href="#clientbot" data-view="clientbot"><span class="v19-map-kicker">10 · каналы</span><b>Клиент-бот</b><p>Telegram-витрина, заявки, статусы, оплата, уведомления и отзывы.</p><small>AI: контекст заказа и клиентской коммуникации</small></a>
+   <a class="v19-map-node" href="#pages" data-view="pages"><span class="v19-map-kicker">11 · терминалы</span><b>LAN-страницы</b><p>Касса, СБП, банк, TV, track, staff и другие специализированные режимы.</p><small>Не основные вкладки: отдельные рабочие поверхности по роли</small></a>
+   <a class="v19-map-node" href="#settings" data-view="settings"><span class="v19-map-kicker">12 · система</span><b>Настройки</b><p>Bambu, сеть, тарифы, склад, налоги, касса, боты, backup и automation.</p><small>AI: объяснить настройку · изменить разрешённые параметры с readback</small></a>
+  </div>
+
+  <div class="v19-map-ai">
+   <div class="v19-map-ai-orb" aria-hidden="true"></div>
+   <div><span class="eyebrow">сквозной слой</span><h2>PrintFlow AI</h2><p>Видит текущий экран и выбранную сущность. Цикл: <b>read → plan → act → verify</b>. Запись проходит через каталог разрешённых действий; физические и критичные операции сохраняют подтверждения и серверные safety-gates.</p></div>
+   <button class="btn primary" id="system_map_ai_bottom" type="button">Спросить AI</button>
+  </div>
+ </div>
+</section>
+
 <section class="view" id="view-settings">
  <div class="view-head">
   <div><span class="eyebrow">Система · параметры, парк и экономика</span><h1>Настройки</h1><p>Управление принтерами, шлюзом Bambu Studio, тарифами цеха, складом, ценами и автоматизацией.</p></div>
@@ -4028,8 +4078,10 @@
   <button type="button" data-set-shortcut="production"><span>◉</span><b>Цех</b><small>тарифы и смены</small></button>
   <button type="button" data-set-shortcut="storage"><span>🧵</span><b>Склад</b><small>пластик и списание</small></button>
   <button type="button" data-set-shortcut="pricing"><span>💰</span><b>Цены</b><small>наценка и налоги</small></button>
-  <button type="button" data-set-shortcut="business"><span>◈</span><b>Бизнес</b><small>реквизиты и кассы</small></button>
+  <button type="button" data-set-shortcut="business"><span>◈</span><b>Бизнес</b><small>реквизиты и счета</small></button>
+  <button type="button" data-set-shortcut="cashier"><span>▦</span><b>Касса</b><small>СБП и банк</small></button>
   <button type="button" data-set-shortcut="system"><span>⚙</span><b>Система</b><small>Telegram и бэкапы</small></button>
+  <button type="button" data-set-shortcut="all"><span>☷</span><b>Все</b><small>полный список</small></button>
  </div>
 
  <div class="seg tabs settings-tabs" id="set_tabs">
@@ -4276,7 +4328,7 @@
     <div id="set_sound" class="muted">Загружаем…</div>
    </div>
    <div class="card" data-set-card>
-    <div class="card-head"><div><h2>NOZZA tour — демо для гостей</h2><p>Виртуальный принтер и демо-данные; откат по одной кнопке</p></div></div>
+    <div class="card-head"><div><h2>PrintFlow tour — демо для гостей</h2><p>Виртуальный принтер и демо-данные; откат по одной кнопке</p></div></div>
     <div id="set_tour" class="muted">Проверяем состояние…</div>
    </div>
    <div class="card" data-set-card>
@@ -5102,7 +5154,7 @@
  <div class="modal-foot"><button class="btn" type="button" data-close="wishes_modal">Закрыть</button></div>
 </form></dialog>
 <dialog class="modal narrow" id="my_nozza_modal"><form method="dialog">
- <div class="modal-head"><div><span class="eyebrow">Мой NOZZA</span><h2 id="my_title">Страница клиента</h2><p>Код даёт заказчику доступ к статусу, фото и долгу без звонка.</p></div><button class="icon-btn" type="button" data-close="my_nozza_modal">×</button></div>
+ <div class="modal-head"><div><span class="eyebrow">Кабинет клиента</span><h2 id="my_title">Страница клиента</h2><p>Код даёт заказчику доступ к статусу, фото и долгу без звонка.</p></div><button class="icon-btn" type="button" data-close="my_nozza_modal">×</button></div>
  <div class="modal-body" style="text-align:center">
   <div id="my_qr" style="margin:8px auto;width:160px"></div>
   <div id="my_code" style="font-size:26px;font-weight:800;letter-spacing:4px;font-family:monospace"></div>
