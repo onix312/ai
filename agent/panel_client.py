@@ -188,12 +188,17 @@ class Client:
         return True, ""
 
     def actions(self) -> dict[str, Any]:
-        """Каталог действий панели: что ассистент может попросить у цеха."""
+        """Каталог Nozza для Luma: действия панели плюс v19 domain contracts."""
         state = self.status()
         if not state["alive"]:
-            return {"ok": False, "actions": [], "reason": state["reason"]}
+            return {"ok": False, "actions": [], "domains": {}, "reason": state["reason"]}
         rows = state["actions"]
-        return {"ok": True, "actions": rows, "reason": "",
+        domains: dict[str, list[str]] = {}
+        for row in rows:
+            domain = str(row.get("domain") or "global").strip() or "global"
+            domains.setdefault(domain, []).append(str(row.get("id") or ""))
+        return {"ok": True, "actions": rows, "domains": domains, "reason": "",
+                "contract_version": 2,
                 "count": len(rows),
                 "confirmed": sum(1 for row in rows if row.get("confirm")),
                 "reads": sum(1 for row in rows if not row.get("confirm"))}
