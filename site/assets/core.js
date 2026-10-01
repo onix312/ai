@@ -1073,7 +1073,7 @@ function showView(name, sub) {
   syncStockTabs(name);
   $('top_title').textContent = VIEWS[name].title;
   $('top_sub').textContent = VIEWS[name].sub;
-  document.title = `${VIEWS[name].title} · NOZZA`;
+  document.title = `${VIEWS[name].title} · PrintFlow 19`;
   resetViewScroll();
   closeSide();
   PF.emit('view', { view: name, sub });
