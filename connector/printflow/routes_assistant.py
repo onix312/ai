@@ -81,6 +81,17 @@ def assistant_intent(api: Any, ctx: Ctx):
     return service.parse_intent(api.db, str(ctx.arg("text") or ""))
 
 
+@router.post("/api/assistant/verify", doc="Nozza: проверить результат действия")
+def assistant_verify_action(api: Any, ctx: Ctx):
+    """Readback после действия Luma: только проверка, без повторного выполнения."""
+    from .assistant_verify import verify_action
+
+    body = ctx.body if isinstance(ctx.body, dict) else {}
+    params = body.get("params") if isinstance(body.get("params"), dict) else {}
+    result = body.get("result") if isinstance(body.get("result"), dict) else {}
+    return verify_action(api, str(body.get("action") or ""), params, result)
+
+
 @router.post("/api/assistant/journal", doc="Помощник: запись действия в журнал",
              audit="Помощник: запись в журнал")
 def assistant_journal(api: Any, ctx: Ctx):

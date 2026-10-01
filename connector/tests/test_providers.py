@@ -86,6 +86,75 @@ class PanelClientV19Tests(unittest.TestCase):
         self.assertEqual(2, payload["reads"])
 
 
+    def test_run_action_unwraps_order_draft_and_requests_verification(self):
+        client = Client()
+        action = {
+            "id": "order_save", "method": "POST", "path": "/api/order/save",
+            "confirm": True,
+        }
+        calls = []
+
+        def fake_request(url, payload=None, timeout=0, **kwargs):
+            calls.append((url, payload))
+            if url.endswith("/api/order/save"):
+                return True, {"ok": True, "order": {"id": "o1"}}, ""
+            if url.endswith("/api/assistant/verify"):
+                return True, {"ok": True, "verified": True, "state": "verified",
+                              "evidence": {"order_id": "o1"}}, ""
+            return False, None, "unexpected"
+
+        with patch("agent.panel_client._request", side_effect=fake_request):
+            result = client.run_action(
+                action, {"draft": {"id": "o1", "product": "Ваза"}}, confirmed=True)
+
+        self.assertTrue(result["ok"])
+        self.assertTrue(result["verified"])
+        self.assertEqual("o1", calls[0][1]["id"])
+        self.assertEqual("Ваза", calls[0][1]["product"])
+        self.assertNotIn("draft", calls[0][1])
+        self.assertEqual("order_save", calls[1][1]["action"])
+
+    def test_run_action_unwraps_settings_patch(self):
+        client = Client()
+        action = {
+            "id": "settings_save", "method": "POST", "path": "/api/settings",
+            "confirm": True,
+        }
+        calls = []
+
+        def fake_request(url, payload=None, timeout=0, **kwargs):
+            calls.append((url, payload))
+            if url.endswith("/api/settings"):
+                return True, {"ok": True, "settings": {"tax_rate": 6}}, ""
+            return True, {"ok": True, "verified": True, "state": "verified"}, ""
+
+        with patch("agent.panel_client._request", side_effect=fake_request):
+            client.run_action(action, {"patch": {"tax_rate": 6}}, confirmed=True)
+
+        self.assertEqual(6, calls[0][1]["tax_rate"])
+        self.assertNotIn("patch", calls[0][1])
+
+    def test_order_fulfill_maps_confirmation_to_handoff(self):
+        client = Client()
+        action = {
+            "id": "order_fulfill", "method": "POST", "path": "/api/order/fulfill",
+            "confirm": True,
+        }
+        calls = []
+
+        def fake_request(url, payload=None, timeout=0, **kwargs):
+            calls.append((url, payload))
+            if url.endswith("/api/order/fulfill"):
+                return True, {"ok": True, "order": {"id": "o1"}}, ""
+            return True, {"ok": True, "verified": True, "state": "verified"}, ""
+
+        with patch("agent.panel_client._request", side_effect=fake_request):
+            client.run_action(
+                action, {"id": "o1", "payment_action": "debt"}, confirmed=True)
+
+        self.assertTrue(calls[0][1]["handoff_confirmed"])
+        self.assertNotIn("confirmed", calls[0][1])
+
 class ProviderImplementationTests(unittest.TestCase):
     def test_printflow_provider_preserves_panel_action_confirmation_metadata(self):
         provider = registry.for_skill("panel.do")
