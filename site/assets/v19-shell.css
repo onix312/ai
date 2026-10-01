@@ -1062,6 +1062,62 @@
     .v19-fin-source-grid { grid-template-columns: minmax(0,1fr); }
   }
 
+  /* Queue: operator pulse before detailed list. */
+  .v19-queue-pulse {
+    display: grid;
+    grid-template-columns: repeat(4,minmax(0,1fr));
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+  .v19-queue-pulse button {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    min-height: 54px;
+    padding: 10px 12px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: var(--panel);
+    color: var(--text-2);
+    text-align: left;
+  }
+  .v19-queue-pulse button:hover { border-color: var(--pf-accent-line); }
+  .v19-queue-pulse button.on {
+    border-color: var(--pf-accent-line);
+    background: linear-gradient(120deg, var(--pf-accent-soft), var(--panel));
+    color: var(--text);
+  }
+  .v19-queue-pulse span { color: var(--muted); font-size: 10.5px; font-weight: 720; }
+  .v19-queue-pulse b { font-size: 20px; font-weight: 800; letter-spacing: -.04em; }
+  body.pf-v19 #view-queue #queue_filter { display: none; }
+  body.pf-v19 #view-queue .queue-toolbar {
+    margin-bottom: 12px;
+    background: var(--panel);
+  }
+
+  /* Settings: one navigation surface; legacy tab strip stays as hidden compatibility wiring. */
+  body.pf-v19 #view-settings .settings-tabs { display: none; }
+  body.pf-v19 #view-settings .settings-quicknav {
+    position: sticky;
+    top: 70px;
+    z-index: 17;
+    padding: 8px;
+    border: 1px solid var(--line);
+    border-radius: 13px;
+    background: color-mix(in srgb, var(--panel) 95%, transparent);
+    backdrop-filter: blur(10px);
+  }
+  body.pf-v19 #view-settings .settings-quicknav button {
+    min-height: 52px;
+    box-shadow: none;
+  }
+
+  @media (max-width: 760px) {
+    .v19-queue-pulse { grid-template-columns: repeat(2,minmax(0,1fr)); }
+    body.pf-v19 #view-settings .settings-quicknav { position: static; }
+  }
+
   /* Functional map of PrintFlow domains. */
   .v19-map-root { display: grid; gap: 16px; }
   .v19-map-core {
