@@ -70,6 +70,12 @@ function orderStaleDays(o) {
   if (!Number.isFinite(ms)) return 0;
   return Math.max(0, (Date.now() - ms) / 864e5);
 }
+function orderReady(o) {
+  if (!o || PF.isFinal(o)) return false;
+  const st = PF.status(o.status) || {};
+  const name = String(st.name || '').toLowerCase();
+  return String(o.status || '').toLowerCase() === 'ready' || name.includes('готов');
+}
 function boardCompare() {
   if (filters.sort === 'due') {
     return (a, b) => {
@@ -101,6 +107,7 @@ function filtered() {
       if (new Date(o.due + 'T23:59:59').getTime() - Date.now() > 3 * 864e5) return false;
     }
     if (filters.extra === 'nodue' && (o.due || PF.isFinal(o))) return false;
+    if (filters.extra === 'ready' && !orderReady(o)) return false;
     if (filters.extra === 'debt' && !(orderDebt(o) > 0)) return false;
     if (filters.extra === 'stale' && (PF.isFinal(o) || orderStaleDays(o) < 7)) return false;
     if (!q) return true;
@@ -116,6 +123,7 @@ function filtered() {
 const PRESET_VIEWS = [
   { id: 'all', name: 'Все заказы', f: {} },
   { id: 'hot', name: 'Горящее · 3 дня', f: { extra: 'hot', sort: 'due' } },
+  { id: 'ready', name: 'Готовы к выдаче', f: { extra: 'ready', sort: 'due' } },
   { id: 'nodue', name: 'Без срока', f: { extra: 'nodue', sort: 'stale' } },
   { id: 'debt', name: 'Должники', f: { extra: 'debt', sort: 'debt' } },
   { id: 'stale', name: 'Забытые · 7+ дней', f: { extra: 'stale', sort: 'stale' } },
@@ -163,8 +171,9 @@ function syncFilterControls() {
   if (sort) sort.value = filters.sort;
   const extraLabel = document.querySelector('#orders_more_filters > summary');
   if (extraLabel) {
-    const count = Number(!!filters.niche) + Number(!!filters.chan) + Number(filters.sort !== 'new');
-    extraLabel.textContent = count ? `Доп. фильтры · ${count}` : 'Доп. фильтры';
+    const count = Number(!!filters.status) + Number(!!filters.niche) + Number(!!filters.chan)
+      + Number(filters.sort !== 'new') + Number(PF.orderBox === 'archived');
+    extraLabel.textContent = count ? `Фильтры и архив · ${count}` : 'Фильтры и архив';
   }
   const ps = $('orders_preset');
   if (ps && activePreset !== '__save') {
@@ -210,6 +219,33 @@ function touchCustomPreset() {
     activePreset = hit ? hit.id : activePreset;
   }
   syncFilterControls();
+}
+
+function renderOrderPulse() {
+  const host = $('orders_pulse');
+  if (!host) return;
+  const source = PF.state.orders || [];
+  const active = source.filter((o) => !PF.isFinal(o));
+  const hot = active.filter((o) => {
+    if (!o.due) return false;
+    return new Date(o.due + 'T23:59:59').getTime() - Date.now() <= 3 * 864e5;
+  });
+  const ready = active.filter(orderReady);
+  const debt = source.filter((o) => orderDebt(o) > 0);
+  const stale = active.filter((o) => orderStaleDays(o) >= 7);
+  const set = (id, value) => { const el = $(id); if (el) el.textContent = String(value); };
+  set('orders_pulse_all', active.length);
+  set('orders_pulse_hot', hot.length);
+  set('orders_pulse_ready', ready.length);
+  set('orders_pulse_debt', debt.length);
+  set('orders_pulse_stale', stale.length);
+  host.querySelectorAll('[data-order-pulse]').forEach((button) => {
+    button.classList.toggle('on',
+      PF.orderBox !== 'archived' && presetMatchesFilters(button.dataset.orderPulse || 'all'));
+  });
+  host.querySelector('[data-order-pulse="hot"]')?.classList.toggle('alert', hot.length > 0);
+  host.querySelector('[data-order-pulse="debt"]')?.classList.toggle('warn', debt.length > 0);
+  host.querySelector('[data-order-pulse="stale"]')?.classList.toggle('warn', stale.length > 0);
 }
 
 /* ============================================================== канбан */
@@ -544,6 +580,7 @@ function renderTable(list) {
 
 function renderOrders() {
   const archived = PF.orderBox === 'archived';
+  renderOrderPulse();
   const source = ordersSource();
   const list = filtered();
   const viewName = ([...PRESET_VIEWS, ...customViews()].find((v) => v.id === activePreset) || {}).name || '';
@@ -3707,6 +3744,13 @@ function bind() {
       await PF.refreshCore();
       renderOrders();
     } catch (e) { fail(e); }
+  });
+  const pulse = $('orders_pulse');
+  if (pulse) pulse.addEventListener('click', async (e) => {
+    const button = e.target.closest('[data-order-pulse]');
+    if (!button) return;
+    if (PF.orderBox === 'archived') await setOrderBox('');
+    applyPreset(button.dataset.orderPulse || 'all');
   });
   $('orders_search').addEventListener('input', debounce((e) => { filters.q = e.target.value; boardExpanded = new Set(); renderOrders(); }, 180));
   // 13.1 (33): компактные карточки канбана
