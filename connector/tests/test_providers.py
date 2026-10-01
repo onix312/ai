@@ -20,6 +20,9 @@ class ProviderRegistryTests(unittest.TestCase):
         self.assertEqual("browser", registry.for_skill("browser.page").spec.name)
         self.assertEqual("desktop", registry.for_skill("desktop.observe").spec.name)
         self.assertEqual("printflow", registry.for_skill("panel.ask").spec.name)
+        self.assertEqual("printflow", registry.for_skill("printflow.context").spec.name)
+        self.assertEqual("printflow", registry.for_skill("printflow.read").spec.name)
+        self.assertEqual("printflow", registry.for_skill("printflow.act").spec.name)
         self.assertEqual("printflow", registry.for_skill("day.summary").spec.name)
         self.assertEqual("personal", registry.for_skill("reminder.list").spec.name)
         self.assertEqual("personal", registry.for_skill("habit.add").spec.name)
@@ -64,6 +67,10 @@ class ProviderRegistryTests(unittest.TestCase):
         panel_skills = {row["name"]: row for row in by_name["printflow"]["skills"]}
         self.assertTrue(panel_skills["panel.do"]["danger"])
         self.assertTrue(panel_skills["panel.do"]["confirm"])
+        self.assertEqual("read", panel_skills["printflow.read"]["risk"])
+        self.assertFalse(panel_skills["printflow.read"]["confirm"])
+        self.assertTrue(panel_skills["printflow.act"]["danger"])
+        self.assertTrue(panel_skills["printflow.act"]["confirm"])
 
 
 class ProviderImplementationTests(unittest.TestCase):
@@ -89,6 +96,54 @@ class ProviderImplementationTests(unittest.TestCase):
         self.assertTrue(result["confirmed"])
         self.assertEqual("Пауза очереди", result["title_action"])
         self.assertEqual("поставить очередь на паузу", result["target"])
+
+    def test_v19_printflow_read_cannot_execute_write_action(self):
+        provider = registry.for_skill("printflow.read")
+
+        class Panel:
+            def run_domain_action(self, name, values, read_only=False):
+                self.call = (name, values, read_only)
+                return {"ok": False, "reason": "write blocked"}
+
+        panel = Panel()
+        runner = type("RunnerStub", (), {"panel": panel})()
+        result = provider.run("printflow.read", {
+            "action": "shelf.transfer_in",
+            "params": {"qty": 2},
+        }, runner)
+        self.assertFalse(result["ok"])
+        self.assertEqual(("shelf.transfer_in", {"qty": 2}, True), panel.call)
+
+    def test_v19_printflow_act_preserves_inner_confirmation_metadata(self):
+        provider = registry.for_skill("printflow.act")
+
+        class Panel:
+            def find_domain_action(self, name):
+                return {
+                    "id": name,
+                    "title": "Перенести на стеллаж",
+                    "confirm": True,
+                }, ""
+
+            def run_domain_action(self, name, values, confirmed=False, read_only=False):
+                return {
+                    "ok": True,
+                    "domain_action": name,
+                    "confirmed": confirmed,
+                    "read_only": read_only,
+                    "values": values,
+                }
+
+        runner = type("RunnerStub", (), {"panel": Panel()})()
+        result = provider.run("printflow.act", {
+            "action": "shelf.transfer_in",
+            "params": {"qty": 2},
+            "explain": "перенести две штуки на стеллаж",
+        }, runner)
+        self.assertTrue(result["ok"])
+        self.assertTrue(result["confirmed"])
+        self.assertFalse(result["read_only"])
+        self.assertEqual("перенести две штуки на стеллаж", result["target"])
 
     def test_personal_provider_delegates_only_to_personal_handlers(self):
         provider = registry.for_skill("reminder.list")
