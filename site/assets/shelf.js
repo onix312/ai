@@ -587,10 +587,8 @@ function selectedStockGood() {
 function onStockGoodChange() {
   const row = selectedStockGood();
   const info = $('shf_stock_info');
-  const qtyEl = $('shf_qty');
   if (!row) {
     info.hidden = true;
-    qtyEl.disabled = false;
     return;
   }
   // Подставляем данные товара в пустые поля — владелец может поправить.
@@ -602,9 +600,7 @@ function onStockGoodChange() {
     if (!$('shf_barcode').value.trim()) $('shf_barcode').value = row.barcode || '';
     if (!$('shf_sku').value.trim()) $('shf_sku').value = row.sku || '';
   }
-  // Остаток придёт переносом со склада, а не «начальным остатком».
-  qtyEl.disabled = true;
-  qtyEl.value = '';
+  // Остаток всегда меняется операцией, а не редактированием карточки.
   const unit = row.unit || 'шт';
   const max = pieceUnit(unit) ? Math.floor(num(row.qty)) : num(row.qty);
   const q = $('shf_stock_qty');
@@ -666,7 +662,6 @@ function openShelf(id) {
     $('shf_stock_section').hidden = false;
     $('shf_stock_item').value = '';
     $('shf_stock_qty').value = 1;
-    $('shf_qty').disabled = false;
     $('shf_stock_info').hidden = true;
     loadStockGoods().then(fillStockGoodsSelect);
   } else {
@@ -688,7 +683,6 @@ async function saveShelf() {
     nom_id: $('shf_nom_id').value,
     price: num($('shf_price').value),
     cost_per_unit: num($('shf_cost').value),
-    qty: num($('shf_qty').value),
     min_qty: num($('shf_min').value),
     note: $('shf_note').value.trim(),
     barcode: $('shf_barcode').value.trim(),
@@ -981,12 +975,12 @@ function bind() {
   }
   $('shelf_save').addEventListener('click', saveShelf);
   $('shelf_delete').addEventListener('click', async () => {
-    if (!editingShelf || !confirmDanger('Удалить позицию стеллажа? История движений останется.')) return;
+    if (!editingShelf || !confirmDanger('Архивировать позицию стеллажа? История движений и продаж останется.')) return;
     try {
       await post('/api/shelf/delete', { id: editingShelf });
       closeModal('shelf_modal');
       await refreshShelf();
-      toast('Позиция удалена');
+      toast('Позиция архивирована');
     } catch (e) { fail(e); }
   });
   $('shf_photo_btn').addEventListener('click', () => $('shf_photo_file').click());
