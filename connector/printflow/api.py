@@ -2035,6 +2035,13 @@ class Api:
         # --- настройки, бэкап, уведомления
         # --- стеллаж магазина
         if path == "/api/shelf/save":
+            # v19: карточка описывает витрину, но не переписывает остаток.
+            # Для новой позиции ненулевой qty должен прийти отдельной операцией
+            # produce/transfer/inventory; существующий qty валидирует Shelf.
+            if not body.get("id") and abs(num(body.get("qty"))) > 1e-9:
+                raise ValueError(
+                    "Начальный остаток нельзя задать в карточке. "
+                    "Используйте приход или перенос со склада.")
             item = self.shelf.save_item(body)
             self.catalog_changed("shelf_save")
             return 200, {"ok": True, "item": item}
@@ -2053,6 +2060,12 @@ class Api:
                 body.get("nom_id", ""), body.get("warehouse_id", ""),
                 num(body.get("qty")), body.get("item_id", ""),
                 body.get("note", ""), body.get("variant_id", ""))
+        if path == "/api/shelf/transfer-out":
+            # Обратный путь v19: retail-регистр остаётся отдельным, но товар
+            # можно атомарно вернуть на любой обычный учётный склад.
+            return 200, self.shelf.transfer_to_stock(
+                body.get("item_id", ""), body.get("warehouse_id", ""),
+                num(body.get("qty")), body.get("note", ""))
         if path == "/api/shelf/save-from-stock":
             # Новая позиция стеллажа сразу с готовым товаром со склада:
             # создание позиции и перенос штук — одной операцией.
