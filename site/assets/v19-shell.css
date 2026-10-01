@@ -354,6 +354,139 @@
     .v19-ai-brief { min-height: 0; }
   }
 
+  /* Printers: fleet first, selected-machine actions second, engineering details last. */
+  body.pf-v19 #view-printers #pr_park {
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 270px), 1fr));
+    gap: 10px;
+    margin-bottom: 12px;
+  }
+  body.pf-v19 #view-printers #pr_park .pk-card.pcard {
+    padding: 12px 13px;
+    gap: 8px;
+    border-radius: 13px;
+    background: color-mix(in srgb, var(--panel) 94%, var(--panel-2));
+  }
+  body.pf-v19 #view-printers #pr_park .pk-card.pcard.on {
+    border-color: var(--pf-accent-line);
+    background:
+      linear-gradient(145deg, rgba(24,183,164,.10), transparent 62%),
+      var(--panel);
+    box-shadow: inset 0 0 0 1px rgba(24,183,164,.08);
+  }
+  body.pf-v19 #view-printers .pc-title b { font-size: 13.5px; }
+  body.pf-v19 #view-printers .pc-task { font-size: 11.8px; }
+  body.pf-v19 #view-printers .pc-meta { font-size: 11.2px; }
+
+  .v19-pr-operator {
+    position: sticky;
+    top: 70px;
+    z-index: 18;
+    display: flex;
+    align-items: center;
+    gap: 18px;
+    margin: 12px 0 10px;
+    padding: 10px 12px;
+    border: 1px solid var(--line);
+    border-radius: 13px;
+    background: color-mix(in srgb, var(--panel) 94%, transparent);
+    backdrop-filter: blur(10px);
+  }
+  .v19-pr-operator-copy {
+    display: grid;
+    min-width: 190px;
+    gap: 1px;
+  }
+  .v19-pr-operator-copy .eyebrow {
+    color: var(--muted);
+    font-size: 9px;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+  }
+  .v19-pr-operator-copy b {
+    color: var(--text);
+    font-size: 13.5px;
+    font-weight: 760;
+  }
+  .v19-pr-operator-copy small {
+    max-width: 420px;
+    overflow: hidden;
+    color: var(--muted);
+    font-size: 10.8px;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  .v19-pr-operator-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 7px;
+    flex: 1;
+    min-width: 0;
+    flex-wrap: wrap;
+  }
+  .v19-pr-action-sep {
+    width: 1px;
+    align-self: stretch;
+    min-height: 26px;
+    margin: 0 2px;
+    background: var(--line);
+  }
+  .v19-pr-operator .btn.primary {
+    background: var(--pf-accent);
+    border-color: var(--pf-accent);
+    color: #061411;
+  }
+  .v19-pr-operator .btn.danger {
+    color: var(--bad);
+    border-color: color-mix(in srgb, var(--bad) 46%, var(--line));
+  }
+
+  body.pf-v19 #view-printers .ptab-bar {
+    gap: 3px;
+    margin: 0 0 14px;
+    padding: 3px;
+    border: 1px solid var(--line);
+    border-radius: 11px;
+    background: var(--panel-2);
+  }
+  body.pf-v19 #view-printers .ptab {
+    flex: 0 0 auto;
+    padding: 7px 12px;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--muted);
+    font-size: 11.8px;
+  }
+  body.pf-v19 #view-printers .ptab.on {
+    background: var(--panel);
+    color: var(--text);
+    box-shadow: inset 0 0 0 1px var(--line);
+  }
+  body.pf-v19 #view-printers .printer-grid {
+    grid-template-columns: minmax(0,1.7fr) minmax(300px,.8fr);
+  }
+  body.pf-v19 #view-printers .job-card {
+    border-color: color-mix(in srgb, var(--line) 70%, var(--pf-accent));
+  }
+  body.pf-v19 #view-printers .telemetry .card,
+  body.pf-v19 #view-printers details.pulse-sec.card {
+    background: color-mix(in srgb, var(--panel-2) 72%, var(--panel));
+  }
+  body.pf-v19 #view-printers details.pulse-sec > summary {
+    color: var(--text-2);
+  }
+
+  @media (max-width: 900px) {
+    .v19-pr-operator {
+      position: static;
+      align-items: stretch;
+      flex-direction: column;
+    }
+    .v19-pr-operator-actions { justify-content: flex-start; }
+    .v19-pr-action-sep { display: none; }
+  }
+
   /* Persistent AI rail. */
   .pf-ai-rail {
     position: fixed;

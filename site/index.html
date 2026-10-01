@@ -268,16 +268,16 @@
 <!-- ================================================== ПРИНТЕРЫ -->
 <section class="view" id="view-printers">
  <div class="view-head">
-  <div><span class="eyebrow">Bambu Lab · парк</span><h1>Принтеры</h1><p id="pr_sub">Мониторинг, управление и файлы принтера по локальной сети.</p></div>
+  <div><span class="eyebrow">Производство · парк</span><h1>Принтеры</h1><p id="pr_sub">Состояние парка, текущая печать и следующие действия.</p></div>
   <div class="head-actions">
    <button class="btn primary" id="pr_add" type="button">+ Принтер</button>
-   <button class="btn" id="pr_edit" type="button">⚙ Настроить</button>
-   <button class="btn" id="pr_reconnect" type="button">⟳ Переподключить</button>
    <details class="view-options">
-    <summary class="btn">Вид ▾</summary>
+    <summary class="btn">Ещё ▾</summary>
     <div class="view-options-pop">
+     <button class="btn ghost" id="pr_edit" type="button">⚙ Настроить выбранный</button>
+     <button class="btn ghost" id="pr_reconnect" type="button">⟳ Переподключить</button>
      <button class="btn ghost" id="pr_density" type="button" title="Компактная или просторная раскладка карточек">⇥ Компактно</button>
-     <button class="btn ghost" id="pr_wall" type="button">▦ Стена</button>
+     <button class="btn ghost" id="pr_wall" type="button">▦ Стена парка</button>
     </div>
    </details>
   </div>
@@ -287,6 +287,18 @@
  <div id="pr_workspace" hidden>
    <div id="pr_alerts" class="alert-strip"></div>
    <div id="pr_enough" class="notice" hidden><span>◍</span><span id="pr_enough_text">Проверяем пластик на следующее задание…</span></div>
+   <div class="v19-pr-operator" id="pr_operator">
+    <div class="v19-pr-operator-copy"><span class="eyebrow">Выбранный станок</span><b id="pr_operator_name">—</b><small id="pr_operator_state">Проверяем состояние…</small></div>
+    <div class="v19-pr-operator-actions">
+     <button class="btn sm" id="pr_quick_pause" data-cmd="pause" type="button"><span class="ic" data-icon="pause">❙❙</span>Пауза</button>
+     <button class="btn sm primary" id="pr_quick_resume" data-cmd="resume" type="button" hidden><span class="ic" data-icon="play">▶</span>Продолжить</button>
+     <button class="btn sm danger" id="pr_quick_stop" data-cmd="stop" type="button" hidden><span class="ic" data-icon="stop">■</span>Стоп</button>
+     <span class="v19-pr-action-sep" aria-hidden="true"></span>
+     <button class="btn sm ghost" data-pr-tab="camera" type="button">Камера</button>
+     <button class="btn sm ghost" data-pr-tab="ams" type="button">AMS</button>
+     <a class="btn sm ghost" href="#queue" data-view="queue">Очередь</a>
+    </div>
+   </div>
   <div class="ptab-bar" id="pr_detail_tabs" role="tablist" aria-label="Детали принтера">
    <button type="button" class="ptab on" data-ptab="overview" role="tab" aria-selected="true">◈ Обзор</button>
    <button type="button" class="ptab" data-ptab="camera" role="tab" aria-selected="false">◉ Камера</button>
