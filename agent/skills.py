@@ -150,7 +150,7 @@ SKILLS: dict[str, dict[str, Any]] = {
         "description": "Текущий экран, парк, очередь и бизнес-контекст PrintFlow.",
         "host": "panel", "risk": "read", "params": {},
         "provider": "printflow",
-        "requires": ("panel",), "ideas": (),
+        "requires": ("panel",), "ideas": ("И137",),
         "doc": "Nozza использует активный экран как контекст, а не как команду.",
     },
     "printflow.actions": {
@@ -158,7 +158,7 @@ SKILLS: dict[str, dict[str, Any]] = {
         "description": "Доменный каталог business-actions с риском, проверкой и подтверждением.",
         "host": "panel", "risk": "read", "params": {"domain": "text"},
         "provider": "printflow",
-        "requires": ("panel",), "ideas": (),
+        "requires": ("panel",), "ideas": ("И137",),
         "doc": "URL и risk принадлежат PrintFlow; модель выбирает только известный action id.",
     },
     "printflow.read": {
@@ -167,7 +167,7 @@ SKILLS: dict[str, dict[str, Any]] = {
         "host": "panel", "risk": "read",
         "params": {"action": "text", "params": "object"},
         "provider": "printflow",
-        "requires": ("panel",), "ideas": (),
+        "requires": ("panel",), "ideas": ("И137",),
         "doc": "Навык технически блокирует POST, даже если модель выбрала его ошибочно.",
     },
     "printflow.act": {
@@ -176,7 +176,7 @@ SKILLS: dict[str, dict[str, Any]] = {
         "host": "panel", "risk": "write",
         "params": {"action": "text", "params": "object", "explain": "text"},
         "provider": "printflow",
-        "requires": ("panel",), "ideas": (),
+        "requires": ("panel",), "ideas": ("И137",),
         "doc": "Outer Agent confirmation + внутренние metadata PrintFlow; произвольные URL запрещены.",
     },
     # --- файлы и знания (И142, И143, И144, И147, И148) ---------------------
