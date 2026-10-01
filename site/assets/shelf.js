@@ -20,7 +20,7 @@ const GROUP_STATUS_LABEL = {
 
 const KIND_LABEL = {
   produce: 'Приход', sale: 'Продажа', online: 'Продажа онлайн',
-  writeoff: 'Списание', inventory: 'Инвентаризация',
+  writeoff: 'Списание', inventory: 'Инвентаризация', transfer: 'На склад',
 };
 const STATUS_LABEL = {
   ok: 'В наличии', low: 'Мало', dead: 'Мёртвый сток', empty: 'Пусто',
@@ -187,6 +187,9 @@ function renderShelf() {
       + `<button class="btn sm ghost" type="button" data-shelf-card="${esc(i.id)}">▤ Карточка</button>`
       + `<button class="btn sm ghost" type="button" data-shelf-tag="${esc(i.id)}">▦ Ценник</button>`
       + `<button class="btn sm ghost" type="button" data-shelf-promo="${esc(i.id)}">◆ Промостенд</button>`
+      + (num(i.qty) > 0 && i.nom_id
+        ? `<button class="btn sm ghost" type="button" data-shelf-return="${esc(i.id)}">↩ На склад</button>`
+        : '')
       + `<button class="btn sm" type="button" data-shelf-sell="${esc(i.id)}">−1</button>`
       + `<button class="btn sm" type="button" data-shelf-prod="${esc(i.id)}">+</button>`
       + `</div></article>`;
@@ -837,6 +840,54 @@ async function saveTransfer() {
   } catch (e) { fail(e); }
 }
 
+/* ============================================== со стеллажа на склад */
+let returnWarehouses = [];
+
+async function openReturnToStock(itemId) {
+  const item = (shelfData.items || []).find((x) => x.id === itemId);
+  if (!item) return fail(new Error('Позиция не найдена'));
+  if (!item.nom_id) return fail(new Error('Сначала свяжите позицию с товаром'));
+  if (num(item.qty) <= 0) return fail(new Error('На стеллаже нет остатка'));
+  try {
+    const data = await get('/api/warehouses');
+    returnWarehouses = (data.warehouses || data.items || data || [])
+      .filter((w) => !w.archived && w.kind !== 'shelf');
+  } catch (e) { return fail(e); }
+  if (!returnWarehouses.length) {
+    return fail(new Error('Нет обычного склада для возврата товара'));
+  }
+  $('srf_item').value = item.id;
+  $('srf_info').textContent = `${item.name} · на стеллаже ${nfmt(item.qty)} шт`;
+  $('srf_warehouse').innerHTML = returnWarehouses.map((w) =>
+    `<option value="${esc(w.id)}">${esc(w.name || w.id)}</option>`).join('');
+  $('srf_qty').value = 1;
+  $('srf_qty').max = Math.max(1, Math.floor(num(item.qty)));
+  $('srf_note').value = '';
+  openModal('shelf_return_modal');
+}
+
+async function saveReturnToStock() {
+  const itemId = $('srf_item').value;
+  const item = (shelfData.items || []).find((x) => x.id === itemId);
+  const qty = num($('srf_qty').value);
+  if (!item) return fail(new Error('Позиция не найдена'));
+  if (qty <= 0 || qty > num(item.qty)) {
+    return fail(new Error(`Можно вернуть от 1 до ${nfmt(item.qty)} шт`));
+  }
+  try {
+    await post('/api/shelf/transfer-to-stock', {
+      item_id: itemId,
+      warehouse_id: $('srf_warehouse').value,
+      qty,
+      note: $('srf_note').value.trim(),
+    });
+    closeModal('shelf_return_modal');
+    await refreshShelf();
+    if (PF.refreshCore) await PF.refreshCore();
+    toast('Перемещено на склад', `${item.name} · ${nfmt(qty)} шт`);
+  } catch (e) { fail(e); }
+}
+
 /* ============================================================== продажи */
 function openSales() {
   const items = (shelfData.items || []).filter((i) => num(i.qty) > 0);
@@ -1017,6 +1068,7 @@ function bind() {
 
   $('shelf_transfer_btn').addEventListener('click', openTransfer);
   $('shelf_transfer_save').addEventListener('click', saveTransfer);
+  if ($('shelf_return_save')) $('shelf_return_save').addEventListener('click', saveReturnToStock);
   $('stf_item').addEventListener('change', updateTransferInfo);
   $('stf_qty').addEventListener('input', updateTransferInfo);
 
@@ -1098,6 +1150,8 @@ function bind() {
       window.open(`/materials/промостенды-67x57.html?item=${encodeURIComponent(promo.dataset.shelfPromo)}`, '_blank', 'noopener');
       return;
     }
+    const back = e.target.closest('[data-shelf-return]');
+    if (back) { openReturnToStock(back.dataset.shelfReturn); return; }
     const sell = e.target.closest('[data-shelf-sell]');
     if (sell) {
       const item = (shelfData.items || []).find((x) => x.id === sell.dataset.shelfSell);
