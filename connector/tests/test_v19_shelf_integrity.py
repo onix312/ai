@@ -12,6 +12,7 @@ sys.path.insert(0, str(ROOT / "connector"))
 
 from connector.printflow.db import Database  # noqa: E402
 from connector.printflow.shelf import Shelf  # noqa: E402
+from connector.printflow.stock import Stock  # noqa: E402
 
 
 _held: list[tempfile.TemporaryDirectory] = []
@@ -75,6 +76,47 @@ class ShelfV19IntegrityTests(unittest.TestCase):
         self.assertEqual(100.0, summary["sold_7_money"])
 
 
+class ShelfV19TransferTests(unittest.TestCase):
+    def setUp(self):
+        self.db = make_db()
+        self.stock = Stock(self.db)
+        self.shelf = Shelf(self.db)
+        self.db.upsert("nomenclature", {
+            "id": "nom1", "name": "Dragon", "kind": "product",
+            "unit": "шт", "archived": 0,
+        })
+        self.stock.add_move("nom1", "home", 5, 500, doc_kind="receipt")
+        moved = self.shelf.transfer_from_stock("nom1", "home", 3)
+        self.item_id = moved["item"]["id"]
+
+    def tearDown(self):
+        self.db.close()
+
+    def test_transfer_back_moves_both_ledgers_atomically(self):
+        result = self.shelf.transfer_to_stock(self.item_id, "home", 2, "снять с витрины")
+        self.assertTrue(result["ok"])
+        self.assertEqual(1.0, self.shelf.item(self.item_id)["qty"])
+        self.assertEqual(1.0, self.stock.qty("nom1", "shelf"))
+        self.assertEqual(4.0, self.stock.qty("nom1", "home"))
+        self.assertEqual(5.0, self.stock.qty("nom1"))
+        self.assertEqual("transfer", result["move"]["kind"])
+
+    def test_transfer_back_respects_shelf_reserve(self):
+        self.stock.reserve("nom1", 3, order_id="o1", warehouse_id="shelf")
+        with self.assertRaisesRegex(ValueError, "зарезервировано|свободно"):
+            self.shelf.transfer_to_stock(self.item_id, "home", 1)
+        self.assertEqual(3.0, self.shelf.item(self.item_id)["qty"])
+
+    def test_transfer_back_rejects_shelf_as_target(self):
+        with self.assertRaisesRegex(ValueError, "назначения"):
+            self.shelf.transfer_to_stock(self.item_id, "shelf", 1)
+
+    def test_transfer_back_requires_nomenclature_link(self):
+        manual = self.shelf.save_item({"name": "Manual", "qty": 1, "price": 100})
+        with self.assertRaisesRegex(ValueError, "номенклатур"):
+            self.shelf.transfer_to_stock(manual["id"], "home", 1)
+
+
 class ShelfV19FrontendContractTests(unittest.TestCase):
     def test_card_does_not_submit_quantity_and_uses_archive_wording(self):
         index = (ROOT / "site/index.html").read_text(encoding="utf-8")
@@ -86,6 +128,8 @@ class ShelfV19FrontendContractTests(unittest.TestCase):
         payload_end = script.index("};", payload_start)
         self.assertNotIn("qty:", script[payload_start:payload_end])
         self.assertIn("Архивировать позицию стеллажа", script)
+        self.assertIn("/api/shelf/transfer-to-stock", script)
+        self.assertIn('id="shelf_return_modal"', index)
 
 
 if __name__ == "__main__":
