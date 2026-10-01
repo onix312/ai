@@ -1028,6 +1028,7 @@ const VIEW_ALIASES = {
   docs2: 'documents', document: 'documents', documenty: 'documents',
   warehouse: 'warehouses', sklad: 'warehouses', wh: 'warehouses',
   money: 'finance', finances: 'finance', accounting: 'finance',
+  map: 'system-map', graph: 'system-map', functions: 'system-map',
   home: 'dashboard', main: 'dashboard', overview: 'dashboard',
   jobs: 'queue', clients: 'customers',
   calculator: 'calc', docs: 'library', settings2: 'settings',
