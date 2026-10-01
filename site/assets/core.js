@@ -1013,7 +1013,8 @@ const VIEWS = {
   print: { title: 'Печать', sub: 'Формы цеха: ценники, стикеры, наклейки, визитки, талоны' },
   clientbot: { title: 'Клиент-бот', sub: 'Telegram-бот для покупателей: витрина, заказы, статусы' },
   library: { title: 'Библиотека', sub: 'Инструкции, скрипты и материалы' },
-  pages: { title: 'Страницы', sub: 'Хаб LAN-страниц: касса, СБП, банк, витрины, ТВ' },
+  pages: { title: 'Страницы', sub: 'Хаб LAN-режимов: касса, СБП, банк, витрины и ТВ' },
+  'system-map': { title: 'Карта системы', sub: 'Функции PrintFlow и сквозной слой AI' },
   settings: { title: 'Настройки', sub: 'Тарифы, автоматизация и данные' },
 };
 /* привычные синонимы разделов, чтобы ссылки вида #spools не бросали на обзор */
@@ -1027,6 +1028,7 @@ const VIEW_ALIASES = {
   docs2: 'documents', document: 'documents', documenty: 'documents',
   warehouse: 'warehouses', sklad: 'warehouses', wh: 'warehouses',
   money: 'finance', finances: 'finance', accounting: 'finance',
+  map: 'system-map', graph: 'system-map', functions: 'system-map',
   home: 'dashboard', main: 'dashboard', overview: 'dashboard',
   jobs: 'queue', clients: 'customers',
   calculator: 'calc', docs: 'library', settings2: 'settings',
