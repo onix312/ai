@@ -3,11 +3,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="light dark">
-<title>NOZZA · PrintFlow — управление 3D-производством</title>
+<title>PrintFlow — управление 3D-производством</title>
 <link rel="icon" href="assets/brand/favicon.svg" type="image/svg+xml">
-<link rel="apple-touch-icon" href="assets/brand/nozza-mark.svg">
+<link rel="apple-touch-icon" href="assets/brand/favicon.svg">
 <link rel="manifest" href="/manifest.webmanifest">
-<meta name="theme-color" content="#f5f7fb">
+<meta name="theme-color" content="#0d1417">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="PrintFlow">
@@ -19,24 +19,17 @@
 <link rel="stylesheet" href="assets/more.css?v=18.23.1">
 <link rel="stylesheet" href="assets/controls.css?v=18.23.1">
 <link rel="stylesheet" href="assets/refine.css?v=18.23.1">
-</head><body>
+<link rel="stylesheet" href="assets/v19-shell.css?v=19.0.0">
+</head><body class="pf-v19">
 <a class="skip-link" href="#views" id="skip_link">Перейти к содержимому</a>
 <div class="top-load" id="top_load" hidden aria-hidden="true"></div>
-<div class="splash" id="splash" aria-hidden="true"><div class="splash-mark"><svg class="splash-svg" viewBox="0 0 72 72" width="72" height="72" role="img" aria-label="NOZZA">
-   <defs><linearGradient id="splashGrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#4f46e5"/><stop offset="100%" stop-color="#7c3aed"/></linearGradient></defs>
-   <rect class="splash-layer" x="2" y="2" width="68" height="68" rx="18" fill="url(#splashGrad)" style="--l:0"/>
-   <rect class="splash-layer" x="16" y="16" width="40" height="6" rx="3" fill="#fff" opacity=".95" style="--l:1"/>
-   <rect class="splash-layer" x="19" y="26" width="34" height="6" rx="3" fill="#fff" opacity=".85" style="--l:2"/>
-   <rect class="splash-layer" x="23" y="36" width="26" height="6" rx="3" fill="#fff" opacity=".72" style="--l:3"/>
-   <rect class="splash-layer" x="27" y="46" width="18" height="6" rx="3" fill="#fff" opacity=".58" style="--l:4"/>
-   <circle class="splash-layer splash-dot" cx="36" cy="61" r="4" fill="#fff" opacity=".95" style="--l:5"/>
-  </svg><i></i></div><b>NOZZA · PrintFlow</b><span>Печатаем панель…</span></div>
+<div class="splash" id="splash" aria-hidden="true"><div class="pf-splash-mark"></div><b>PrintFlow</b><span>Поднимаем производственный контур…</span></div>
 <button class="up-btn" id="up_btn" type="button" aria-label="Наверх" hidden>↑</button>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs><linearGradient id="pfgrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="var(--accent)"></stop><stop offset="100%" stop-color="var(--accent-2)"></stop></linearGradient></defs></svg>
 
 <div id="shell">
 <nav id="side">
- <div class="brand"><img class="brand-logo" src="assets/brand/nozza-mark.svg" alt="NOZZA" width="38" height="38"><div><b>NOZZA</b><small>PrintFlow · цех</small></div></div>
+ <div class="brand"><span class="pf-brand-mark" aria-hidden="true"></span><div><b>PrintFlow</b><small>локальное 3D-производство</small></div></div>
  <label class="nav-find"><span>⌕</span><input id="nav_find" type="search" placeholder="Найти раздел…" autocomplete="off"></label>
  <div class="side-scroll" id="nav_scroll">
   <div class="nav-group">
@@ -54,7 +47,7 @@
   <div class="nav-group">
    <div class="nav-group-title">Управление</div>
    <a class="nav-link" href="#finance" data-view="finance" data-find="финансы учёт налог прибыль долг проводка доход расход"><span class="ic" data-icon="ruble">₽</span>Финансы</a>
-   <a class="nav-link nav-link-ext" href="/assistant.html" target="_blank" rel="noopener" data-find="помощник ассистент модель ollama разговор голос каталог действий" aria-label="Открыть панель помощника в отдельной вкладке"><span class="ic" data-icon="sparkles">✦</span><span>Помощник</span><small>отдельная панель ↗</small></a>
+   <button class="nav-link pf-ai-nav" id="pf_ai_nav" type="button" data-find="printflow ai помощник ассистент модель ollama разговор голос действия" aria-expanded="false"><span class="pf-ai-nav-orb" aria-hidden="true"></span><span>PrintFlow AI</span><span class="tag live">AI</span></button>
   </div>
   <div class="nav-group">
    <details class="nav-more" id="nav_more"><summary class="nav-group-title">Все разделы</summary>
@@ -93,8 +86,21 @@
   <button class="icon-btn" id="sound_btn" type="button" title="Звуки панели" aria-pressed="true"><span class="ic" data-icon="volume">🔔</span></button>
   <button class="icon-btn" id="density_btn" type="button" title="Плотность интерфейса"><span class="ic" data-icon="layout">◫</span></button>
   <button class="icon-btn" id="theme_btn" type="button" title="Тема оформления"><span class="ic" data-icon="theme">◐</span></button>
+  <button class="pf-ai-trigger" id="pf_ai_open" type="button" aria-controls="pf_ai_rail" aria-expanded="false" title="PrintFlow AI · Alt+A"><span class="pf-ai-dot"></span><span class="pf-ai-label">PrintFlow AI</span></button>
   <button class="btn primary" id="quick_order" type="button"><span class="ic" data-icon="plus">+</span>Заказ</button>
  </header>
+
+ <aside class="pf-ai-rail" id="pf_ai_rail" aria-hidden="true" aria-label="PrintFlow AI">
+  <div class="pf-ai-rail-head">
+   <span class="pf-ai-nav-orb" aria-hidden="true"></span>
+   <div class="pf-ai-rail-title"><b>PrintFlow AI</b><small id="pf_ai_state">проверяем локальный AI…</small></div>
+   <span class="pf-ai-rail-spacer"></span>
+   <a class="icon-btn" href="/assistant.html" target="_blank" rel="noopener" title="Открыть полную панель AI" aria-label="Открыть полную панель AI">↗</a>
+   <button class="icon-btn" id="pf_ai_close" type="button" aria-label="Закрыть PrintFlow AI">×</button>
+  </div>
+  <iframe class="pf-ai-frame" id="pf_ai_frame" title="PrintFlow AI" data-src="/assistant.html?embed=1"></iframe>
+ </aside>
+ <button class="pf-ai-scrim" id="pf_ai_scrim" type="button" aria-label="Закрыть PrintFlow AI"></button>
 
  <!-- 18.11: шторка инцидентов — тревоги фермы с действием в строке -->
  <aside id="incidents_drawer" class="inc-drawer" aria-hidden="true">
@@ -5727,6 +5733,7 @@
 
 <script src="assets/qr.js?v=18.23.1"></script>
 <script src="assets/core.js?v=18.23.1"></script>
+<script src="assets/v19-shell.js?v=19.0.0"></script>
 <script src="assets/colors.js?v=18.23.1"></script>
 <script src="assets/icons.js?v=18.23.1"></script>
 <script src="assets/sound.js?v=18.23.1"></script>
