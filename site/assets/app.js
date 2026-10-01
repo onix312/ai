@@ -390,14 +390,31 @@ const DASH_WIDGETS = [
   ['heartbeat', 'Здоровье системы'],
 ];
 const WIDGET_KEY = 'pf_dash_widgets';
+const WIDGET_V19_MIGRATION_KEY = 'pf_dash_widgets_v19_migrated';
 function widgetPrefs() {
   try {
     const v = JSON.parse(store.get(WIDGET_KEY, 'null'));
-    if (Array.isArray(v) && v.length) return v.filter((id) => DASH_WIDGETS.some(([w]) => w === id));
+    if (Array.isArray(v) && v.length) {
+      const filtered = v.filter((id) => DASH_WIDGETS.some(([w]) => w === id));
+      // Существующий пользователь ещё не мог выбрать новый v19-брифинг.
+      // Один раз добавляем его в старые prefs; после этого ручное скрытие уважается.
+      if (store.get(WIDGET_V19_MIGRATION_KEY, '') !== '1') {
+        if (!filtered.includes('ai_brief')) {
+          const focus = filtered.indexOf('operator_focus');
+          filtered.splice(focus >= 0 ? focus + 1 : 0, 0, 'ai_brief');
+        }
+        store.set(WIDGET_V19_MIGRATION_KEY, '1');
+        store.set(WIDGET_KEY, JSON.stringify(filtered));
+      }
+      return filtered;
+    }
   } catch (e) { /* повреждённые настройки — вернём всё */ }
   return DASH_WIDGETS.map(([id]) => id);
 }
-function saveWidgetPrefs(list) { store.set(WIDGET_KEY, JSON.stringify(list)); }
+function saveWidgetPrefs(list) {
+  store.set(WIDGET_V19_MIGRATION_KEY, '1');
+  store.set(WIDGET_KEY, JSON.stringify(list));
+}
 function applyWidgets() {
   const prefs = widgetPrefs();
   $$('[data-widget]').forEach((el) => el.classList.toggle('hidden', !prefs.includes(el.dataset.widget)));
