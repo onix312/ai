@@ -559,24 +559,36 @@
 <!-- ================================================== ЗАКАЗЫ -->
 <section class="view" id="view-orders">
  <div class="view-head">
-  <div><span class="eyebrow">Продажи и производство</span><h1>Заказы</h1><p id="orders_sub">Загружаем заказы…</p></div>
+  <div><span class="eyebrow">От заявки до выдачи</span><h1>Заказы</h1><p id="orders_sub">Загружаем рабочую доску…</p></div>
   <div class="head-actions">
-   <button class="btn" id="orders_export" type="button">Экспорт CSV</button>
-   <button class="btn" id="orders_statuses" type="button">Статусы</button>
-   <button class="btn" id="orders_wishes" type="button" title="Хотелки клиентов: что просили, что нашли">♥ Хотелки <span class="tag" id="orders_wishes_tag" hidden></span></button>
    <button class="btn primary" id="orders_new" type="button">+ Новый заказ</button>
+   <details class="view-options">
+    <summary class="btn">Ещё ▾</summary>
+    <div class="view-options-pop">
+     <button class="btn ghost" id="orders_wishes" type="button" title="Хотелки клиентов: что просили, что нашли">♥ Хотелки <span class="tag" id="orders_wishes_tag" hidden></span></button>
+     <button class="btn ghost" id="orders_statuses" type="button">Статусы и этапы</button>
+     <button class="btn ghost" id="orders_export" type="button">↓ Экспорт CSV</button>
+    </div>
+   </details>
   </div>
  </div>
- <div class="toolbar">
-  <div class="search-box"><input id="orders_search" type="search" placeholder="Изделие, клиент, номер, файл…" aria-label="Поиск заказов"></div>
+ <div class="v19-orders-pulse" id="orders_pulse" role="group" aria-label="Быстрые виды заказов">
+  <button type="button" class="on" data-order-pulse="all"><span>В работе</span><b id="orders_pulse_all">0</b></button>
+  <button type="button" data-order-pulse="hot"><span>Горят</span><b id="orders_pulse_hot">0</b></button>
+  <button type="button" data-order-pulse="ready"><span>Готовы</span><b id="orders_pulse_ready">0</b></button>
+  <button type="button" data-order-pulse="debt"><span>Ждём оплату</span><b id="orders_pulse_debt">0</b></button>
+  <button type="button" data-order-pulse="stale"><span>Забыты 7+ дн.</span><b id="orders_pulse_stale">0</b></button>
+ </div>
+ <div class="toolbar v19-orders-toolbar">
+  <div class="search-box"><input id="orders_search" type="search" placeholder="Номер, изделие или клиент…" aria-label="Поиск заказов"></div>
   <select id="orders_preset" title="Сохранённый вид доски"><option value="all">Все заказы</option></select>
   <button class="btn sm ghost" id="orders_preset_del" type="button" title="Удалить этот вид" hidden>✕</button>
-  <select id="orders_filter_status"><option value="">Все статусы</option></select>
   <div class="seg" id="orders_view"><button data-mode="kanban" class="on">Канбан</button><button data-mode="table">Таблица</button></div>
-  <div class="seg" id="orders_box" role="group" aria-label="Доска или архив" title="Архив — снятые с доски заказы: данные, платежи и история на месте"><button type="button" data-box="" class="on">На доске</button><button type="button" data-box="archived">⌸ В архиве</button></div>
   <details class="orders-more-filters" id="orders_more_filters">
-   <summary class="btn sm">Доп. фильтры</summary>
+   <summary class="btn sm">Фильтры и архив</summary>
    <div class="orders-more-filter-grid">
+    <label>Статус <select id="orders_filter_status"><option value="">Все статусы</option></select></label>
+    <div><span>Доска</span><div class="seg" id="orders_box" role="group" aria-label="Доска или архив" title="Архив — снятые с доски заказы: данные, платежи и история на месте"><button type="button" data-box="" class="on">На доске</button><button type="button" data-box="archived">В архиве</button></div></div>
     <label>Ниша <select id="orders_filter_niche"><option value="">Все ниши</option></select></label>
     <label>Порядок <select id="orders_sort" title="Порядок заказов"><option value="new">Сначала новые</option><option value="due">По сроку</option><option value="debt">По долгу</option><option value="stale">Забытые сверху</option></select></label>
     <div><span>Канал продаж</span><div class="seg" id="orders_chan" role="group" aria-label="Канал продаж"><button type="button" data-chan="" class="on">Все каналы</button><button type="button" data-chan="telegram"><i data-icon="telegram">✈</i> Telegram</button><button type="button" data-chan="no-tg">Без TG</button></div></div>
