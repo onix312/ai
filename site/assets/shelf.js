@@ -666,7 +666,7 @@ function openShelf(id) {
     $('shf_stock_section').hidden = false;
     $('shf_stock_item').value = '';
     $('shf_stock_qty').value = 1;
-    $('shf_qty').disabled = false;
+    $('shf_qty').readOnly = true;
     $('shf_stock_info').hidden = true;
     loadStockGoods().then(fillStockGoodsSelect);
   } else {
@@ -688,7 +688,6 @@ async function saveShelf() {
     nom_id: $('shf_nom_id').value,
     price: num($('shf_price').value),
     cost_per_unit: num($('shf_cost').value),
-    qty: num($('shf_qty').value),
     min_qty: num($('shf_min').value),
     note: $('shf_note').value.trim(),
     barcode: $('shf_barcode').value.trim(),
@@ -981,12 +980,12 @@ function bind() {
   }
   $('shelf_save').addEventListener('click', saveShelf);
   $('shelf_delete').addEventListener('click', async () => {
-    if (!editingShelf || !confirmDanger('Удалить позицию стеллажа? История движений останется.')) return;
+    if (!editingShelf || !confirmDanger('Убрать позицию с витрины? Остаток должен быть нулевым; история движений сохранится.')) return;
     try {
       await post('/api/shelf/delete', { id: editingShelf });
       closeModal('shelf_modal');
       await refreshShelf();
-      toast('Позиция удалена');
+      toast('Позиция убрана с витрины', 'История движений сохранена');
     } catch (e) { fail(e); }
   });
   $('shf_photo_btn').addEventListener('click', () => $('shf_photo_file').click());
