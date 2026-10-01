@@ -198,6 +198,97 @@ class Client:
                 "confirmed": sum(1 for row in rows if row.get("confirm")),
                 "reads": sum(1 for row in rows if not row.get("confirm"))}
 
+    def domain_actions(self, domain: str = "") -> dict[str, Any]:
+        """PrintFlow 19 business-action catalog owned by the panel."""
+        query = ""
+        if str(domain or "").strip():
+            query = "?" + urllib.parse.urlencode({"domain": str(domain).strip()})
+        ok, payload, reason = _request(
+            f"{self.url}/api/assistant/actions/v19{query}",
+            timeout=min(self.timeout, 5.0),
+        )
+        if not ok or not isinstance(payload, dict):
+            return {"ok": False, "version": 19, "actions": [],
+                    "reason": reason or "каталог PrintFlow 19 недоступен"}
+        rows = [row for row in payload.get("actions", []) if isinstance(row, dict)]
+        return {
+            **payload,
+            "ok": bool(payload.get("ok", True)),
+            "actions": rows,
+            "count": len(rows),
+            "reason": "" if payload.get("ok", True)
+            else "; ".join(str(x) for x in payload.get("problems", [])[:5]),
+        }
+
+    def find_domain_action(self, name: str) -> tuple[dict[str, Any] | None, str]:
+        """Find one v19 domain action by exact id from PrintFlow."""
+        key = str(name or "").strip().casefold()
+        catalog = self.domain_actions()
+        if not catalog.get("ok"):
+            return None, str(catalog.get("reason") or "каталог PrintFlow 19 недоступен")
+        for row in catalog.get("actions", []):
+            if str(row.get("id") or "").strip().casefold() == key:
+                return row, ""
+        known = ", ".join(str(row.get("id") or "")
+                          for row in catalog.get("actions", [])[:30])
+        return None, f"Действия PrintFlow 19 «{name}» нет. Есть: {known}"
+
+    def run_domain_action(self, name: str, params: dict[str, Any] | None = None,
+                          *, confirmed: bool = False,
+                          read_only: bool = False) -> dict[str, Any]:
+        """Execute one action selected from PrintFlow's own v19 catalog.
+
+        Unknown parameters are dropped, required parameters are validated here,
+        and read_only never permits a POST.  Confirmation metadata still comes
+        from the panel catalog; the model cannot lower it.
+        """
+        action, why = self.find_domain_action(name)
+        if action is None:
+            return {"ok": False, "reason": why, "action": str(name or "")}
+        method = str(action.get("method") or "GET").upper()
+        if read_only and method != "GET":
+            return {
+                "ok": False,
+                "reason": f"«{action.get('id')}» меняет PrintFlow; используйте printflow.act",
+                "action": str(action.get("id") or name),
+            }
+
+        raw = params if isinstance(params, dict) else {}
+        allowed = {str(key) for key in action.get("params", [])}
+        values = {str(key): value for key, value in raw.items() if str(key) in allowed}
+        missing = [
+            str(key) for key in action.get("required", [])
+            if values.get(str(key)) in (None, "")
+        ]
+        if missing:
+            return {
+                "ok": False,
+                "reason": "Не хватает параметров: " + ", ".join(missing),
+                "action": str(action.get("id") or name),
+            }
+
+        panel_confirm = bool(action.get("confirm"))
+        if panel_confirm and not confirmed:
+            return {
+                "ok": False,
+                "reason": "Действие требует подтверждения человека",
+                "action": str(action.get("id") or name),
+                "needs_confirmation": True,
+                "risk": str(action.get("risk") or "write"),
+            }
+
+        result = self.run_action(action, values, confirmed=panel_confirm and confirmed)
+        result.update({
+            "domain_action": str(action.get("id") or name),
+            "title_action": str(action.get("title") or action.get("id") or ""),
+            "domain": str(action.get("domain") or ""),
+            "risk": str(action.get("risk") or "read"),
+            "reversible": bool(action.get("reversible", True)),
+            "verify": str(action.get("verify") or ""),
+            "panel_confirm": panel_confirm,
+        })
+        return result
+
     # --- исполнение -------------------------------------------------------
     def run_action(self, action: dict[str, Any], params: dict[str, Any],
                    confirmed: bool = False) -> dict[str, Any]:
