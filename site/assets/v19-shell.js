@@ -58,6 +58,10 @@ async function syncAssistantStatus() {
 }
 
 trigger.addEventListener('click', toggle);
+['system_map_ai', 'system_map_ai_bottom'].forEach((id) => {
+  const button = document.getElementById(id);
+  if (button) button.addEventListener('click', () => setOpen(true));
+});
 if (nav) nav.addEventListener('click', (event) => {
   event.preventDefault();
   setOpen(true);
