@@ -231,8 +231,11 @@ class Client:
                 body = dict(values["patch"])
             if action_id == "order_fulfill" and confirmed:
                 body.setdefault("handoff_confirmed", True)
-            # Физические маршруты используют confirmed; остальные его игнорируют.
-            body.setdefault("confirmed", bool(confirmed))
+            # Только эти action routes читают поле confirmed напрямую.
+            # Остальные подтверждаются политикой Runner/Provider и не получают
+            # неизвестный ключ, который settings/schema пришлось бы игнорировать.
+            if action_id in {"printer_command", "job_start"}:
+                body.setdefault("confirmed", bool(confirmed))
             url = f"{self.url}{path}"
         else:
             url = f"{self.url}{path}"
