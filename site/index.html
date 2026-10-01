@@ -843,24 +843,34 @@
  <div class="view-head">
   <div><span class="eyebrow">Номенклатура · учёт 3.0</span><h1>Товары</h1><p>Модель, остаток по складам, цены и экономика — одной карточкой.</p></div>
   <div class="head-actions">
-   <select id="prod_warehouse" title="Склад"><option value="">Все склады</option></select>
-   <button class="btn" id="prod_recalc" type="button" title="Пересчитать цены от себестоимости">↻ Цены</button>
    <button class="btn" id="prod_plan_btn" type="button">⚑ План пополнения</button>
-   <button class="btn" id="prod_sale_btn" type="button">💰 Продажа</button>
    <button class="btn primary" id="prod_add" type="button">+ Товар</button>
+   <details class="view-options">
+    <summary class="btn">Ещё ▾</summary>
+    <div class="view-options-pop">
+     <button class="btn ghost" id="prod_sale_btn" type="button">💰 Ручная продажа</button>
+     <button class="btn ghost" id="prod_recalc" type="button" title="Пересчитать цены от себестоимости">↻ Пересчитать цены</button>
+    </div>
+   </details>
   </div>
  </div>
  <div class="kpi-grid" id="prod_kpis"></div>
- <div class="toolbar">
+ <div class="toolbar v19-products-toolbar">
   <div class="search-box"><input id="prod_search" type="search" placeholder="Название, артикул, код, штрихкод…"></div>
+  <select id="prod_warehouse" title="Склад"><option value="">Все склады</option></select>
   <select id="prod_group"><option value="">Все группы</option></select>
   <select id="prod_kind"><option value="">Все виды</option><option value="product">Товар</option><option value="semi">Полуфабрикат</option><option value="kit">Комплект</option><option value="material">Материал</option><option value="service">Услуга</option><option value="showcase">Для магазина</option></select>
   <select id="prod_status"><option value="">Любой статус</option><option value="low">Мало</option><option value="empty">Кончился</option><option value="dead">Мёртвый сток</option><option value="unprofitable">Убыточные</option></select>
   <select id="prod_sort" title="Сортировка плиток"><option value="">Порядок по умолчанию</option><option value="margin">По марже</option><option value="sold7">По продажам 7 дн.</option><option value="days">Кончается первым</option><option value="price">По цене</option></select>
-  <button class="btn sm ghost" id="prod_shelf3d" type="button" title="Витрина-полка в перспективе (В59)"><i data-icon="bag">📦</i> Полка 3D</button>
-  <select class="btn sm ghost" id="prod_season" title="Сезон витрины — лента на публичных страницах (В67)" style="height:32px"><option value="none">Без сезона</option><option value="newyear">Новый год</option><option value="spring">8 Марта</option><option value="autumn">Осень</option></select>
-  <button class="btn sm ghost" id="prod_shop_eye" type="button" title="Плитки как их видит покупатель в боте: фото, цена, скрытые"><i data-icon="eye">👁</i> Витрина</button>
   <div class="seg" id="prod_view"><button data-mode="cards" class="on">Плитки</button><button data-mode="table">Таблица</button></div>
+  <details class="v19-prod-merch">
+   <summary class="btn sm">Витрина ▾</summary>
+   <div class="v19-prod-merch-pop">
+    <button class="btn sm ghost" id="prod_shelf3d" type="button" title="Витрина-полка в перспективе (В59)"><i data-icon="bag">📦</i> Полка 3D</button>
+    <select class="btn sm ghost" id="prod_season" title="Сезон витрины — лента на публичных страницах (В67)"><option value="none">Без сезона</option><option value="newyear">Новый год</option><option value="spring">8 Марта</option><option value="autumn">Осень</option></select>
+    <button class="btn sm ghost" id="prod_shop_eye" type="button" title="Плитки как их видит покупатель в боте: фото, цена, скрытые"><i data-icon="eye">👁</i> Как видит покупатель</button>
+   </div>
+  </details>
  </div>
  <div class="toolbar-alerts" id="prod_warn_badge" hidden></div>
  <div class="prod-grid" id="prod_grid"></div>
@@ -950,53 +960,76 @@
 <!-- ================================================== СТЕЛЛАЖ -->
 <section class="view" id="view-shelf">
  <div class="view-head">
-  <div><span class="eyebrow">Магазин · полка NOZZA</span><h1>Стеллаж</h1><p>Готовая продукция: остатки, продажи и план пополнения.</p></div>
+  <div><span class="eyebrow">Розница · отдельный регистр</span><h1>Стеллаж</h1><p>Что лежит на полке, что заканчивается и что нужно пополнить.</p></div>
   <div class="head-actions">
-   <a class="btn" href="/order.html" target="_blank" rel="noopener">🛍 Витрина</a>
-   <a class="btn" href="/price-tags.html" target="_blank" rel="noopener">▦ Конструктор ценников</a>
-   <button class="btn" id="shelf_inventory_btn" type="button">✓ Инвентаризация</button>
-   <button class="btn" id="shelf_map_btn" type="button" title="Схема полки по ячейкам A1, B2…">🗺 Карта полки</button>
-   <button class="btn" id="shelf_check_btn" type="button" title="Чек-лист «пересчитал / выставил» — инвентаризация без бумажки">☑ Проверка полки</button>
-   <button class="btn" id="shelf_sale_btn" type="button">💰 Продажи за день</button>
-   <button class="btn" id="shelf_produce_btn" type="button">+ Приход</button>
-   <button class="btn" id="shelf_transfer_btn" type="button">📦 Со склада</button>
-   <button class="btn" id="shelf_group_add" type="button" title="Несколько позиций — один средний ценник">▦ Группа</button>
+   <button class="btn" id="shelf_transfer_btn" type="button">← Со склада</button>
    <button class="btn primary" id="shelf_add" type="button">+ Позиция</button>
+   <details class="view-options">
+    <summary class="btn">Ещё ▾</summary>
+    <div class="view-options-pop">
+     <button class="btn ghost" id="shelf_inventory_btn" type="button">✓ Инвентаризация</button>
+     <button class="btn ghost" id="shelf_produce_btn" type="button">+ Ручной приход</button>
+     <button class="btn ghost" id="shelf_sale_btn" type="button">💰 Продажи за день</button>
+     <button class="btn ghost" id="shelf_group_add" type="button">▦ Группа ценника</button>
+     <button class="btn ghost" id="shelf_map_btn" type="button">🗺 Карта полки</button>
+     <button class="btn ghost" id="shelf_check_btn" type="button">☑ Проверка полки</button>
+     <a class="btn ghost" href="/price-tags.html" target="_blank" rel="noopener">▦ Ценники →</a>
+     <a class="btn ghost" href="/order.html" target="_blank" rel="noopener">🛍 Витрина →</a>
+    </div>
+   </details>
   </div>
  </div>
- <div class="toolbar shelf-toolbar" id="shelf_toolbar" style="display:flex;flex-wrap:wrap;gap:8px;margin:12px 0;align-items:center">
-  <input id="shelf_search" type="search" placeholder="Поиск по названию, артикулу или штрихкоду" style="flex:1;min-width:200px">
-  <select id="shelf_filter_status">
-   <option value="">Все позиции</option>
-   <option value="ok">В наличии</option>
-   <option value="low">Мало</option>
-   <option value="empty">Нет</option>
-   <option value="dead">Мёртвый сток</option>
-   <option value="needs">Нужны на полку</option>
-  </select>
-  <label class="check"><span class="switch"><input type="checkbox" id="shelf_filter_linked"><i></i></span>Только с кодом 1С</label>
+ <div class="v19-shelf-pulse" id="shelf_pulse" role="group" aria-label="Состояние стеллажа">
+  <button type="button" class="on" data-shelf-pulse=""><span>Все</span><b id="shelf_pulse_all">0</b></button>
+  <button type="button" data-shelf-pulse="low"><span>Мало</span><b id="shelf_pulse_low">0</b></button>
+  <button type="button" data-shelf-pulse="empty"><span>Нет</span><b id="shelf_pulse_empty">0</b></button>
+  <button type="button" data-shelf-pulse="needs"><span>Нужно пополнить</span><b id="shelf_pulse_needs">0</b></button>
+  <button type="button" data-shelf-pulse="dead"><span>Мёртвый сток</span><b id="shelf_pulse_dead">0</b></button>
+ </div>
+ <div class="toolbar shelf-toolbar v19-shelf-toolbar" id="shelf_toolbar">
+  <input id="shelf_search" type="search" placeholder="Название, артикул или штрихкод…">
+  <details class="v19-shelf-filters">
+   <summary class="btn sm">Фильтры</summary>
+   <div class="v19-shelf-filter-pop">
+    <select id="shelf_filter_status">
+     <option value="">Все позиции</option>
+     <option value="ok">В наличии</option>
+     <option value="low">Мало</option>
+     <option value="empty">Нет</option>
+     <option value="dead">Мёртвый сток</option>
+     <option value="needs">Нужны на полку</option>
+    </select>
+    <label class="check"><span class="switch"><input type="checkbox" id="shelf_filter_linked"><i></i></span>Только с кодом 1С</label>
+   </div>
+  </details>
  </div>
  <div class="kpi-grid" id="shelf_kpis"></div>
- <div class="card" id="shelf_groups_widget" style="margin-top:16px">
-  <div class="card-head">
-   <div><h2>Группы витрины</h2><p>Один средний ценник на несколько товаров — меньше бумаги на полке</p></div>
-   <button class="btn sm" id="shelf_group_add2" type="button">+ Группа</button>
-  </div>
-  <div id="shelf_groups_list"></div>
- </div>
- <div class="card" id="shelf_cash_widget" style="margin-top:16px">
-  <div class="card-head">
-   <div><h2>Касса магазина</h2><p>Деньги от стеллажа лежат физически в кассе — заберите и запишите выемку</p></div>
-   <button class="btn sm primary" id="shelf_cash_take" type="button">💰 Забрали…</button>
-  </div>
-  <div class="kpi-grid" id="shelf_cash_mini"></div>
-  <div id="shelf_cash_mini_list" style="margin-top:8px"></div>
- </div>
  <div class="shelf-grid" id="shelf_grid"></div>
- <div class="card" style="margin-top:16px">
-  <div class="card-head"><div><h2>Движения стеллажа</h2><p>Приход, продажи, списания и инвентаризации</p></div></div>
+
+ <details class="card v19-shelf-secondary" style="margin-top:16px">
+  <summary><div><h2>Розничные инструменты</h2><p>Группы среднего ценника и физическая касса магазина</p></div><span class="chip outline">подробнее</span></summary>
+  <div class="v19-shelf-secondary-body">
+   <div class="card" id="shelf_groups_widget">
+    <div class="card-head">
+     <div><h2>Группы витрины</h2><p>Один средний ценник на несколько товаров</p></div>
+     <button class="btn sm" id="shelf_group_add2" type="button">+ Группа</button>
+    </div>
+    <div id="shelf_groups_list"></div>
+   </div>
+   <div class="card" id="shelf_cash_widget">
+    <div class="card-head">
+     <div><h2>Касса магазина</h2><p>Физические деньги от продаж со Стеллажа</p></div>
+     <button class="btn sm primary" id="shelf_cash_take" type="button">Забрали…</button>
+    </div>
+    <div class="kpi-grid" id="shelf_cash_mini"></div>
+    <div id="shelf_cash_mini_list" style="margin-top:8px"></div>
+   </div>
+  </div>
+ </details>
+ <details class="card v19-shelf-moves" style="margin-top:16px">
+  <summary><div><h2>История движений</h2><p>Приход, переносы, продажи, списания и инвентаризации</p></div><span class="chip outline">аудит</span></summary>
   <div id="shelf_moves"></div>
- </div>
+ </details>
 </section>
 
 <section class="view" id="view-inventory" data-alias="inventory">
