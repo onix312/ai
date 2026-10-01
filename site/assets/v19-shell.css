@@ -946,6 +946,50 @@
     }
   }
 
+  .v19-products-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+  .v19-products-toolbar .search-box {
+    flex: 1 1 280px;
+    min-width: 220px;
+  }
+  .v19-prod-merch {
+    position: relative;
+    margin-left: auto;
+  }
+  .v19-prod-merch-pop {
+    position: absolute;
+    z-index: 30;
+    top: calc(100% + 7px);
+    right: 0;
+    display: grid;
+    gap: 8px;
+    min-width: 240px;
+    padding: 10px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: var(--panel);
+    box-shadow: var(--shadow-2);
+  }
+  .v19-prod-merch-pop .btn,
+  .v19-prod-merch-pop select {
+    width: 100%;
+  }
+  @media (max-width: 760px) {
+    .v19-products-toolbar {
+      align-items: stretch;
+      flex-wrap: wrap;
+    }
+    .v19-products-toolbar .search-box {
+      flex-basis: 100%;
+      min-width: 0;
+    }
+    .v19-prod-merch { margin-left: 0; }
+  }
+
   /* Persistent AI rail. */
   .pf-ai-rail {
     position: fixed;
