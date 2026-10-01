@@ -119,6 +119,7 @@ function variantChip(i) {
 }
 function renderShelf() {
   const s = shelfData.summary || {};
+  renderShelfPulse();
   const head = shelfData.head;
   const headHtml = head && head.text
     ? `<div class="notice" style="margin-bottom:12px"><span>✦</span><span>${esc(head.text)}${head.new_items && head.new_items.length ? ` Новинки: ${head.new_items.map((n) => '«' + esc(n) + '»').join(', ')}.` : ''}</span></div>`
@@ -537,6 +538,33 @@ function openShelfCheck() {
 }
 
 /* ============================================================ фильтры */
+function renderShelfPulse() {
+  const host = $('shelf_pulse');
+  if (!host) return;
+  const items = shelfData.items || [];
+  const counts = {
+    all: items.length,
+    low: items.filter((i) => i.status === 'low').length,
+    empty: items.filter((i) => i.status === 'empty').length,
+    dead: items.filter((i) => i.status === 'dead').length,
+    needs: items.filter((i) =>
+      i.status === 'empty' || i.status === 'low' || i.status === 'dead' || num(i.plan_qty) > 0).length,
+  };
+  const set = (id, value) => { const el = $(id); if (el) el.textContent = String(value); };
+  set('shelf_pulse_all', counts.all);
+  set('shelf_pulse_low', counts.low);
+  set('shelf_pulse_empty', counts.empty);
+  set('shelf_pulse_needs', counts.needs);
+  set('shelf_pulse_dead', counts.dead);
+  host.querySelectorAll('[data-shelf-pulse]').forEach((button) => {
+    button.classList.toggle('on', (button.dataset.shelfPulse || '') === shelfFilter.status);
+  });
+  host.querySelector('[data-shelf-pulse="low"]')?.classList.toggle('warn', counts.low > 0);
+  host.querySelector('[data-shelf-pulse="empty"]')?.classList.toggle('bad', counts.empty > 0);
+  host.querySelector('[data-shelf-pulse="needs"]')?.classList.toggle('warn', counts.needs > 0);
+  host.querySelector('[data-shelf-pulse="dead"]')?.classList.toggle('bad', counts.dead > 0);
+}
+
 function filteredShelfItems() {
   const all = shelfData.items || [];
   const q = shelfFilter.q.trim().toLocaleLowerCase('ru-RU');
@@ -1022,6 +1050,14 @@ function bind() {
       if (btn) openShelfGroup(btn.dataset.shelfGroupEdit);
     });
   }
+  const shelfPulse = $('shelf_pulse');
+  if (shelfPulse) shelfPulse.addEventListener('click', (e) => {
+    const button = e.target.closest('[data-shelf-pulse]');
+    if (!button) return;
+    const select = $('shelf_filter_status');
+    if (select) select.value = button.dataset.shelfPulse || '';
+    applyShelfFilter();
+  });
   if ($('shelf_search')) {
     $('shelf_search').addEventListener('input', applyShelfFilter);
     $('shelf_filter_status').addEventListener('change', applyShelfFilter);
