@@ -5360,7 +5360,7 @@
 <datalist id="print_groups_datalist"></datalist>
 
 <dialog id="shelf_modal" class="modal">
- <div class="modal-head"><div><h3 id="shelf_modal_title">Позиция стеллажа</h3><p>Штуки на полке, цена ценника и себестоимость</p></div>
+ <div class="modal-head"><div><h3 id="shelf_modal_title">Позиция стеллажа</h3><p>Карточка витрины. Остаток меняется только операциями.</p></div>
   <button class="icon-btn" type="button" data-close="shelf_modal">✕</button></div>
  <div class="modal-body">
   <input id="shf_nom_id" type="hidden">
@@ -5374,14 +5374,14 @@
    <div class="notice" id="shf_stock_info" hidden><span>ℹ</span><span id="shf_stock_info_text"></span></div>
   </section>
   <section class="form-section">
-   <h3>Товар и остаток</h3>
+   <h3>Товар и учёт</h3>
    <div class="form-grid">
     <label>Название<input id="shf_name" placeholder="Адресник для кота"></label>
     <label>Позиция каталога
      <select id="shf_catalog_id"><option value="">Без привязки</option></select></label>
     <label>Цена ценника, ₽<input id="shf_price" type="number" min="0" step="10" placeholder="450"></label>
     <label>Себестоимость штуки, ₽<input id="shf_cost" type="number" min="0" step="1" placeholder="60"></label>
-    <label>Начальный остаток, шт<input id="shf_qty" type="number" min="0" step="1" placeholder="10"></label>
+    <label>Остаток по операциям, шт<input id="shf_qty" type="number" min="0" step="1" value="0" readonly aria-readonly="true"><small class="muted">Приход, перенос, продажа, списание или инвентаризация</small></label>
     <label>Мин. остаток для предупреждения, шт<input id="shf_min" type="number" min="0" step="1" placeholder="3"></label>
    </div>
     <label style="margin-top:10px">Ячейка на схеме полки<input id="shf_cell" placeholder="A1, B3… — оставьте пустым, если без места"></label>
@@ -5424,7 +5424,7 @@
    <input type="file" id="shf_photo_file" accept="image/*" hidden>
   </div>
  </div>
- <div class="modal-foot"><button class="btn danger" type="button" id="shelf_delete" hidden>Удалить</button><span class="spacer"></span>
+ <div class="modal-foot"><button class="btn danger" type="button" id="shelf_delete" hidden>Убрать с витрины</button><span class="spacer"></span>
   <button class="btn" type="button" data-close="shelf_modal">Отмена</button>
   <button class="btn primary" type="button" id="shelf_save">Сохранить</button></div>
 </dialog>
