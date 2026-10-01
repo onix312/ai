@@ -18,6 +18,7 @@ PF.state.report = null;
 PF.state.reportSales = null;
 
 let shelfCash = null;
+let moneySources = null;
 let repPeriod = 'month', repOffset = 0;
 let salesFilter = { q: '', source: '' };
 let editingAccount = null, editingChannel = null, editingFixed = null,
@@ -447,6 +448,17 @@ function renderFinancialAttention(data) {
       'details', money(shelfCash.in_shop));
   }
 
+  if (moneySources && moneySources.bank && (moneySources.bank.pending_review || []).length) {
+    push('warn', 'Банк требует сверки',
+      (moneySources.bank.pending_review || []).length + ' поступлений не разобраны',
+      'sources', nfmt((moneySources.bank.pending_review || []).length));
+  }
+  if (moneySources && moneySources.sbp && (moneySources.sbp.pending || []).length) {
+    push('warn', 'СБП ждёт подтверждения',
+      (moneySources.sbp.pending || []).length + ' платежей ожидают решения',
+      'sources', nfmt((moneySources.sbp.pending || []).length));
+  }
+
   host.innerHTML = items.length
     ? items.slice(0, 6).map((item) => '<div class="v19-fin-attention ' + item.level + '">'
       + '<span class="v19-fin-attention-dot"></span>'
@@ -456,6 +468,60 @@ function renderFinancialAttention(data) {
       + '</div>').join('')
     : '<div class="v19-fin-clear"><span>✓</span><div><b>Критичных финансовых действий нет</b>'
       + '<small>Просрочек, отрицательных касс и обязательств к уплате сейчас не видно.</small></div></div>';
+}
+
+/* ============================================ v19: каналы денег */
+async function refreshMoneySources() {
+  const settled = await Promise.allSettled([
+    get('/api/bank/state'),
+    get('/api/sbp/state'),
+    get('/api/cashier/sessions'),
+  ]);
+  moneySources = {
+    bank: settled[0].status === 'fulfilled' ? settled[0].value : null,
+    sbp: settled[1].status === 'fulfilled' ? settled[1].value : null,
+    cashier: settled[2].status === 'fulfilled' ? settled[2].value : null,
+  };
+  renderMoneySources();
+  if (PF.state.money) renderFinancialAttention(PF.state.money);
+  return moneySources;
+}
+
+function renderMoneySources() {
+  const host = $('fin_sources');
+  if (!host) return;
+  if (!moneySources) {
+    host.innerHTML = '<div class="v19-fin-source skel"></div><div class="v19-fin-source skel"></div><div class="v19-fin-source skel"></div>';
+    return;
+  }
+  const bank = moneySources.bank;
+  const sbp = moneySources.sbp;
+  const cashier = moneySources.cashier;
+  const bankPending = bank ? (bank.pending_review || []).length : null;
+  const sbpPending = sbp ? (sbp.pending || []).length : null;
+  const cashierOnline = cashier ? num(cashier.online) : null;
+  const cashierTotal = cashier ? num(cashier.total) : null;
+
+  const card = (kind, title, value, detail, href, badge, bad) =>
+    '<a class="v19-fin-source ' + (bad ? 'warn' : '') + '" href="' + href + '">'
+    + '<span class="v19-fin-source-ic ' + kind + '"></span>'
+    + '<div><small>' + esc(title) + '</small><b>' + esc(value) + '</b><span>' + esc(detail) + '</span></div>'
+    + '<strong>' + esc(badge) + '</strong><i>→</i></a>';
+
+  host.innerHTML = [
+    card('bank', 'Банк',
+      bankPending == null ? 'нет связи' : (bankPending ? nfmt(bankPending) + ' на сверку' : 'всё сверено'),
+      bank ? 'поступления и выписка' : 'сводка недоступна',
+      '/bank.html', bank && bank.auto_confirm ? 'авто' : 'ручной', num(bankPending) > 0),
+    card('sbp', 'СБП',
+      sbpPending == null ? 'нет связи' : (sbpPending ? nfmt(sbpPending) + ' ожидают' : 'нет ожиданий'),
+      sbp && sbp.enabled ? 'приём платежей включён' : 'проверьте настройки СБП',
+      '/sbp.html', sbp && sbp.enabled ? 'включено' : 'выкл', num(sbpPending) > 0),
+    card('cash', 'Касса',
+      cashierOnline == null ? 'нет связи' : nfmt(cashierOnline) + ' онлайн',
+      cashierTotal == null ? 'сессии недоступны' : nfmt(cashierTotal) + ' зарегистрировано',
+      '/cashier.html', cashierOnline ? 'на смене' : 'офлайн', cashierTotal > 0 && cashierOnline === 0),
+  ].join('');
 }
 
 /* ============================================ касса стеллажа (магазин) */
@@ -799,8 +865,19 @@ function bind() {
       const debtsCard = document.querySelector('.v19-fin-debts');
       if (debtsCard) debtsCard.scrollIntoView({ block: 'start', behavior: 'smooth' });
     }
+    if (focus === 'sources') {
+      const sources = document.querySelector('.v19-fin-sources');
+      if (sources) sources.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    }
   });
 
+
+  btn('fin_sources_refresh', async () => {
+    const button = $('fin_sources_refresh');
+    if (button) button.disabled = true;
+    await refreshMoneySources();
+    if (button) button.disabled = false;
+  });
 
   btn('fin_export_tx', async () => {
     try {
@@ -1131,6 +1208,7 @@ PF.on('ready', () => {
   bind();
   refreshMoney().then(() => { renderAll(); refreshReport(); });
   refreshShelfCash();
+  refreshMoneySources();
   loadAbc();
   const days = $('abc_days');
   if (days) days.addEventListener('click', (e) => {
@@ -1144,11 +1222,15 @@ PF.on('ready', () => {
 PF.on('money', PF.whenView(['finance', 'calc'], renderAll));
 PF.on('finance', PF.whenView(['finance', 'calc'], () => { if (PF.state.money) renderAll(); }));
 PF.on('view', (d) => {
-  if (d.view === 'finance' || d.view === 'settings') { refreshMoney(); refreshShelfCash(); }
+  if (d.view === 'finance' || d.view === 'settings') {
+    refreshMoney();
+    refreshShelfCash();
+    if (d.view === 'finance') refreshMoneySources();
+  }
 });
 
 PF.modules.finance = {
-  refreshMoney, renderAll, openAccount, openChannel, openFixed, openExpCat,
+  refreshMoney, refreshMoneySources, renderAll, openAccount, openChannel, openFixed, openExpCat,
   openPayment, fillSelects, MODE_HINTS,
 };
 })();
