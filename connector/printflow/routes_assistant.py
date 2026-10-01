@@ -104,6 +104,90 @@ def assistant_journal_recent(api: Any, ctx: Ctx):
     return {"ok": True, "events": service.journal_recent(api.db, int(ctx.num("limit", 30)))}
 
 
+@router.get("/api/assistant/actions/v19", doc="PrintFlow 19: доменный каталог действий для Luma")
+def assistant_actions_v19(api: Any, ctx: Ctx):
+    """Структурированный business-action catalog PrintFlow 19.
+
+    Luma видит только заранее объявленные действия. URL, риск, обязательные
+    параметры, подтверждение и способ независимой проверки принадлежат
+    PrintFlow, а не генерируются моделью.
+    """
+    from . import action_registry
+
+    domain = str(ctx.one("domain") or "").strip()
+    problems = action_registry.validate()
+    rows = action_registry.payload(domain)
+    return {
+        "ok": not problems,
+        "version": 19,
+        "domain": domain,
+        "count": len(rows),
+        "domains": action_registry.domains(),
+        "actions": rows,
+        "problems": problems,
+    }
+
+
+@router.post("/api/assistant/ui-context", doc="PrintFlow 19: контекст активного экрана")
+def assistant_ui_context(api: Any, ctx: Ctx):
+    """Принять только безопасный структурный контекст открытого экрана.
+
+    Здесь нет HTML, произвольных команд или секретов: только view/sub,
+    выбранная сущность и скалярные фильтры. Контекст помогает понимать
+    фразы вроде «его» и «этот заказ», но сам ничего не выполняет.
+    """
+    body = ctx.body if isinstance(ctx.body, dict) else {}
+    view = str(body.get("view") or "").strip().casefold()[:40]
+    if view and not all(ch.isalnum() or ch in "_-" for ch in view):
+        return 400, {"ok": False, "error": "Некорректный view"}
+    sub = " ".join(str(body.get("sub") or "").split())[:120]
+
+    raw_entity = body.get("entity") if isinstance(body.get("entity"), dict) else {}
+    entity = {}
+    for key in ("type", "id", "label"):
+        value = " ".join(str(raw_entity.get(key) or "").split())
+        if value:
+            entity[key] = value[:160]
+
+    raw_filters = body.get("filters") if isinstance(body.get("filters"), dict) else {}
+    filters = {}
+    for key, value in list(raw_filters.items())[:20]:
+        name = str(key or "").strip()[:60]
+        if not name or isinstance(value, (dict, list)):
+            continue
+        filters[name] = str(value)[:160] if value is not None else ""
+
+    state = {
+        "view": view or "dashboard",
+        "sub": sub,
+        "entity": entity,
+        "filters": filters,
+    }
+    setattr(api, "_assistant_ui_context", state)
+    return {"ok": True, "ui": state}
+
+
+@router.post("/api/assistant/luma", doc="PrintFlow 19: разговор через Luma")
+def assistant_luma(api: Any, ctx: Ctx):
+    """Реплика из встроенной Nozza → материнский reasoning core Luma.
+
+    Если Luma недоступна, маршрут честно возвращает причину. UI может
+    временно откатиться к legacy brain, но v19 не создаёт второй execution
+    path: реальные действия Luma выполняет только через skill/provider слой.
+    """
+    from . import assistant as service
+
+    body = ctx.body if isinstance(ctx.body, dict) else {}
+    text = " ".join(str(body.get("text") or body.get("question") or "").split())[:1000]
+    if not text:
+        return 400, {"ok": False, "error": "Пустая фраза"}
+    session = str(body.get("session") or "printflow-v19")[:40]
+    request_id = str(body.get("request_id") or "").strip()[:80]
+    return service.agent_chat(
+        api.db, text, session=session, timeout=35.0,
+        request_id=request_id, mode="full")
+
+
 @router.get("/api/assistant/agent", doc="Помощник: жив ли агент компьютера")
 def assistant_agent(api: Any, ctx: Ctx):
     """Статус внешнего агента: стоп-слово и активное окно.
@@ -269,7 +353,9 @@ def assistant_memory_change(api: Any, ctx: Ctx):
 def assistant_context(api: Any, ctx: Ctx):
     """Сводка для боковой панели: дата, парк, очередь, долги, память, имя владельца."""
     from . import assistant_brain as brain
-    return brain.context_summary(api)
+    summary = brain.context_summary(api)
+    summary["ui"] = dict(getattr(api, "_assistant_ui_context", {}) or {})
+    return summary
 
 
 @router.get("/api/assistant/dialog", doc="Помощник: разговор по сессиям")
