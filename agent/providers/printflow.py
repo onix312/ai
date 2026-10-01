@@ -56,8 +56,16 @@ class PrintFlowProvider:
             result["panel_confirm"] = confirmed
             explain = " ".join(str(params.get("explain") or "").split())[:300]
             result["target"] = explain or result["title_action"]
+            verification = result.get("verification") if isinstance(result.get("verification"), dict) else {}
+            state = str(verification.get("state") or "")
             if not confirmed:
                 result["hint"] = "Действие чтения: выполнено без подтверждения"
+            elif state == "verified":
+                result["hint"] = (explain + " · Проверено по состоянию PrintFlow").strip(" ·")
+            elif state == "pending":
+                result["hint"] = "Команда принята; PrintFlow ещё ждёт подтверждающее состояние"
+            elif state == "failed":
+                result["hint"] = "Действие принято, но readback не подтвердил ожидаемый результат"
             elif explain and result.get("ok"):
                 result["hint"] = explain
             return result
