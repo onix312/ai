@@ -50,7 +50,8 @@ CONFIRM_RISKS = ("irreversible",)
 # потому что имеют внешний, физический или труднообратимый эффект. Остальные
 # локальные обратимые write/system skills выполняются сразу.
 DANGEROUS_SKILLS = frozenset({
-    "panel.do",             # PrintFlow catalog решает печать/деньги; outer gate сохраняем
+    "panel.do",             # Legacy PrintFlow catalog; outer gate сохраняем
+    "printflow.act",        # v19 domain action: внутренний risk принадлежит PrintFlow
     "tg.post",              # внешняя публикация от имени владельца
     "system.power",         # сон/reboot/shutdown и похожие power actions
     "system.install",       # установка ПО/моделей
@@ -143,6 +144,40 @@ SKILLS: dict[str, dict[str, Any]] = {
         "provider": "printflow",
         "requires": ("panel",), "ideas": ("И1",),
         "doc": "Числа в ответе сверяются с найденными фактами: расхождение видно как предупреждение.",
+    },
+    "printflow.context": {
+        "title": "Контекст PrintFlow",
+        "description": "Текущий экран, парк, очередь и бизнес-контекст PrintFlow.",
+        "host": "panel", "risk": "read", "params": {},
+        "provider": "printflow",
+        "requires": ("panel",), "ideas": (),
+        "doc": "Nozza использует активный экран как контекст, а не как команду.",
+    },
+    "printflow.actions": {
+        "title": "Действия PrintFlow 19",
+        "description": "Доменный каталог business-actions с риском, проверкой и подтверждением.",
+        "host": "panel", "risk": "read", "params": {"domain": "text"},
+        "provider": "printflow",
+        "requires": ("panel",), "ideas": (),
+        "doc": "URL и risk принадлежат PrintFlow; модель выбирает только известный action id.",
+    },
+    "printflow.read": {
+        "title": "Прочитать PrintFlow",
+        "description": "Выполнить только GET-действие из доменного каталога PrintFlow 19.",
+        "host": "panel", "risk": "read",
+        "params": {"action": "text", "params": "object"},
+        "provider": "printflow",
+        "requires": ("panel",), "ideas": (),
+        "doc": "Навык технически блокирует POST, даже если модель выбрала его ошибочно.",
+    },
+    "printflow.act": {
+        "title": "Изменить PrintFlow",
+        "description": "Выполнить структурированное действие PrintFlow 19 через штатный provider.",
+        "host": "panel", "risk": "write",
+        "params": {"action": "text", "params": "object", "explain": "text"},
+        "provider": "printflow",
+        "requires": ("panel",), "ideas": (),
+        "doc": "Outer Agent confirmation + внутренние metadata PrintFlow; произвольные URL запрещены.",
     },
     # --- файлы и знания (И142, И143, И144, И147, И148) ---------------------
     "files.index": {
