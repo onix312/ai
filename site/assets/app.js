@@ -17,6 +17,7 @@ const on = (id, ev, fn) => { const el = $(id); if (el) el.addEventListener(ev, f
 const put = (id, html) => { const el = $(id); if (el) el.innerHTML = html; };
 
 let dashMode = 'money';
+let aiBriefingBusy = false;
 
 /* ============================================================ дашборд */
 function kpi(label, value, sub, kind, extra) {
@@ -153,6 +154,7 @@ function renderDashboard() {
   }).join('') : '<div class="empty compact"><span>Заказов со сроками нет.</span></div>');
 
   renderOperatorFocus();
+  renderAiBriefing();
   renderOwnerCash();
   renderPlan();
   renderHealth();
@@ -164,6 +166,52 @@ function renderDashboard() {
   renderRecords();
   applyWidgets();
   applyDashOrder();
+}
+
+/* ===================================================== v19: AI-брифинг смены
+   Брифинг детерминированный: /api/assistant/day собирает те же факты, что
+   видят План, Финансы, Долги и Парк. Модель здесь не вызывается. */
+function renderAiBriefing() {
+  const host = $('dash_ai_brief');
+  if (!host) return;
+  const data = PF.state.aiBriefing;
+  if (!data) {
+    host.innerHTML = '<div class="v19-ai-brief-empty">Собираем факты смены…</div>';
+    return;
+  }
+  if (!data.ok) {
+    host.innerHTML = '<div class="v19-ai-brief-empty">' + esc(data.reason || 'Для брифинга пока мало данных.') + '</div>';
+    if ($('dash_ai_hint')) $('dash_ai_hint').textContent = 'Брифинг обновится вместе с данными цеха';
+    return;
+  }
+  const problems = new Set((data.problems || []).map((x) => String(x || '').trim()).filter(Boolean));
+  const lines = (data.lines || []).filter((line) => String(line || '').trim()).slice(0, 6);
+  host.innerHTML = lines.length
+    ? lines.map((line, index) => {
+        const text = String(line || '').trim();
+        const warn = problems.has(text) || /^не прочитано:/i.test(text);
+        return '<div class="v19-ai-line' + (warn ? ' warn' : '') + '">'
+          + '<span class="v19-ai-line-mark">' + (warn ? '!' : String(index + 1).padStart(2, '0')) + '</span>'
+          + '<span>' + esc(text.replace(/^Не прочитано:\s*/i, '')) + '</span></div>';
+      }).join('')
+    : '<div class="v19-ai-brief-empty">Срочных фактов для брифинга нет.</div>';
+  if ($('dash_ai_hint')) {
+    $('dash_ai_hint').textContent = data.hint || 'Факты из локальной базы PrintFlow';
+  }
+}
+
+async function refreshAiBriefing() {
+  if (aiBriefingBusy) return PF.state.aiBriefing;
+  aiBriefingBusy = true;
+  try {
+    PF.state.aiBriefing = await get('/api/assistant/day', { kind: 'briefing', days: 1 });
+  } catch (e) {
+    PF.state.aiBriefing = { ok: false, reason: e.message || 'Брифинг недоступен' };
+  } finally {
+    aiBriefingBusy = false;
+  }
+  if (document.querySelector('#view-dashboard.on')) renderAiBriefing();
+  return PF.state.aiBriefing;
 }
 
 /* ============================================ 13.1 (41): рекорды цеха
@@ -327,6 +375,7 @@ function renderEvents() {
 const DASH_WIDGETS = [
   ['kpis', 'Показатели смены (4 KPI)'],
   ['operator_focus', 'Сейчас нужно сделать'],
+  ['ai_brief', 'AI-брифинг смены'],
   ['due', 'Ближайшие сроки'],
   ['plan', 'План на сегодня'],
   ['health', 'Здоровье бизнеса'],
@@ -3297,9 +3346,19 @@ function bind() {
   });
   on('dash_refresh', 'click', async () => {
     try {
-      await Promise.all([PF.refreshCore(), PF.refreshFinance(), PF.refreshEvents(), refreshTimeline(), refreshPlan(), refreshInsights()]);
+      await Promise.all([PF.refreshCore(), PF.refreshFinance(), PF.refreshEvents(), refreshTimeline(), refreshPlan(), refreshInsights(), refreshAiBriefing()]);
       toast('Обновлено');
     } catch (e) { fail(e); }
+  });
+  on('dash_ai_refresh', 'click', async () => {
+    const button = $('dash_ai_refresh');
+    if (button) button.disabled = true;
+    await refreshAiBriefing();
+    if (button) button.disabled = false;
+  });
+  on('dash_ai_open', 'click', () => {
+    const button = $('pf_ai_open');
+    if (button) button.click();
   });
   on('dash_events_refresh', 'click', () => PF.refreshEvents().catch(fail));
   on('operator_focus_refresh', 'click', async () => {
@@ -3706,6 +3765,7 @@ PF.on('ready', () => {
   refreshTimeline();
   refreshPlan();
   refreshInsights();
+  refreshAiBriefing();
   loadTemplates();
   initBrowserNotify();
   checkUpdate(false);
@@ -3715,6 +3775,7 @@ PF.on('ready', () => {
   setInterval(refreshTimeline, 60000);
   setInterval(refreshPlan, 60000);
   setInterval(refreshInsights, 90000);
+  setInterval(refreshAiBriefing, 120000);
   setInterval(refreshHeartbeat, 60000);
   setInterval(refreshAchievements, 300000);
 });
