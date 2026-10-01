@@ -206,37 +206,67 @@ class Client:
     # --- исполнение -------------------------------------------------------
     def run_action(self, action: dict[str, Any], params: dict[str, Any],
                    confirmed: bool = False) -> dict[str, Any]:
-        """Выполнить действие панели. Адрес, метод и confirm — из каталога панели.
+        """Выполнить действие панели и детерминированно проверить readback.
 
-        Ассистент не конструирует URL: путь берётся из записи каталога, которую
-        отдала сама панель. Поэтому «полный доступ к панели» не превращается в
-        «ассистент дёргает любой маршрут».
+        URL по-прежнему берётся только из серверного каталога. Структурные
+        параметры разворачиваются лишь для двух исторических маршрутов, которые
+        принимают объект верхнего уровня: order_save(draft) и settings_save(patch).
         """
+        action_id = str(action.get("id") or "")
         method = str(action.get("method") or "GET").upper()
         path = str(action.get("path") or "")
         if not path.startswith("/api/"):
             return {"ok": False, "reason": f"Действие не содержит маршрута панели: «{path}»"}
-        query = {key: value for key, value in (params or {}).items()
+
+        values = dict(params or {})
+        query = {key: value for key, value in values.items()
                  if not isinstance(value, (dict, list))}
-        body = {key: value for key, value in (params or {}).items()
+        body = {key: value for key, value in values.items()
                 if isinstance(value, (dict, list))}
         if method == "POST":
             body.update(query)
-            # Подтверждение ставит человек в окне агента, а не модель: значение
-            # приходит из вызова навыка, который уже прошёл через `confirm`.
+            if action_id == "order_save" and isinstance(values.get("draft"), dict):
+                body = dict(values["draft"])
+            elif action_id == "settings_save" and isinstance(values.get("patch"), dict):
+                body = dict(values["patch"])
+            if action_id == "order_fulfill" and confirmed:
+                body.setdefault("handoff_confirmed", True)
+            # Физические маршруты используют confirmed; остальные его игнорируют.
             body.setdefault("confirmed", bool(confirmed))
             url = f"{self.url}{path}"
         else:
             url = f"{self.url}{path}"
             if query:
                 url += "?" + urllib.parse.urlencode(query)
+
         ok, payload, reason = _request(url, payload=body if method == "POST" else None,
                                        timeout=self.timeout)
         if not ok:
-            return {"ok": False, "reason": reason, "action": str(action.get("id") or path)}
-        return {"ok": True, "reason": "", "action": str(action.get("id") or path),
+            return {"ok": False, "reason": reason, "action": action_id or path}
+
+        verification = self.verify_action(action, values,
+                                          payload if isinstance(payload, dict) else {})
+        return {"ok": True, "reason": "", "action": action_id or path,
                 "method": method, "path": path, "confirmed": bool(confirmed),
-                "result": payload}
+                "result": payload, "verification": verification,
+                "verified": bool(verification.get("verified")),
+                "verification_state": str(verification.get("state") or "")}
+
+    def verify_action(self, action: dict[str, Any], params: dict[str, Any],
+                      result: dict[str, Any]) -> dict[str, Any]:
+        """Попросить Nozza проверить действие по авторитетному состоянию PrintFlow."""
+        action_id = str(action.get("id") or "").strip()
+        ok, payload, reason = _request(
+            f"{self.url}/api/assistant/verify",
+            payload={"action": action_id, "params": dict(params or {}),
+                     "result": dict(result or {})},
+            timeout=min(self.timeout, 8.0),
+        )
+        if not ok or not isinstance(payload, dict):
+            return {"ok": False, "verified": False, "state": "pending",
+                    "action": action_id, "reason": reason or "readback недоступен",
+                    "evidence": {}}
+        return payload
 
     def find_action(self, name: str) -> tuple[dict[str, Any] | None, str]:
         """Действие по имени из каталога панели — или причина, почему его нет."""
