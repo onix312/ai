@@ -21,6 +21,7 @@ const GROUP_STATUS_LABEL = {
 const KIND_LABEL = {
   produce: 'Приход', sale: 'Продажа', online: 'Продажа онлайн',
   writeoff: 'Списание', inventory: 'Инвентаризация',
+  transfer_out: 'На склад',
 };
 const STATUS_LABEL = {
   ok: 'В наличии', low: 'Мало', dead: 'Мёртвый сток', empty: 'Пусто',
@@ -187,6 +188,7 @@ function renderShelf() {
       + `<button class="btn sm ghost" type="button" data-shelf-card="${esc(i.id)}">▤ Карточка</button>`
       + `<button class="btn sm ghost" type="button" data-shelf-tag="${esc(i.id)}">▦ Ценник</button>`
       + `<button class="btn sm ghost" type="button" data-shelf-promo="${esc(i.id)}">◆ Промостенд</button>`
+      + (i.nom_id && num(i.qty) > 0 ? `<button class="btn sm ghost" type="button" data-shelf-return="${esc(i.id)}">На склад</button>` : '')
       + `<button class="btn sm" type="button" data-shelf-sell="${esc(i.id)}">−1</button>`
       + `<button class="btn sm" type="button" data-shelf-prod="${esc(i.id)}">+</button>`
       + `</div></article>`;
@@ -842,6 +844,66 @@ async function saveTransfer() {
   } catch (e) { fail(e); }
 }
 
+/* ============================================== со стеллажа на склад */
+async function moveShelfToStock(itemId) {
+  const item = (shelfData.items || []).find((x) => x.id === itemId);
+  if (!item) return fail(new Error('Позиция стеллажа не найдена'));
+  if (!item.nom_id) {
+    return fail(new Error('Сначала привяжите позицию к товару номенклатуры'));
+  }
+  let warehouses = (PF.state.warehouses || []).filter((w) =>
+    !num(w.archived) && String(w.kind || '') !== 'shelf');
+  if (!warehouses.length) {
+    try {
+      const data = await get('/api/warehouses');
+      warehouses = (data.warehouses || data.items || []).filter((w) =>
+        !num(w.archived) && String(w.kind || '') !== 'shelf');
+    } catch (e) { return fail(e); }
+  }
+  if (!warehouses.length) return fail(new Error('Нет обычного склада-получателя'));
+
+  const ans = await ask({
+    eyebrow: 'Перемещение',
+    title: `Вернуть «${item.name}» на склад`,
+    sub: `На стеллаже ${nfmt(item.qty)} шт. Перенос изменит оба регистра одной операцией.`,
+    ok: 'Переместить',
+    fields: [
+      {
+        name: 'warehouse_id', label: 'Склад-получатель', type: 'select',
+        value: warehouses[0].id,
+        options: warehouses.map((w) => ({ value: w.id, label: w.name || w.id })),
+      },
+      {
+        name: 'qty', label: 'Количество', type: 'number', value: 1,
+        min: 1, max: Math.max(1, num(item.qty)), step: 1,
+      },
+      {
+        name: 'note', label: 'Комментарий', type: 'text',
+        value: '', placeholder: 'например: убрать с витрины', required: false,
+      },
+    ],
+  });
+  if (!ans) return;
+  const qty = num(ans.qty);
+  if (qty <= 0 || qty > num(item.qty)) {
+    return fail(new Error(`Можно переместить от 1 до ${nfmt(item.qty)} шт`));
+  }
+  try {
+    await post('/api/shelf/transfer-out', {
+      item_id: item.id,
+      warehouse_id: String(ans.warehouse_id || ''),
+      qty,
+      note: String(ans.note || '').trim(),
+    });
+    await refreshShelf();
+    if (PF.refreshCore) await PF.refreshCore();
+    if (PF.modules.products && PF.modules.products.refresh) {
+      try { await PF.modules.products.refresh(); } catch (e) { /* обновится при входе */ }
+    }
+    toast('Перемещено на склад', `${item.name} · ${nfmt(qty)} шт`);
+  } catch (e) { fail(e); }
+}
+
 /* ============================================================== продажи */
 function openSales() {
   const items = (shelfData.items || []).filter((i) => num(i.qty) > 0);
@@ -1103,6 +1165,8 @@ function bind() {
       window.open(`/materials/промостенды-67x57.html?item=${encodeURIComponent(promo.dataset.shelfPromo)}`, '_blank', 'noopener');
       return;
     }
+    const back = e.target.closest('[data-shelf-return]');
+    if (back) { moveShelfToStock(back.dataset.shelfReturn); return; }
     const sell = e.target.closest('[data-shelf-sell]');
     if (sell) {
       const item = (shelfData.items || []).find((x) => x.id === sell.dataset.shelfSell);
