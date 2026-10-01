@@ -1214,4 +1214,6 @@ def context_summary(api: Any) -> dict[str, Any]:
         summary["debts"] = {"total": debts.get("total"), "count": debts.get("count"), "overdue": debts.get("overdue")}
     except Exception:
         summary["debts"] = None
+    ui = getattr(api, "assistant_ui_context", None)
+    summary["ui"] = dict(ui) if isinstance(ui, dict) else {}
     return summary

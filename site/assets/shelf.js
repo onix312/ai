@@ -630,6 +630,9 @@ function fillShelfSelectors(keep) {
 
 function openShelf(id) {
   editingShelf = id || null;
+  PF.setAssistantContext({
+    entity_type: id ? 'shelf_item' : 'shelf_item_draft', entity_id: id || '', dirty: !id,
+  });
   const i = id ? (shelfData.items || []).find((x) => x.id === id) : null;
   const d = i || {
     name: '', catalog_id: '', nom_id: '', price: '', cost_per_unit: '', qty: 0,

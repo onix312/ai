@@ -279,6 +279,7 @@ function pslotHtml(p, x) {
 function selectPrinter(pid, opts) {
   if (!pid) return;
   opts = opts || {};
+  PF.setAssistantContext({ entity_type: 'printer', entity_id: pid, dirty: false });
   const changed = PF.state.activePrinter !== pid;
   PF.state.activePrinter = pid;
   renderLive();

@@ -1516,6 +1516,9 @@ async function downloadOrderFile() {
 
 async function openOrder(id, intakeDraft, intakeMeta) {
   editingOrder = id || null;
+  PF.setAssistantContext({
+    entity_type: id ? 'order' : 'order_draft', entity_id: id || '', dirty: !id,
+  });
   orderRequestKey = id ? '' : ((window.crypto && crypto.randomUUID)
     ? `panel-order-${crypto.randomUUID()}` : `panel-order-${Date.now()}`);
   fillSelectors();

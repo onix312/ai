@@ -35,6 +35,7 @@
 """
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
 from .router import Ctx, router
@@ -263,6 +264,37 @@ def assistant_memory_change(api: Any, ctx: Ctx):
     saved = memory.remember(api.db, str(body.get("text") or ""), str(body.get("kind") or "fact"),
                             str(body.get("subject") or ""), source="panel", pinned=bool(body.get("pinned")))
     return saved if saved.get("ok") else (400, saved)
+
+
+@router.get("/api/assistant/ui-context", doc="Nozza: текущий контекст интерфейса")
+def assistant_ui_context_get(api: Any, ctx: Ctx):
+    """Эфемерный контекст панели: экран, выбранная сущность и фильтры."""
+    state = getattr(api, "assistant_ui_context", None)
+    return {"ok": True, "context": dict(state) if isinstance(state, dict) else {}}
+
+
+@router.post("/api/assistant/ui-context", doc="Nozza: обновить контекст интерфейса")
+def assistant_ui_context_set(api: Any, ctx: Ctx):
+    """UI сообщает Nozza, что сейчас видит человек. В SQLite это не сохраняется."""
+    body = ctx.body if isinstance(ctx.body, dict) else {}
+    filters = body.get("filters") if isinstance(body.get("filters"), dict) else {}
+    clean_filters: dict[str, Any] = {}
+    for key, value in list(filters.items())[:20]:
+        name = str(key or "").strip()[:80]
+        if not name or isinstance(value, (dict, list)):
+            continue
+        clean_filters[name] = value if isinstance(value, (bool, int, float)) else str(value)[:200]
+    state = {
+        "view": str(body.get("view") or "").strip()[:80],
+        "sub": str(body.get("sub") or "").strip()[:80],
+        "entity_type": str(body.get("entity_type") or "").strip()[:80],
+        "entity_id": str(body.get("entity_id") or "").strip()[:160],
+        "filters": clean_filters,
+        "dirty": bool(body.get("dirty")),
+        "updated_at": datetime.now().isoformat(timespec="seconds"),
+    }
+    api.assistant_ui_context = state
+    return {"ok": True, "context": state}
 
 
 @router.get("/api/assistant/context", doc="Помощник: что помощник видит сейчас")
