@@ -173,7 +173,7 @@ function appendProposal(action, params, explain, doScroll = true) {
   card.innerHTML =
     `<b>${esc(title)}</b><span>${esc(detail)}</span>`
     + (paramText ? `<small class="muted" style="display:block;margin-top:4px">${esc(paramText)}</small>` : '')
-    + '<small class="muted" style="display:block;margin-top:6px">Выполнение будет подключено через v19 Action Registry с проверкой и подтверждением.</small>';
+    + '<small class="muted" style="display:block;margin-top:6px">Действие выполняется только через Luma → PrintFlow Action Registry и штатное подтверждение.</small>';
   host.appendChild(card);
   if (doScroll) scrollBottom();
 }
@@ -273,7 +273,7 @@ async function confirmPending(id, confirmed) {
       id: clean,
       confirmed: !!confirmed,
     });
-    const card = document.querySelector(`[data-pending-id="${CSS.escape(clean)}"]`);
+    const card = document.querySelector(`[data-pending-id="${clean}"]`);
     if (card) card.remove();
     const nested = result && result.result && typeof result.result === 'object'
       ? result.result : {};
