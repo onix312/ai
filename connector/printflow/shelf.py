@@ -358,6 +358,8 @@ class Shelf:
         # оформляем отдельным inventory-движением — история остаётся проверяемой.
         qty_supplied = "qty" in data
         requested_qty = round(num(data.pop("qty", 0)), 2) if qty_supplied else 0.0
+        if new and requested_qty < 0:
+            raise ValueError("Начальный остаток не может быть отрицательным")
         if existing is not None and qty_supplied:
             current_qty = round(num(existing.get("qty")), 2)
             if abs(requested_qty - current_qty) > 1e-9:
@@ -434,8 +436,6 @@ class Shelf:
         # Совместимость старых импортов: стартовый остаток новой позиции
         # принимаем, но проводим как отдельную инвентаризационную операцию.
         if new and requested_qty:
-            if requested_qty < 0:
-                raise ValueError("Начальный остаток не может быть отрицательным")
             note = "Начальный остаток позиции"
             with self.db.transaction():
                 self._move(item_id, "inventory", requested_qty, note=note)
