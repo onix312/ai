@@ -77,18 +77,14 @@ class ActionCatalogTests(unittest.TestCase):
         cls.known = server_routes()
 
     def test_catalog_size_matches_documents(self):
-        """12 чтений + 8 действий с подтверждением = 20.
-
-        Число записано в `CHANGELOG.md` и в отчёте версии, поэтому состав
-        каталога pinned: добавили действие — обновите документы.
-        """
+        """v19 expands the catalog with domain reads and retail operations."""
         reading = [name for name, action in assistant.ACTIONS.items()
                    if not action["confirm"]]
         confirmed = [name for name, action in assistant.ACTIONS.items()
                      if action["confirm"]]
-        self.assertEqual(12, len(reading), sorted(reading))
-        self.assertEqual(8, len(confirmed), sorted(confirmed))
-        self.assertEqual(20, len(assistant.ACTIONS))
+        self.assertEqual(22, len(reading), sorted(reading))
+        self.assertEqual(11, len(confirmed), sorted(confirmed))
+        self.assertEqual(33, len(assistant.ACTIONS))
 
     def test_every_action_route_exists(self):
         """Половина «готового» обычно мертва — здесь это ловится тестом."""
@@ -111,10 +107,31 @@ class ActionCatalogTests(unittest.TestCase):
         """Правило репозитория: подтверждение — только для денег и печати."""
         confirmed = set(assistant.CONFIRMED_ACTIONS)
         for name in ("printer_command", "job_start", "job_cancel", "order_save",
-                     "order_status", "order_fulfill", "shelf_sale", "settings_save"):
+                     "order_status", "order_fulfill", "shelf_sale", "settings_save",
+                     "shelf_transfer_in", "shelf_transfer_out", "shelf_inventory"):
             self.assertIn(name, confirmed, f"{name} двигает деньги или станок")
-        for name in ("park", "orders", "queue", "insights", "finance", "search"):
+        for name in ("park", "orders", "queue", "insights", "finance", "search",
+                     "stock", "warehouses", "client_rfm", "anomalies", "smart_queue"):
             self.assertNotIn(name, confirmed, f"{name} — чтение, кнопка не нужна")
+
+    def test_v19_retail_actions_have_explicit_contracts(self):
+        payload = {row["id"]: row for row in assistant.actions_payload()}
+        for name in ("shelf_transfer_in", "shelf_transfer_out", "shelf_inventory"):
+            row = payload[name]
+            self.assertEqual("retail", row["domain"])
+            self.assertEqual("write", row["risk"])
+            self.assertTrue(row["confirm"])
+            self.assertTrue(row["reversible"])
+            self.assertEqual("shelf_and_stock_readback", row["verification"])
+
+    def test_v19_analytics_reads_are_safe(self):
+        payload = {row["id"]: row for row in assistant.actions_payload()}
+        for name in ("anomalies", "smart_queue", "frozen_capital",
+                     "filament_forecast", "client_rfm"):
+            row = payload[name]
+            self.assertEqual("GET", row["method"])
+            self.assertEqual("read", row["risk"])
+            self.assertFalse(row["confirm"])
 
     def test_reading_actions_are_get(self):
         for name, action in assistant.ACTIONS.items():
@@ -128,6 +145,10 @@ class ActionCatalogTests(unittest.TestCase):
             self.assertIn("confirm", row)
             self.assertIn("path", row)
             self.assertIsInstance(row["params"], list)
+            self.assertIn("domain", row)
+            self.assertIn("risk", row)
+            self.assertIn("reversible", row)
+            self.assertIn("verification", row)
 
 
 class IntentTests(unittest.TestCase):
