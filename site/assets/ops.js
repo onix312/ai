@@ -2987,7 +2987,7 @@ function renderCustomers() {
       + `<td class="right tnum">${money(customer.revenue)}</td>`
       + `<td>${customer.last_order ? esc(dateText(customer.last_order)) : '—'}</td>`
       + `<td><span class="chip ${segment[0]}">${segment[1]}</span></td>`
-      + `<td><button class="btn xs" type="button" data-cust-my="${esc(customer.id)}" title="Страница «Мой NOZZA» по коду">🔑 Мой NOZZA</button> `
+      + `<td><button class="btn xs" type="button" data-cust-my="${esc(customer.id)}" title="Страница клиента по коду">🔑 Кабинет</button> `
       + `<button class="btn xs" type="button" data-cust-wish="${esc(customer.id)}" title="Wish-list: хочу, когда будет">💌 Пожелания</button></td></tr>`;
   }).join('') : `<tr><td colspan="7">${customers.length
     ? '<div class="empty compact"><span>В этом сегменте никого не найдено.</span></div>'
@@ -3686,7 +3686,7 @@ async function openMyNozza(id) {
     const link = `${base}/my.html?code=${code}`;
     $('my_link').textContent = link;
     if (window.QR) $('my_qr').innerHTML = window.QR.svg(link, { size: 160 });
-    $('my_copy').onclick = () => copyTextLocal(link, 'Ссылка «Мой NOZZA»');
+    $('my_copy').onclick = () => copyTextLocal(link, 'Ссылка на кабинет клиента');
     $('my_open').onclick = () => window.open(link, '_blank');
   } catch (e) {
     box.textContent = '';
