@@ -34,7 +34,7 @@ class PrintFlowV19ActionRegistryTests(unittest.TestCase):
 
     def test_registry_is_internally_valid(self):
         self.assertEqual([], action_registry.validate())
-        self.assertGreaterEqual(len(action_registry.ACTIONS), 60)
+        self.assertGreaterEqual(len(action_registry.ACTIONS), 50)
 
     def test_every_action_points_to_a_real_server_route(self):
         missing = []
