@@ -20,7 +20,9 @@ function setOpen(open, focus = true) {
   trigger.setAttribute('aria-expanded', open ? 'true' : 'false');
   if (nav) nav.setAttribute('aria-expanded', open ? 'true' : 'false');
   try { localStorage.setItem('pf_v19_ai_open', open ? '1' : '0'); } catch (e) {}
-  if (open && frame && !frame.src) frame.src = frame.dataset.src || '/assistant.html?embed=1';
+  if (open && frame && !frame.getAttribute('src')) {
+    frame.setAttribute('src', frame.dataset.src || '/assistant.html?embed=1');
+  }
   if (open && focus && frame) {
     window.setTimeout(() => {
       try { frame.contentWindow && frame.contentWindow.focus(); } catch (e) {}
