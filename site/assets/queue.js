@@ -43,7 +43,17 @@ function matchJob(j, q) {
 function renderQueue() {
   const queue = PF.state.jobs.queue || [];
   const running = queue.filter((j) => j.state === 'running').length;
+  const active = queue.filter((j) => ['uploading', 'starting', 'running'].includes(j.state)).length;
+  const queued = queue.filter((j) => j.state === 'queued').length;
+  const unassigned = queue.filter((j) => j.state === 'queued' && !j.printer_id).length;
   text('queue_sub', `${queue.length} в работе и в очереди · ${running} печатается`);
+  text('queue_pulse_all', queue.length);
+  text('queue_pulse_active', active);
+  text('queue_pulse_queued', queued);
+  text('queue_pulse_unassigned', unassigned);
+  $('#queue_pulse [data-queue-pulse]').forEach((button) => {
+    button.classList.toggle('on', (button.dataset.queuePulse || 'all') === queueFilter);
+  });
 
   const tag = $('nav_queue_tag');
   tag.hidden = !queue.length;
@@ -338,6 +348,13 @@ function bind() {
   const group = $('queue_group');
   if (group) group.addEventListener('click', () => {
     queueGrouped = !queueGrouped;
+    renderQueue();
+  });
+  const pulse = $('queue_pulse');
+  if (pulse) pulse.addEventListener('click', (e) => {
+    const button = e.target.closest('[data-queue-pulse]');
+    if (!button) return;
+    queueFilter = button.dataset.queuePulse || 'all';
     renderQueue();
   });
   const filter = $('queue_filter');
