@@ -710,6 +710,14 @@ PF.on = (name, fn) => PF.bus.addEventListener(name, (e) => fn(e.detail));
    (идея 47), подключаются уже ПОСЛЕ события 'ready' — обычный PF.on('ready')
    у них не сработает никогда. PF.onReady вызывает fn сразу, если панель
    уже поднята, и честно ждёт события, если ещё нет. */
+PF.assistantContext = {
+  view: '', sub: '', entity_type: '', entity_id: '', filters: {}, dirty: false,
+};
+PF.setAssistantContext = debounce((patch = {}) => {
+  PF.assistantContext = { ...PF.assistantContext, ...patch };
+  post('/api/assistant/ui-context', PF.assistantContext).catch(() => {});
+}, 80);
+
 PF.ready = false;
 PF.dataReady = false;
 PF.onReady = (fn) => {
@@ -1077,6 +1085,9 @@ function showView(name, sub) {
   resetViewScroll();
   closeSide();
   PF.emit('view', { view: name, sub });
+  PF.setAssistantContext({
+    view: name, sub: sub || '', entity_type: '', entity_id: '', filters: {}, dirty: false,
+  });
   // Идея 47: раздел может жить в отдельном файле, который грузится при
   // первом входе. После загрузки повторяем событие — модуль отрисуется.
   if (LAZY_MODULES[name] && !lazyLoaded.has(name)) {
