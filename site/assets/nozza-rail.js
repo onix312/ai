@@ -14,6 +14,8 @@ let currentView = 'dashboard';
 let assistantStatus = null;
 let lumaStatus = null;
 let contextState = null;
+let uiEntity = {};
+let uiFilters = {};
 let busy = false;
 let initialized = false;
 
@@ -195,6 +197,26 @@ function showThinking(show) {
   scrollBottom();
 }
 
+async function publishUiContext() {
+  try {
+    await post('/api/assistant/ui-context', {
+      view: currentView,
+      sub: '',
+      entity: uiEntity,
+      filters: uiFilters,
+    });
+  } catch (e) {
+    /* context is helpful but never blocks the panel */
+  }
+}
+
+function setScreenContext(entity = {}, filters = {}) {
+  uiEntity = entity && typeof entity === 'object' ? { ...entity } : {};
+  uiFilters = filters && typeof filters === 'object' ? { ...filters } : {};
+  publishUiContext().catch(() => {});
+  renderContext();
+}
+
 async function refreshState() {
   const tasks = await Promise.allSettled([
     get('/api/assistant/status'),
@@ -209,6 +231,10 @@ async function refreshState() {
 }
 
 async function loadDialog() {
+  if (lumaStatus && lumaStatus.available) {
+    renderTurns([]);
+    return;
+  }
   try {
     const data = await get('/api/assistant/dialog', { session: SESSION, limit: 40 });
     renderTurns(data.turns || []);
@@ -219,6 +245,71 @@ async function loadDialog() {
 
 function makeRequestId() {
   return 'pf19-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
+}
+
+function appendPending(pending, skill = '') {
+  if (!pending || !pending.id) return;
+  const host = $('nozza_messages');
+  if (!host) return;
+  const card = document.createElement('div');
+  card.className = 'nozza-proposal';
+  card.dataset.pendingId = pending.id;
+  const label = pending.text || skill || 'Действие Luma';
+  card.innerHTML =
+    `<b>Требуется подтверждение</b><span>${esc(label)}</span>`
+    + '<div style="display:flex;gap:6px;margin-top:8px">'
+    + `<button class="btn sm primary" type="button" data-nozza-confirm="${esc(pending.id)}">Подтвердить</button>`
+    + `<button class="btn sm ghost" type="button" data-nozza-reject="${esc(pending.id)}">Отменить</button>`
+    + '</div>';
+  host.appendChild(card);
+  scrollBottom();
+}
+
+async function confirmPending(id, confirmed) {
+  const clean = String(id || '').trim();
+  if (!clean) return;
+  try {
+    const result = await post('/api/assistant/luma/confirm', {
+      id: clean,
+      confirmed: !!confirmed,
+    });
+    const card = document.querySelector(`[data-pending-id="${CSS.escape(clean)}"]`);
+    if (card) card.remove();
+    const nested = result && result.result && typeof result.result === 'object'
+      ? result.result : {};
+    const detail = confirmed
+      ? (result.done ? 'Действие выполнено.' : (result.reason || nested.reason || 'Действие не выполнено.'))
+      : 'Действие отменено.';
+    appendTurn('assistant', detail);
+    refreshState().catch(() => {});
+  } catch (e) {
+    appendTurn('assistant', 'Подтверждение не прошло: ' + (e.message || e));
+  }
+}
+
+async function lumaOrLegacy(clean) {
+  if (lumaStatus && lumaStatus.available) {
+    try {
+      const response = await post('/api/assistant/luma', {
+        text: clean,
+        session: SESSION,
+        source: 'printflow-v19-rail',
+        request_id: makeRequestId(),
+      });
+      if (response && response.ok !== false) return { ...response, _brain: 'luma' };
+    } catch (e) {
+      /* legacy fallback below */
+    }
+  }
+  const legacy = await post('/api/assistant/chat', {
+    contract_version: 1,
+    text: clean,
+    session: SESSION,
+    source: 'printflow-v19-rail',
+    delegate: true,
+    request_id: makeRequestId(),
+  });
+  return { ...legacy, _brain: 'legacy' };
 }
 
 async function send(text) {
@@ -233,19 +324,14 @@ async function send(text) {
   showThinking(true);
 
   try {
-    const res = await post('/api/assistant/chat', {
-      contract_version: 1,
-      text: clean,
-      session: SESSION,
-      source: 'printflow-v19-rail',
-      delegate: true,
-      request_id: makeRequestId(),
-    });
+    await publishUiContext();
+    const res = await lumaOrLegacy(clean);
     showThinking(false);
     appendTurn('assistant',
       res.reply || res.answer || res.reason || 'Нет ответа.',
       null);
     if (res.action) appendProposal(res.action, res.params || {}, res.explain || '');
+    if (res.pending && res.pending.id) appendPending(res.pending, res.skill || '');
     if (Array.isArray(res.suggestions) && res.suggestions.length) {
       const host = $('nozza_prompts');
       if (host) {
@@ -290,6 +376,16 @@ function bind() {
     }
   });
   document.addEventListener('click', (e) => {
+    const approve = e.target.closest('[data-nozza-confirm]');
+    if (approve) {
+      confirmPending(approve.dataset.nozzaConfirm, true);
+      return;
+    }
+    const reject = e.target.closest('[data-nozza-reject]');
+    if (reject) {
+      confirmPending(reject.dataset.nozzaReject, false);
+      return;
+    }
     const btn = e.target.closest('[data-nozza-prompt]');
     if (!btn) return;
     const prompt = btn.dataset.nozzaPrompt || '';
@@ -307,8 +403,11 @@ function bind() {
 
   PF.on('view', (detail) => {
     currentView = (detail && detail.view) || currentView;
+    uiEntity = {};
+    uiFilters = {};
     renderContext();
     promptSet();
+    publishUiContext().catch(() => {});
   });
 }
 
@@ -319,11 +418,19 @@ async function init() {
   currentView = (location.hash || '#dashboard').slice(1).split('/')[0] || 'dashboard';
   promptSet();
   renderContext();
-  await Promise.all([refreshState(), loadDialog()]);
+  await publishUiContext();
+  await refreshState();
+  await loadDialog();
   const restore = store.get('pf_v19_nozza_open', '0') === '1';
   if (restore && window.innerWidth > 1100) setOpen(true, false);
 }
 
 PF.onReady(() => { init().catch(() => {}); });
-PF.modules.nozzaRail = { open: openRail, close: closeRail, refresh: refreshState, send };
+PF.modules.nozzaRail = {
+  open: openRail,
+  close: closeRail,
+  refresh: refreshState,
+  send,
+  setContext: setScreenContext,
+};
 })();
