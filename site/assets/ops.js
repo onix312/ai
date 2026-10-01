@@ -241,7 +241,7 @@ function renderOrderPulse() {
   set('orders_pulse_stale', stale.length);
   host.querySelectorAll('[data-order-pulse]').forEach((button) => {
     button.classList.toggle('on',
-      PF.orderBox !== 'archived' && button.dataset.orderPulse === activePreset);
+      PF.orderBox !== 'archived' && presetMatchesFilters(button.dataset.orderPulse || 'all'));
   });
   host.querySelector('[data-order-pulse="hot"]')?.classList.toggle('alert', hot.length > 0);
   host.querySelector('[data-order-pulse="debt"]')?.classList.toggle('warn', debt.length > 0);
