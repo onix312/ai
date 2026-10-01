@@ -362,19 +362,15 @@ class Shelf:
             data["id"] = uid("shf")
         item_id = str(data["id"])
 
-        # v19: остаток стеллажа — результат операций, а не поле карточки.
-        # Новая позиция начинается с нуля; пополнение идёт через
-        # produce/transfer/inventory. Старому клиенту разрешено прислать
-        # неизменённый qty, но переписать остаток напрямую нельзя.
+        # v19: для существующей позиции остаток — результат операций, а
+        # не поле карточки. Внутренний save_item сохраняет возможность создать
+        # fixture/legacy-позицию с начальным qty; публичный /api/shelf/save
+        # отдельно запрещает этот путь. Переписать остаток существующей
+        # позиции напрямую нельзя ни при каких условиях.
         existing = None if new else self.db.one(
             "SELECT qty FROM shelf_items WHERE id=?", (item_id,))
         if new:
-            requested_qty = num(data.get("qty"))
-            if abs(requested_qty) > 1e-9:
-                raise ValueError(
-                    "Остаток нельзя задавать в карточке. Используйте приход, "
-                    "перемещение со склада или инвентаризацию.")
-            data["qty"] = 0.0
+            data["qty"] = round(num(data.get("qty")), 2)
         elif "qty" in data:
             current_qty = num((existing or {}).get("qty"))
             requested_qty = num(data.get("qty"))
