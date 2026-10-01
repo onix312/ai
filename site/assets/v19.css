@@ -1,0 +1,485 @@
+/* PrintFlow 19 — shell, motion and integrated Nozza rail.
+   Loaded last: this file changes composition without duplicating legacy page CSS. */
+
+:root {
+  --side-w: 236px;
+  --v19-rail-w: 374px;
+  --v19-shell-gap: 14px;
+  --v19-page-max: 1760px;
+  --v19-ease-out: cubic-bezier(.22, 1, .36, 1);
+  --v19-ease-spring: cubic-bezier(.2, .9, .2, 1.08);
+}
+
+/* ---------------------------------------------------------- shell */
+body {
+  background-color: var(--bg);
+  background-image: var(--bg-grad);
+}
+
+#side {
+  padding: 16px 12px 12px;
+  background: color-mix(in srgb, var(--panel) 94%, transparent);
+  border-right-color: var(--line-soft);
+  box-shadow: 12px 0 40px -38px rgba(66, 43, 29, .42);
+}
+
+.brand {
+  min-height: 52px;
+  padding: 4px 9px 12px;
+}
+.brand b {
+  font-size: 14.5px;
+  letter-spacing: .045em;
+}
+.brand small {
+  margin-top: 1px;
+  color: var(--muted);
+}
+.brand-logo {
+  border-radius: 12px;
+  filter: drop-shadow(0 6px 12px rgba(109, 40, 217, .13));
+}
+
+.nav-group-title {
+  color: color-mix(in srgb, var(--muted) 88%, var(--text));
+  letter-spacing: .115em;
+}
+.nav-link {
+  min-height: 40px;
+  margin: 2px 0;
+  border: 1px solid transparent;
+  border-radius: 12px;
+}
+.nav-link:hover {
+  background: color-mix(in srgb, var(--panel-3) 72%, transparent);
+  border-color: var(--line-soft);
+}
+.nav-link.on {
+  background: linear-gradient(135deg,
+    color-mix(in srgb, var(--accent-soft) 92%, var(--panel)),
+    color-mix(in srgb, var(--accent-soft) 60%, var(--panel)));
+  border-color: var(--accent-line);
+  box-shadow: 0 8px 22px -19px var(--accent);
+}
+.nav-link.on::before { display: none; }
+.nav-link.on .ic { transform: scale(1.05); }
+
+.v19-nozza-nav {
+  width: 100%;
+  border: 1px solid var(--accent-line);
+  background: linear-gradient(135deg,
+    color-mix(in srgb, var(--accent-soft) 78%, var(--panel)),
+    var(--panel));
+  color: var(--text);
+  text-align: left;
+}
+.v19-nozza-nav:hover {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+.v19-nozza-nav .v19-ai-dot {
+  width: 18px;
+  height: 18px;
+}
+
+#topbar {
+  padding: 0 24px;
+  background: color-mix(in srgb, var(--bg) 86%, transparent);
+  backdrop-filter: blur(18px) saturate(1.18);
+  -webkit-backdrop-filter: blur(18px) saturate(1.18);
+}
+.cmd-trigger {
+  background: color-mix(in srgb, var(--panel) 90%, transparent);
+}
+#views {
+  width: min(100%, var(--v19-page-max));
+  margin-inline: auto;
+  padding: 24px 30px 72px;
+}
+
+.view {
+  animation: v19ViewIn 220ms var(--v19-ease-out);
+}
+@keyframes v19ViewIn {
+  from { opacity: 0; transform: translateY(7px) scale(.996); }
+  to { opacity: 1; transform: none; }
+}
+
+.card, .kpi {
+  border-color: var(--line-soft);
+  box-shadow: 0 8px 24px -24px rgba(72, 50, 35, .52),
+              0 1px 0 rgba(255, 255, 255, .24) inset;
+}
+.card {
+  border-radius: 16px;
+}
+.kpi {
+  border-radius: 15px;
+}
+.kpi:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 16px 38px -30px rgba(72, 50, 35, .55);
+}
+.btn.primary {
+  background: linear-gradient(135deg, #6d28d9, #8b5cf6);
+}
+html[data-theme="dark"] .btn.primary {
+  background: linear-gradient(135deg, #9b6bf2, #c4a5ff);
+  color: #17110f;
+}
+
+/* ------------------------------------------------------ AI identity */
+.v19-ai-dot {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  flex: none;
+  border-radius: 9px 12px 9px 12px;
+  background: linear-gradient(145deg, var(--accent), var(--accent-2));
+  box-shadow: 0 7px 20px -11px var(--accent);
+}
+.v19-ai-dot::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border: 2px solid var(--accent-ink);
+  border-radius: 50%;
+  opacity: .92;
+}
+.v19-ai-dot.listening::after,
+.v19-ai-dot.thinking::after {
+  content: "";
+  position: absolute;
+  inset: -5px;
+  border: 1px solid var(--accent-line);
+  border-radius: 12px 15px 12px 15px;
+  animation: v19AiPulse 1.6s var(--v19-ease-out) infinite;
+}
+@keyframes v19AiPulse {
+  0% { transform: scale(.88); opacity: .1; }
+  55% { opacity: .7; }
+  100% { transform: scale(1.2); opacity: 0; }
+}
+
+/* ---------------------------------------------------------- Nozza */
+#nozza_rail {
+  position: fixed;
+  z-index: 72;
+  inset: var(--top-h) 0 0 auto;
+  width: min(var(--v19-rail-w), calc(100vw - var(--side-w)));
+  display: flex;
+  flex-direction: column;
+  background: color-mix(in srgb, var(--panel) 95%, transparent);
+  border-left: 1px solid var(--line);
+  box-shadow: -22px 0 52px -46px rgba(48, 31, 24, .66);
+  backdrop-filter: blur(18px) saturate(1.12);
+  -webkit-backdrop-filter: blur(18px) saturate(1.12);
+  transform: translateX(102%);
+  opacity: 0;
+  pointer-events: none;
+  transition: transform 240ms var(--v19-ease-out),
+              opacity 180ms var(--ease);
+}
+body.nozza-open #nozza_rail {
+  transform: translateX(0);
+  opacity: 1;
+  pointer-events: auto;
+}
+body.nozza-open #main {
+  margin-right: var(--v19-rail-w);
+}
+#main {
+  transition: margin-right 240ms var(--v19-ease-out);
+}
+
+.nozza-head {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  min-height: 68px;
+  padding: 13px 14px 12px 16px;
+  border-bottom: 1px solid var(--line-soft);
+}
+.nozza-head-copy {
+  flex: 1;
+  min-width: 0;
+}
+.nozza-head-copy b {
+  display: block;
+  font-size: 14.5px;
+  letter-spacing: -.01em;
+}
+.nozza-head-copy small {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.nozza-head-copy small i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--muted);
+}
+.nozza-head-copy small i.ok { background: var(--ok); }
+
+.nozza-context {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line-soft);
+  scrollbar-width: none;
+}
+.nozza-context::-webkit-scrollbar { display: none; }
+.nozza-context .chip {
+  flex: none;
+  font-size: 10.8px;
+}
+
+.nozza-messages {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 16px 14px 20px;
+}
+.nozza-welcome {
+  padding: 14px;
+  border: 1px solid var(--accent-line);
+  border-radius: 15px;
+  background: linear-gradient(145deg,
+    color-mix(in srgb, var(--accent-soft) 72%, var(--panel)),
+    var(--panel));
+  font-size: 12.5px;
+  color: var(--text-2);
+}
+.nozza-welcome b {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--text);
+}
+.nozza-turn {
+  display: flex;
+  gap: 8px;
+  margin-top: 13px;
+  animation: nozzaTurnIn 180ms var(--v19-ease-out);
+}
+.nozza-turn.user { justify-content: flex-end; }
+@keyframes nozzaTurnIn {
+  from { opacity: 0; transform: translateY(5px); }
+  to { opacity: 1; transform: none; }
+}
+.nozza-bubble {
+  max-width: 88%;
+  padding: 9px 11px;
+  border-radius: 14px;
+  font-size: 12.6px;
+  line-height: 1.48;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.nozza-turn.assistant .nozza-bubble {
+  border: 1px solid var(--line-soft);
+  background: var(--panel-2);
+  border-bottom-left-radius: 6px;
+}
+.nozza-turn.user .nozza-bubble {
+  background: var(--accent);
+  color: var(--accent-ink);
+  border-bottom-right-radius: 6px;
+}
+.nozza-proposal {
+  margin: 9px 0 0 36px;
+  padding: 10px 11px;
+  border: 1px solid var(--warn);
+  border-radius: 12px;
+  background: var(--warn-soft);
+  font-size: 11.5px;
+}
+.nozza-proposal b {
+  display: block;
+  color: var(--text);
+  margin-bottom: 2px;
+}
+.nozza-proposal span { color: var(--text-2); }
+
+.nozza-thinking {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 9px 12px;
+  margin-top: 12px;
+  border-radius: 13px;
+  background: var(--panel-2);
+}
+.nozza-thinking i {
+  width: 5px; height: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: nozzaDots 1s ease-in-out infinite;
+}
+.nozza-thinking i:nth-child(2) { animation-delay: .12s; }
+.nozza-thinking i:nth-child(3) { animation-delay: .24s; }
+@keyframes nozzaDots {
+  0%, 70%, 100% { transform: translateY(0); opacity: .38; }
+  35% { transform: translateY(-3px); opacity: 1; }
+}
+
+.nozza-prompts {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding: 8px 14px 0;
+  scrollbar-width: none;
+}
+.nozza-prompts::-webkit-scrollbar { display: none; }
+.nozza-prompts button {
+  flex: none;
+  height: 29px;
+  padding: 0 9px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel-2);
+  color: var(--text-2);
+  font-size: 10.8px;
+}
+.nozza-prompts button:hover {
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.nozza-compose {
+  padding: 10px 12px 14px;
+  border-top: 1px solid var(--line-soft);
+  background: color-mix(in srgb, var(--panel) 94%, transparent);
+}
+.nozza-compose form {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+  padding: 7px;
+  border: 1px solid var(--line);
+  border-radius: 15px;
+  background: var(--panel-2);
+  transition: border-color 150ms var(--ease), box-shadow 150ms var(--ease);
+}
+.nozza-compose form:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+#nozza_input {
+  flex: 1;
+  min-height: 36px;
+  max-height: 112px;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  box-shadow: none;
+  resize: none;
+  font-size: 12.5px;
+}
+#nozza_input:focus { box-shadow: none; background: transparent; }
+#nozza_send {
+  width: 36px;
+  height: 36px;
+  flex: none;
+  border: 0;
+  border-radius: 11px;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-size: 16px;
+}
+.nozza-compose-note {
+  display: block;
+  margin: 6px 3px 0;
+  font-size: 9.8px;
+  line-height: 1.35;
+  color: var(--muted);
+}
+
+/* Rail toggle in topbar */
+#nozza_toggle {
+  position: relative;
+}
+#nozza_toggle .v19-ai-dot {
+  width: 20px;
+  height: 20px;
+  border-radius: 7px 9px 7px 9px;
+}
+#nozza_toggle .v19-ai-dot::before {
+  width: 6px; height: 6px; border-width: 1.5px;
+}
+body.nozza-open #nozza_toggle {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: var(--accent-line);
+}
+
+/* ------------------------------------------------------- dashboard */
+#view-dashboard > .view-head {
+  margin-bottom: 20px;
+}
+#view-dashboard > .view-head h1 {
+  font-size: clamp(27px, 2.6vw, 34px);
+  font-weight: 720;
+  letter-spacing: -.035em;
+}
+#view-dashboard .operator-focus {
+  background:
+    linear-gradient(var(--panel), var(--panel)) padding-box,
+    linear-gradient(135deg, var(--accent-line), transparent 55%) border-box;
+  border-color: transparent;
+}
+
+/* ------------------------------------------------------ responsive */
+@media (max-width: 1420px) {
+  body.nozza-open #main { margin-right: 0; }
+  #nozza_rail {
+    inset-top: var(--top-h);
+    box-shadow: -30px 0 70px -30px rgba(23, 17, 15, .42);
+  }
+  body.nozza-open::after {
+    content: "";
+    position: fixed;
+    z-index: 70;
+    inset: var(--top-h) 0 0 var(--side-w);
+    background: rgba(39, 28, 23, .16);
+    backdrop-filter: blur(1px);
+    pointer-events: none;
+  }
+  body.nozza-open #nozza_rail { z-index: 73; }
+}
+
+@media (max-width: 860px) {
+  :root { --v19-rail-w: min(420px, 100vw); }
+  #views { padding-inline: 16px; }
+  #nozza_rail {
+    inset: 0 0 0 auto;
+    width: min(420px, 100vw);
+  }
+  body.nozza-open::after { inset: 0; }
+  .nozza-head { min-height: 62px; }
+}
+
+@media (max-width: 700px) {
+  #views { padding: 16px 12px 72px; }
+  #nozza_toggle { display: grid; }
+  .cmd-trigger { min-width: 0; }
+  .cmd-trigger .label { display: none; }
+  .cmd-trigger kbd { display: none; }
+  #nozza_rail { padding-bottom: 58px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #nozza_rail, #main { transition: none !important; }
+  .view, .nozza-turn, .v19-ai-dot::after, .nozza-thinking i {
+    animation: none !important;
+  }
+}
