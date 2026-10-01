@@ -139,7 +139,7 @@
 <!-- ================================================== ОБЗОР -->
 <section class="view" id="view-dashboard">
  <div class="view-head">
-  <div><span class="eyebrow">Операционная панель</span><h1>Производство сегодня</h1><p>Загрузка парка, деньги и ближайшие сроки.</p></div>
+  <div><span class="eyebrow">Операционный центр</span><h1>Сегодня</h1><p>Что требует внимания, что печатается и что делать дальше.</p></div>
   <div class="head-actions">
    <div class="seg" id="dash_period"><button data-days="7" class="on">7 дней</button><button data-days="30">30 дней</button><button data-days="90">90 дней</button></div>
    <button class="btn" id="dash_widgets_btn" type="button" title="Показать или скрыть виджеты панели"><span class="ic" data-icon="layout">◫</span>Виджеты</button>
@@ -148,22 +148,40 @@
   </div>
  </div>
 
- <!-- 18.10.0: Hero-пульт активного станка (производственный контур) -->
- <div class="card hero-pult-card" id="dash_hero_pult">
-  <div class="card-head hero-pult-head">
-   <div class="hero-pult-title-wrap">
-    <div class="hero-pult-badge-row">
-     <span class="eyebrow">Живой цех</span>
-     <span class="hero-live-dot pulse" id="dash_hero_dot"></span>
+ <!-- v19: первый экран отвечает на два вопроса — что происходит и что делать -->
+ <div class="v19-today-grid">
+  <div class="card hero-pult-card" id="dash_hero_pult">
+   <div class="card-head hero-pult-head">
+    <div class="hero-pult-title-wrap">
+     <div class="hero-pult-badge-row">
+      <span class="eyebrow">Живой цех</span>
+      <span class="hero-live-dot pulse" id="dash_hero_dot"></span>
+     </div>
+     <h2>Сейчас печатается</h2>
+     <p id="dash_active_sub">—</p>
     </div>
-    <h2>Панель принтера</h2>
-    <p id="dash_active_sub">—</p>
+    <div class="hero-pult-printers" id="dash_hero_printers"></div>
    </div>
-   <div class="hero-pult-printers" id="dash_hero_printers"></div>
+   <div id="dash_active">
+    <div class="skel-row"><i class="skel" style="width:46%"></i></div>
+    <div class="skel-row"><i class="skel" style="width:78%"></i></div>
+   </div>
   </div>
-  <div id="dash_active">
-   <div class="skel-row"><i class="skel" style="width:46%"></i></div>
-   <div class="skel-row"><i class="skel" style="width:78%"></i></div>
+
+  <div class="card v19-ai-brief" data-widget="ai_brief">
+   <div class="card-head">
+    <div><span class="eyebrow">PrintFlow AI</span><h2>Брифинг смены</h2><p>Только факты из PrintFlow, без догадок модели</p></div>
+    <button class="btn sm ghost" id="dash_ai_refresh" type="button" title="Обновить брифинг">↻</button>
+   </div>
+   <div id="dash_ai_brief" class="v19-ai-brief-body">
+    <div class="skel-row"><i class="skel" style="width:88%"></i></div>
+    <div class="skel-row"><i class="skel" style="width:72%"></i></div>
+    <div class="skel-row"><i class="skel" style="width:80%"></i></div>
+   </div>
+   <div class="v19-ai-brief-foot">
+    <span id="dash_ai_hint">Заказы · парк · деньги · долги · план</span>
+    <button class="btn sm" id="dash_ai_open" type="button">Обсудить с AI →</button>
+   </div>
   </div>
  </div>
 
