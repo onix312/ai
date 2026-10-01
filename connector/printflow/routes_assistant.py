@@ -188,6 +188,18 @@ def assistant_luma(api: Any, ctx: Ctx):
         request_id=request_id, mode="full")
 
 
+@router.post("/api/assistant/luma/confirm", doc="PrintFlow 19: подтвердить действие Luma")
+def assistant_luma_confirm(api: Any, ctx: Ctx):
+    """Подтвердить pending action без обхода Agent confirmation policy."""
+    from . import assistant as service
+
+    action_id = str(ctx.arg("id") or "").strip()
+    if not action_id:
+        return 400, {"ok": False, "error": "Не указан id подтверждения"}
+    return service.agent_confirm_action(
+        api.db, action_id, bool(ctx.arg("confirmed")))
+
+
 @router.get("/api/assistant/agent", doc="Помощник: жив ли агент компьютера")
 def assistant_agent(api: Any, ctx: Ctx):
     """Статус внешнего агента: стоп-слово и активное окно.
