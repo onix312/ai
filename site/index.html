@@ -533,6 +533,12 @@
   <div><span class="eyebrow">Производство</span><h1>Очередь печати</h1><p>Общая очередь на весь парк: задания стартуют вручную или автоматически.</p></div>
   <div class="head-actions"><label class="check"><span class="switch"><input type="checkbox" id="queue_auto"><i></i></span>Автозапуск</label><button class="btn" id="queue_next" type="button">▶ Запустить следующее</button><button class="btn primary" id="queue_add" type="button">+ Задание</button></div>
  </div>
+ <div class="v19-queue-pulse" id="queue_pulse" role="group" aria-label="Состояние очереди">
+  <button type="button" class="on" data-queue-pulse="all"><span>Всего</span><b id="queue_pulse_all">0</b></button>
+  <button type="button" data-queue-pulse="active"><span>Печатаются</span><b id="queue_pulse_active">0</b></button>
+  <button type="button" data-queue-pulse="queued"><span>Ожидают</span><b id="queue_pulse_queued">0</b></button>
+  <button type="button" data-queue-pulse="unassigned"><span>Без принтера</span><b id="queue_pulse_unassigned">0</b></button>
+ </div>
  <div class="toolbar queue-toolbar">
   <div class="search-box"><input id="queue_search" type="search" placeholder="Задание, файл, принтер, заказ…" autocomplete="off"></div>
   <div class="seg" id="queue_search_mode" role="group" aria-label="Где искать">
@@ -632,7 +638,7 @@
   <div><h2>База клиентов</h2><p>Фильтруйте сегменты или найдите человека по имени, контакту и компании.</p></div>
   <div class="toolbar"><div class="search-box"><input id="customers_search" type="search" placeholder="Имя, телефон, мессенджер…" aria-label="Найти клиента"></div></div>
  </div>
- <div class="table-wrap customers-table"><table class="data"><thead><tr><th>Клиент</th><th>Связь</th><th class="right">Заказов</th><th class="right">Выручка</th><th>Последний заказ</th><th>Сегмент</th><th>NOZZA 8.5</th></tr></thead><tbody id="customers_tbody"></tbody></table></div>
+ <div class="table-wrap customers-table"><table class="data"><thead><tr><th>Клиент</th><th>Связь</th><th class="right">Заказов</th><th class="right">Выручка</th><th>Последний заказ</th><th>Сегмент</th><th>Кабинет</th></tr></thead><tbody id="customers_tbody"></tbody></table></div>
 </section>
 
 <!-- ================================================== ФИНАНСЫ -->
@@ -4072,8 +4078,10 @@
   <button type="button" data-set-shortcut="production"><span>◉</span><b>Цех</b><small>тарифы и смены</small></button>
   <button type="button" data-set-shortcut="storage"><span>🧵</span><b>Склад</b><small>пластик и списание</small></button>
   <button type="button" data-set-shortcut="pricing"><span>💰</span><b>Цены</b><small>наценка и налоги</small></button>
-  <button type="button" data-set-shortcut="business"><span>◈</span><b>Бизнес</b><small>реквизиты и кассы</small></button>
+  <button type="button" data-set-shortcut="business"><span>◈</span><b>Бизнес</b><small>реквизиты и счета</small></button>
+  <button type="button" data-set-shortcut="cashier"><span>▦</span><b>Касса</b><small>СБП и банк</small></button>
   <button type="button" data-set-shortcut="system"><span>⚙</span><b>Система</b><small>Telegram и бэкапы</small></button>
+  <button type="button" data-set-shortcut="all"><span>☷</span><b>Все</b><small>полный список</small></button>
  </div>
 
  <div class="seg tabs settings-tabs" id="set_tabs">
@@ -4320,7 +4328,7 @@
     <div id="set_sound" class="muted">Загружаем…</div>
    </div>
    <div class="card" data-set-card>
-    <div class="card-head"><div><h2>NOZZA tour — демо для гостей</h2><p>Виртуальный принтер и демо-данные; откат по одной кнопке</p></div></div>
+    <div class="card-head"><div><h2>PrintFlow tour — демо для гостей</h2><p>Виртуальный принтер и демо-данные; откат по одной кнопке</p></div></div>
     <div id="set_tour" class="muted">Проверяем состояние…</div>
    </div>
    <div class="card" data-set-card>
@@ -5146,7 +5154,7 @@
  <div class="modal-foot"><button class="btn" type="button" data-close="wishes_modal">Закрыть</button></div>
 </form></dialog>
 <dialog class="modal narrow" id="my_nozza_modal"><form method="dialog">
- <div class="modal-head"><div><span class="eyebrow">Мой NOZZA</span><h2 id="my_title">Страница клиента</h2><p>Код даёт заказчику доступ к статусу, фото и долгу без звонка.</p></div><button class="icon-btn" type="button" data-close="my_nozza_modal">×</button></div>
+ <div class="modal-head"><div><span class="eyebrow">Кабинет клиента</span><h2 id="my_title">Страница клиента</h2><p>Код даёт заказчику доступ к статусу, фото и долгу без звонка.</p></div><button class="icon-btn" type="button" data-close="my_nozza_modal">×</button></div>
  <div class="modal-body" style="text-align:center">
   <div id="my_qr" style="margin:8px auto;width:160px"></div>
   <div id="my_code" style="font-size:26px;font-weight:800;letter-spacing:4px;font-family:monospace"></div>
