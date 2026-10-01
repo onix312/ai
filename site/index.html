@@ -307,6 +307,20 @@
    <button type="button" class="ptab" data-ptab="care" role="tab" aria-selected="false">✓ ТО и здоровье<span class="ptab-dot" id="pr_ptab_care_dot" hidden></span></button>
    <button type="button" class="ptab" data-ptab="log" role="tab" aria-selected="false">≡ Журнал</button>
   </div>
+  <div class="v19-pr-operator" id="pr_operator_bar">
+   <div class="v19-pr-operator-main">
+    <span class="eyebrow">Выбранный станок</span>
+    <b id="pr_operator_title">—</b>
+    <small id="pr_operator_sub">Состояние, текущая печать и безопасные действия</small>
+   </div>
+   <div class="v19-pr-operator-actions" id="pr_operator_actions">
+    <button class="btn sm" data-cmd="pause" type="button"><span class="ic" data-icon="pause">❙❙</span>Пауза</button>
+    <button class="btn sm primary" data-cmd="resume" type="button"><span class="ic" data-icon="play">▶</span>Продолжить</button>
+    <button class="btn sm ghost" data-ptab-jump="camera" type="button"><span class="ic" data-icon="camera">◉</span>Камера</button>
+    <button class="btn sm ghost" data-ptab-jump="ams" type="button">AMS</button>
+    <button class="btn sm danger" data-cmd="stop" type="button"><span class="ic" data-icon="stop">■</span>Стоп</button>
+   </div>
+  </div>
   <div class="ptab-pane on" id="ptab-overview" role="tabpanel">
    <div class="printer-grid">
     <div class="grid" style="gap:16px">
