@@ -5424,7 +5424,7 @@
    <input type="file" id="shf_photo_file" accept="image/*" hidden>
   </div>
  </div>
- <div class="modal-foot"><button class="btn danger" type="button" id="shelf_delete" hidden>Удалить</button><span class="spacer"></span>
+ <div class="modal-foot"><button class="btn danger" type="button" id="shelf_delete" hidden>Архивировать</button><span class="spacer"></span>
   <button class="btn" type="button" data-close="shelf_modal">Отмена</button>
   <button class="btn primary" type="button" id="shelf_save">Сохранить</button></div>
 </dialog>
@@ -5473,6 +5473,20 @@
  </div>
  <div class="modal-foot"><button class="btn" type="button" data-close="shelf_transfer_modal">Отмена</button>
   <button class="btn primary" type="button" id="shelf_transfer_save">Переместить на стеллаж</button></div>
+</dialog>
+
+<dialog id="shelf_return_modal" class="modal">
+ <div class="modal-head"><div><h3>Со стеллажа на склад</h3><p>Товар исчезнет с витрины и вернётся на выбранный учётный склад.</p></div>
+  <button class="icon-btn" type="button" data-close="shelf_return_modal">✕</button></div>
+ <div class="modal-body">
+  <input id="srf_item" type="hidden">
+  <div class="notice"><span>↩</span><span id="srf_info">—</span></div>
+  <label style="margin-top:10px">Склад назначения<select id="srf_warehouse"></select></label>
+  <label style="margin-top:10px">Количество<input id="srf_qty" type="number" min="1" step="1" value="1"></label>
+  <label style="margin-top:10px">Заметка<input id="srf_note" placeholder="например: убрать сезонный товар с витрины"></label>
+ </div>
+ <div class="modal-foot"><button class="btn" type="button" data-close="shelf_return_modal">Отмена</button>
+  <button class="btn primary" type="button" id="shelf_return_save">Переместить на склад</button></div>
 </dialog>
 
 <dialog id="shelf_sale_modal" class="modal">

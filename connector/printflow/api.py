@@ -2053,6 +2053,12 @@ class Api:
                 body.get("nom_id", ""), body.get("warehouse_id", ""),
                 num(body.get("qty")), body.get("item_id", ""),
                 body.get("note", ""), body.get("variant_id", ""))
+        if path == "/api/shelf/transfer-to-stock":
+            # Обратное перемещение: отдельный retail-регистр уменьшается,
+            # целевой учётный склад получает те же штуки одной транзакцией.
+            return 200, self.shelf.transfer_to_stock(
+                body.get("item_id", ""), body.get("warehouse_id", ""),
+                num(body.get("qty")), body.get("note", ""))
         if path == "/api/shelf/save-from-stock":
             # Новая позиция стеллажа сразу с готовым товаром со склада:
             # создание позиции и перенос штук — одной операцией.
