@@ -66,6 +66,26 @@ class ProviderRegistryTests(unittest.TestCase):
         self.assertTrue(panel_skills["panel.do"]["confirm"])
 
 
+class PanelClientV19Tests(unittest.TestCase):
+    def test_actions_groups_server_contracts_by_domain(self):
+        client = Client()
+        rows = [
+            {"id": "park", "domain": "production", "confirm": False},
+            {"id": "shelf_transfer_out", "domain": "retail", "confirm": True},
+            {"id": "shelf", "domain": "retail", "confirm": False},
+        ]
+        with patch.object(client, "status", return_value={
+            "alive": True, "actions": rows, "reason": "",
+        }):
+            payload = client.actions()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(2, payload["contract_version"])
+        self.assertEqual(["park"], payload["domains"]["production"])
+        self.assertEqual(["shelf_transfer_out", "shelf"], payload["domains"]["retail"])
+        self.assertEqual(1, payload["confirmed"])
+        self.assertEqual(2, payload["reads"])
+
+
 class ProviderImplementationTests(unittest.TestCase):
     def test_printflow_provider_preserves_panel_action_confirmation_metadata(self):
         provider = registry.for_skill("panel.do")

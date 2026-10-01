@@ -125,7 +125,7 @@ SKILLS: dict[str, dict[str, Any]] = {
         "host": "panel", "risk": "read", "params": {},
         "provider": "printflow",
         "requires": ("panel",), "ideas": ("И137",),
-        "doc": "Двадцать действий панели: двенадцать чтений и восемь с подтверждением.",
+        "doc": "Каталог доменных действий PrintFlow v19: чтения и подтверждаемые операции с серверными контрактами.",
     },
     "panel.do": {
         "title": "Действие в панели",
