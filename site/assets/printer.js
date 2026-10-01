@@ -842,13 +842,22 @@ function renderLive() {
   // только в паузе, «Стоп» приглушён вне работы.
   const cmdBtnEl = (cmd) => document.querySelector(`.cmd-btn[data-cmd="${cmd}"]`);
   const pauseBtnEl = cmdBtnEl('pause'), resumeBtnEl = cmdBtnEl('resume'), stopBtnEl = cmdBtnEl('stop');
-  if (pauseBtnEl || resumeBtnEl || stopBtnEl) {
+  const quickPause = $('pr_quick_pause'), quickResume = $('pr_quick_resume'), quickStop = $('pr_quick_stop');
+  {
     const isRun = kind === 'running';
     const isPaused = st === 'PAUSE' || st === 'PAUSED';
     if (pauseBtnEl) pauseBtnEl.hidden = !isRun;
     if (resumeBtnEl) resumeBtnEl.hidden = !isPaused;
     if (stopBtnEl) stopBtnEl.hidden = !(isRun || isPaused);
+    if (quickPause) quickPause.hidden = !isRun;
+    if (quickResume) quickResume.hidden = !isPaused;
+    if (quickStop) quickStop.hidden = !(isRun || isPaused);
   }
+  text('pr_operator_name', p.name || 'Принтер');
+  text('pr_operator_state',
+    (p.printer.state_label || STATE_LABEL[st] || st)
+    + (kind === 'running' ? ` · ${Math.round(num(p.printer.progress))}% · осталось ${minutesText(p.printer.remaining_min)}` : '')
+    + (p.connection.connected ? '' : ' · нет связи'));
   const dot = $('conn_dot');
   if (!$('offline-bar').classList.contains('show')) {
     dot.className = 'dot ' + (p.connection.connected ? 'ok' : 'warn');
@@ -2455,6 +2464,16 @@ function bind() {
   });
 
   document.addEventListener('click', async (e) => {
+    const tabJump = e.target.closest('[data-pr-tab]');
+    if (tabJump) {
+      selectPtab(tabJump.dataset.prTab);
+      const tabs = $('pr_detail_tabs');
+      if (tabs && tabs.scrollIntoView) {
+        try { tabs.scrollIntoView({ block: 'start', behavior: 'smooth' }); }
+        catch (err) { tabs.scrollIntoView(); }
+      }
+      return;
+    }
     const cmd = e.target.closest('[data-cmd]');
     if (cmd) {
       const name = cmd.dataset.cmd;
