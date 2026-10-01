@@ -355,12 +355,17 @@ function renderCash() {
   if (!data || !$('cash_kpis')) return;
   const acc = data.accounts || {};
   const debts = data.debts || {};
+  const tax = data.tax || {};
   $('cash_kpis').innerHTML = [
-    kpi('В кассе', money(acc.total), `${(acc.accounts || []).length} касс(ы) · наличные, карта, счёт`, num(acc.total) >= 0 ? 'ok' : 'bad'),
-    kpi('Должны нам', money(debts.total), `${nfmt(debts.count)} заказ(ов) не закрыты`, num(debts.total) ? 'warn' : 'ok'),
-    kpi('Просрочка', money(debts.overdue), `дольше ${nfmt(PF.state.settings.debt_alert_days, 0)} дней`,
+    kpi('Доступно сейчас', money(acc.total), `${(acc.accounts || []).length} касс(ы) и счёта`, num(acc.total) >= 0 ? 'ok' : 'bad'),
+    kpi('К получению', money(debts.total), `${nfmt(debts.count)} заказ(ов) с долгом`, num(debts.total) ? 'warn' : 'ok'),
+    kpi('Просрочено', money(debts.overdue), `дольше ${nfmt(PF.state.settings.debt_alert_days, 0)} дней`,
       num(debts.overdue) ? 'bad' : 'ok'),
+    kpi('К уплате', money(tax.total_due), tax.mode_name ? `налоги и взносы · ${esc(tax.mode_name)}` : 'налоги и взносы',
+      num(tax.total_due) ? 'warn' : 'ok'),
   ].join('');
+  renderFinanceResult(data);
+  renderFinancialAttention(data);
 
   $('cash_accounts').innerHTML = (acc.accounts || []).length
     ? acc.accounts.map((a) => `<div class="mini-row">`
@@ -384,6 +389,75 @@ function renderCash() {
     : '<tr><td colspan="6"><div class="empty compact"><span>Все заказы оплачены полностью.</span></div></td></tr>';
 }
 
+function renderFinanceResult(data) {
+  const host = $('fin_result');
+  if (!host) return;
+  const pnl = data.pnl || {};
+  const month = pnl.current || {};
+  const period = (PF.state.finance && PF.state.finance.summary) || {};
+  const days = num(period.period_days, 30);
+  if ($('fin_result_sub')) {
+    $('fin_result_sub').textContent = `Выбранный период: ${nfmt(days)} дн. · месяц отдельно`;
+  }
+  host.innerHTML = '<div class="v19-fin-result-list">'
+    + row('Доход за период', money(period.income))
+    + row('Расход + налоги', money(num(period.expense) + num(period.taxes)))
+    + row('Прибыль за период', money(period.profit), num(period.profit) >= 0 ? 'pos' : 'neg')
+    + row('Маржа периода', pct(period.margin))
+    + '<span class="v19-fin-result-sep"></span>'
+    + row('Прибыль текущего месяца', money(month.profit), num(month.profit) >= 0 ? 'pos total' : 'neg total')
+    + '</div>';
+}
+
+function renderFinancialAttention(data) {
+  const host = $('fin_attention');
+  if (!host) return;
+  const acc = data.accounts || {};
+  const debts = data.debts || {};
+  const tax = data.tax || {};
+  const items = [];
+  const push = (level, title, detail, focus, value) =>
+    items.push({ level, title, detail, focus, value });
+
+  if (num(debts.overdue) > 0) {
+    const count = (debts.rows || []).filter((d) => d.overdue).length;
+    push('bad', 'Просроченная дебиторка', `${nfmt(count)} клиент(ов) требуют внимания`,
+      'debts', money(debts.overdue));
+  } else if (num(debts.total) > 0) {
+    push('warn', 'Есть неоплаченные заказы', `${nfmt(debts.count)} заказ(ов), пока без просрочки`,
+      'debts', money(debts.total));
+  }
+
+  if (num(tax.total_due) > 0) {
+    push('warn', 'Налоги и взносы к уплате',
+      tax.mode_name ? `режим: ${tax.mode_name}` : 'проверьте налоговый календарь',
+      'reports', money(tax.total_due));
+  }
+
+  const negative = (acc.accounts || []).filter((a) => num(a.balance) < -0.005);
+  if (negative.length) {
+    push('bad', 'Отрицательный остаток по счёту',
+      negative.slice(0, 2).map((a) => a.name || a.id).join(' · '),
+      'details', money(negative.reduce((sum, a) => sum + Math.abs(num(a.balance)), 0)));
+  }
+
+  if (shelfCash && num(shelfCash.in_shop) > 0) {
+    push('info', 'Деньги лежат в кассе Стеллажа',
+      'сверьте фактическую кассу магазина и отметьте выемку',
+      'details', money(shelfCash.in_shop));
+  }
+
+  host.innerHTML = items.length
+    ? items.slice(0, 6).map((item) => '<div class="v19-fin-attention ' + item.level + '">'
+      + '<span class="v19-fin-attention-dot"></span>'
+      + '<div><b>' + esc(item.title) + '</b><small>' + esc(item.detail) + '</small></div>'
+      + '<strong>' + item.value + '</strong>'
+      + '<button class="btn sm ghost" type="button" data-fin-focus="' + esc(item.focus) + '">Открыть</button>'
+      + '</div>').join('')
+    : '<div class="v19-fin-clear"><span>✓</span><div><b>Критичных финансовых действий нет</b>'
+      + '<small>Просрочек, отрицательных касс и обязательств к уплате сейчас не видно.</small></div></div>';
+}
+
 /* ============================================ касса стеллажа (магазин) */
 async function refreshShelfCash() {
   try {
@@ -393,6 +467,7 @@ async function refreshShelfCash() {
     shelfCash = null;
   }
   renderShelfCash();
+  if (PF.state.money) renderFinancialAttention(PF.state.money);
 }
 
 function renderShelfCash() {
@@ -702,6 +777,30 @@ function bind() {
   });
 
   const btn = (id, fn) => { const el = $(id); if (el) el.addEventListener('click', fn); };
+  const attention = $('fin_attention');
+  if (attention) attention.addEventListener('click', (e) => {
+    const action = e.target.closest('[data-fin-focus]');
+    if (!action) return;
+    const focus = action.dataset.finFocus;
+    if (focus === 'reports') {
+      const tab = document.querySelector('#fin_tabs [data-pane="reports"]');
+      if (tab) tab.click();
+      return;
+    }
+    if (focus === 'details') {
+      const details = document.querySelector('.v19-fin-details');
+      if (details) {
+        details.open = true;
+        details.scrollIntoView({ block: 'start', behavior: 'smooth' });
+      }
+      return;
+    }
+    if (focus === 'debts') {
+      const debtsCard = document.querySelector('.v19-fin-debts');
+      if (debtsCard) debtsCard.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    }
+  });
+
 
   btn('fin_export_tx', async () => {
     try {
