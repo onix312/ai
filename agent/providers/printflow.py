@@ -21,6 +21,10 @@ class PrintFlowProvider:
             ProviderSkill("panel.actions"),
             ProviderSkill("panel.do", reversible=False),
             ProviderSkill("panel.ask"),
+            ProviderSkill("printflow.context"),
+            ProviderSkill("printflow.actions"),
+            ProviderSkill("printflow.read"),
+            ProviderSkill("printflow.act", reversible=False),
             ProviderSkill("day.briefing"),
             ProviderSkill("day.summary"),
         ),
@@ -33,6 +37,37 @@ class PrintFlowProvider:
         panel = runner.panel
         if skill_name == "panel.actions":
             return panel.actions()
+        if skill_name == "printflow.context":
+            return panel.context()
+        if skill_name == "printflow.actions":
+            return panel.domain_actions(str(params.get("domain") or ""))
+        if skill_name == "printflow.read":
+            action = str(params.get("action") or "").strip()
+            inner = params.get("params")
+            values = inner if isinstance(inner, dict) else {}
+            if not action:
+                return {"ok": False, "reason": "Не указано действие PrintFlow"}
+            return panel.run_domain_action(action, values, read_only=True)
+        if skill_name == "printflow.act":
+            action_name = str(params.get("action") or "").strip()
+            if not action_name:
+                return {"ok": False, "reason": "Не указано действие PrintFlow"}
+            action, why = panel.find_domain_action(action_name)
+            if action is None:
+                return {"ok": False, "reason": why}
+            inner = params.get("params")
+            values = inner if isinstance(inner, dict) else {}
+            # Outer Agent skill has already passed its own confirmation gate.
+            # The inner flag remains canonical metadata owned by PrintFlow.
+            confirmed = bool(action.get("confirm"))
+            result = panel.run_domain_action(
+                action_name, values, confirmed=confirmed, read_only=False)
+            explain = " ".join(str(params.get("explain") or "").split())[:300]
+            result["target"] = explain or str(
+                action.get("title") or action.get("id") or action_name)
+            if explain and result.get("ok"):
+                result["hint"] = explain
+            return result
         if skill_name == "panel.ask":
             question = str(params.get("question") or "").strip()
             if not question:
