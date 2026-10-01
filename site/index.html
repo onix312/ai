@@ -1,77 +1,85 @@
 <!DOCTYPE html>
-<html lang="ru" data-theme="light" data-accent="indigo"><head>
+<html lang="ru" data-theme="light" data-accent="violet"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="light dark">
-<title>NOZZA · PrintFlow — управление 3D-производством</title>
+<title>PrintFlow 19 — управление 3D-производством</title>
 <link rel="icon" href="assets/brand/favicon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="assets/brand/nozza-mark.svg">
 <link rel="manifest" href="/manifest.webmanifest">
-<meta name="theme-color" content="#f5f7fb">
+<meta name="theme-color" content="#f6f1ea">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="PrintFlow">
 <script src="assets/theme-init.js?v=18.23.1"></script>
-<link rel="stylesheet" href="assets/tokens.css?v=18.23.1">
+<link rel="stylesheet" href="assets/tokens.css?v=19.0.0">
 <link rel="stylesheet" href="assets/fonts.css?v=18.23.1">
 <link rel="stylesheet" href="assets/theme.css?v=18.23.1">
 <link rel="stylesheet" href="assets/app.css?v=18.23.1">
 <link rel="stylesheet" href="assets/more.css?v=18.23.1">
 <link rel="stylesheet" href="assets/controls.css?v=18.23.1">
-<link rel="stylesheet" href="assets/refine.css?v=18.23.1">
+<link rel="stylesheet" href="assets/refine.css?v=18.23.1">\n<link rel="stylesheet" href="assets/v19.css?v=19.0.0">
 </head><body>
 <a class="skip-link" href="#views" id="skip_link">Перейти к содержимому</a>
 <div class="top-load" id="top_load" hidden aria-hidden="true"></div>
 <div class="splash" id="splash" aria-hidden="true"><div class="splash-mark"><svg class="splash-svg" viewBox="0 0 72 72" width="72" height="72" role="img" aria-label="NOZZA">
-   <defs><linearGradient id="splashGrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#4f46e5"/><stop offset="100%" stop-color="#7c3aed"/></linearGradient></defs>
+   <defs><linearGradient id="splashGrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#6d28d9"/><stop offset="100%" stop-color="#8b5cf6"/></linearGradient></defs>
    <rect class="splash-layer" x="2" y="2" width="68" height="68" rx="18" fill="url(#splashGrad)" style="--l:0"/>
    <rect class="splash-layer" x="16" y="16" width="40" height="6" rx="3" fill="#fff" opacity=".95" style="--l:1"/>
    <rect class="splash-layer" x="19" y="26" width="34" height="6" rx="3" fill="#fff" opacity=".85" style="--l:2"/>
    <rect class="splash-layer" x="23" y="36" width="26" height="6" rx="3" fill="#fff" opacity=".72" style="--l:3"/>
    <rect class="splash-layer" x="27" y="46" width="18" height="6" rx="3" fill="#fff" opacity=".58" style="--l:4"/>
    <circle class="splash-layer splash-dot" cx="36" cy="61" r="4" fill="#fff" opacity=".95" style="--l:5"/>
-  </svg><i></i></div><b>NOZZA · PrintFlow</b><span>Печатаем панель…</span></div>
+  </svg><i></i></div><b>PrintFlow 19</b><span>Поднимаем рабочее пространство…</span></div>
 <button class="up-btn" id="up_btn" type="button" aria-label="Наверх" hidden>↑</button>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs><linearGradient id="pfgrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="var(--accent)"></stop><stop offset="100%" stop-color="var(--accent-2)"></stop></linearGradient></defs></svg>
 
 <div id="shell">
 <nav id="side">
- <div class="brand"><img class="brand-logo" src="assets/brand/nozza-mark.svg" alt="NOZZA" width="38" height="38"><div><b>NOZZA</b><small>PrintFlow · цех</small></div></div>
+ <div class="brand"><img class="brand-logo" src="assets/brand/nozza-mark.svg" alt="" width="38" height="38"><div><b>PrintFlow</b><small>v19 · локальный цех</small></div></div>
  <label class="nav-find"><span>⌕</span><input id="nav_find" type="search" placeholder="Найти раздел…" autocomplete="off"></label>
  <div class="side-scroll" id="nav_scroll">
   <div class="nav-group">
-   <div class="nav-group-title">Рабочее место</div>
-   <a class="nav-link" href="#dashboard" data-view="dashboard" data-find="обзор сегодня панель дашборд"><span class="ic" data-icon="dashboard">◈</span>Сегодня</a>
+   <div class="nav-group-title">Сегодня</div>
+   <a class="nav-link" href="#dashboard" data-view="dashboard" data-find="обзор сегодня панель действия дашборд"><span class="ic" data-icon="dashboard">◈</span>Рабочий день</a>
+  </div>
+  <div class="nav-group">
+   <div class="nav-group-title">Продажи</div>
    <a class="nav-link" href="#orders" data-view="orders" data-find="заказ канбан выдать срок клиент"><span class="ic" data-icon="kanban">▦</span>Заказы<span class="tag" id="nav_orders_tag" hidden></span></a>
    <a class="nav-link" href="#customers" data-view="customers" data-find="клиент crm телефон повторный отзыв пожелание"><span class="ic" data-icon="users">◎</span>Клиенты</a>
+   <a class="nav-link" href="#shelf" data-view="shelf" data-find="стеллаж витрина розница продажи полка товар"><span class="ic" data-icon="store">▤</span>Стеллаж<span class="tag" id="nav_shelf_tag" hidden></span></a>
   </div>
   <div class="nav-group">
    <div class="nav-group-title">Производство</div>
    <a class="nav-link" href="#printers" data-view="printers" data-find="принтер камера ams пауза стоп bambu"><span class="ic" data-icon="printer">◉</span>Принтеры<span class="tag" id="nav_printers_tag" hidden></span></a>
    <a class="nav-link" href="#queue" data-view="queue" data-find="очередь печать задание журнал старт"><span class="ic" data-icon="queue">≡</span>Очередь<span class="tag" id="nav_queue_tag" hidden></span></a>
-   <a class="nav-link" href="#products" data-view="products" data-views="products batches documents warehouses shelf inventory" data-find="товар номенклатура sku партия документ склад стеллаж пластик катушка инвентарь"><span class="ic" data-icon="box">▩</span>Склад<span class="tag warn" id="nav_products_tag" hidden></span><span class="tag" id="nav_shelf_tag" hidden></span><span class="tag" id="nav_inventory_tag" hidden></span></a>
   </div>
   <div class="nav-group">
-   <div class="nav-group-title">Управление</div>
+   <div class="nav-group-title">Ресурсы</div>
+   <a class="nav-link" href="#products" data-view="products" data-views="products batches documents warehouses inventory" data-find="товар номенклатура sku партия документ склад пластик катушка инвентарь"><span class="ic" data-icon="box">▩</span>Товары и склад<span class="tag warn" id="nav_products_tag" hidden></span><span class="tag" id="nav_inventory_tag" hidden></span></a>
+  </div>
+  <div class="nav-group">
+   <div class="nav-group-title">Бизнес</div>
    <a class="nav-link" href="#finance" data-view="finance" data-find="финансы учёт налог прибыль долг проводка доход расход"><span class="ic" data-icon="ruble">₽</span>Финансы</a>
-   <a class="nav-link nav-link-ext" href="/assistant.html" target="_blank" rel="noopener" data-find="помощник ассистент модель ollama разговор голос каталог действий" aria-label="Открыть панель помощника в отдельной вкладке"><span class="ic" data-icon="sparkles">✦</span><span>Помощник</span><small>отдельная панель ↗</small></a>
+   <button class="nav-link v19-nozza-nav" id="nozza_nav_open" type="button" data-find="nozza нозза luma люма помощник ии ассистент"><span class="v19-ai-dot" aria-hidden="true"></span><span>Nozza</span><small style="margin-left:auto;color:var(--muted)">AI</small></button>
   </div>
   <div class="nav-group">
-   <details class="nav-more" id="nav_more"><summary class="nav-group-title">Все разделы</summary>
+   <details class="nav-more" id="nav_more"><summary class="nav-group-title">Дополнительно</summary>
     <div class="nav-more-section">
-     <a class="nav-link nav-link-ext" href="/control.html" data-find="пульт цеха телефон планшет парк принтеров очередь ams камера киоск"><span class="ic" data-icon="layout">▤</span><span>Пульт цеха</span><small>страница →</small></a>
-     <a class="nav-link" href="#conveyor" data-view="conveyor" data-find="конвейер farmloop farm loop снятие детали серия цикл допуск датчик камера автоматика"><span class="ic" data-icon="refresh">↻</span>Конвейер</a>
-     <a class="nav-link" href="#ops10" data-view="ops10" data-find="центр 10.0 смена inbox воронка автоматизация правила dry run производство"><span class="ic" data-icon="hexagon">◆</span>Центр смены</a>
-     <a class="nav-link" href="#calc" data-view="calc" data-find="калькулятор цена себестоимость наценка"><span class="ic" data-icon="calculator">⌁</span>Калькулятор</a>
-     <a class="nav-link" href="#niches" data-view="niches" data-find="ниша гипотеза спрос конверсия прибыль тест"><span class="ic" data-icon="target">◫</span>Ниши</a>
-     <a class="nav-link nav-link-featured" href="#print" data-view="print" data-find="печать формы ценники стикеры наклейки таблички визитки гарантия отчёт бланк штрихкод бумага"><span class="ic" data-icon="page">▤</span>Печатные формы</a>
-     <a class="nav-link nav-link-ext" href="/sbp.html" data-find="сбп входящие qr платёж оплата банк"><span class="ic" data-icon="qr">▦</span>СБП · входящие</a>
-     <a class="nav-link nav-link-ext" href="/cashier.html" data-find="касса мобильная продажа телефон чек выручка"><span class="ic" data-icon="cart">🛒</span>Мобильная касса</a>
-     <a class="nav-link nav-link-ext" href="/bank.html" data-find="банк поступления выписка сопоставление"><span class="ic" data-icon="bank">▤</span>Банк</a>
-     <a class="nav-link" href="#clientbot" data-view="clientbot" data-find="клиентский бот telegram покупатель витрина заказ статус каталог"><span class="ic" data-icon="send">✈</span>Клиент-бот</a>
-     <a class="nav-link" href="#library" data-view="library" data-find="библиотека инструкция faq помощь материалы чеклист"><span class="ic" data-icon="book">▤</span>Библиотека</a>
-     <a class="nav-link" href="#pages" data-view="pages" data-find="страницы хаб касса трек полка tv ярлыки ценники ссылки qr телефоны lan"><span class="ic" data-icon="grid">▦</span>Страницы</a>
-     <a class="nav-link" href="#settings" data-view="settings" data-find="настройки налог тема облако telegram тариф данные касса сбп банк"><span class="ic" data-icon="sliders">⚙</span>Настройки</a>
+     <a class="nav-link" href="#calc" data-view="calc" data-find="pricing studio калькулятор цена себестоимость наценка"><span class="ic" data-icon="calculator">⌁</span>Pricing Studio</a>
+     <a class="nav-link" href="#clientbot" data-view="clientbot" data-find="входящие клиентский бот telegram покупатель заказ диалог"><span class="ic" data-icon="send">✈</span>Входящие</a>
+     <a class="nav-link" href="#niches" data-view="niches" data-find="рост ниша гипотеза спрос конверсия прибыль тест"><span class="ic" data-icon="target">◫</span>Рост и гипотезы</a>
+     <a class="nav-link" href="#conveyor" data-view="conveyor" data-find="конвейер farmloop серия цикл автоматика"><span class="ic" data-icon="refresh">↻</span>FarmLoop</a>
+     <a class="nav-link" href="#ops10" data-view="ops10" data-find="центр смена inbox автоматизация правила производство"><span class="ic" data-icon="hexagon">◆</span>Центр смены</a>
+     <a class="nav-link nav-link-featured" href="#print" data-view="print" data-find="печатные формы ценники наклейки таблички визитки"><span class="ic" data-icon="page">▤</span>Печатные формы</a>
+     <a class="nav-link nav-link-ext" href="/cashier.html" data-find="касса pos мобильная продажа чек"><span class="ic" data-icon="cart">🛒</span><span>Касса</span><small>страница →</small></a>
+     <a class="nav-link nav-link-ext" href="/sbp.html" data-find="сбп входящие qr платёж оплата банк"><span class="ic" data-icon="qr">▦</span><span>СБП</span><small>страница →</small></a>
+     <a class="nav-link nav-link-ext" href="/bank.html" data-find="банк поступления выписка сопоставление"><span class="ic" data-icon="bank">▤</span><span>Банк</span><small>страница →</small></a>
+     <a class="nav-link nav-link-ext" href="/control.html" data-find="пульт цеха телефон планшет принтер очередь ams камера"><span class="ic" data-icon="layout">▤</span><span>Пульт цеха</span><small>страница →</small></a>
+     <a class="nav-link nav-link-ext" href="/assistant.html" target="_blank" rel="noopener" data-find="полный центр ии assistant nozza"><span class="ic" data-icon="sparkles">✦</span><span>Полный AI-центр</span><small>страница ↗</small></a>
+     <a class="nav-link" href="#library" data-view="library" data-find="библиотека инструкция faq помощь материалы"><span class="ic" data-icon="book">▤</span>Библиотека</a>
+     <a class="nav-link" href="#pages" data-view="pages" data-find="страницы хаб касса трек полка tv qr"><span class="ic" data-icon="grid">▦</span>Страницы</a>
+     <a class="nav-link" href="#settings" data-view="settings" data-find="настройки интеграции система ai luma nozza"><span class="ic" data-icon="sliders">⚙</span>Настройки</a>
     </div>
    </details>
   </div>
@@ -89,6 +97,7 @@
   <div class="top-spacer"></div>
   <button class="cmd-trigger" id="cmd_open" type="button"><span class="ic" data-icon="search">⌕</span><span class="label">Команда или поиск…</span><kbd>Ctrl K</kbd></button>
   <div class="live-pill" id="live_pill" hidden><span class="dot" id="live_dot"></span><span><b id="live_name">—</b> <small id="live_state"></small></span></div>
+  <button class="icon-btn" id="nozza_toggle" type="button" title="Открыть Nozza" aria-label="Открыть Nozza" aria-controls="nozza_rail" aria-expanded="false"><span class="v19-ai-dot" aria-hidden="true"></span></button>
   <button class="icon-btn inc-bell" id="incidents_btn" type="button" title="Инциденты: тревоги станков и цеха (Alt+I)" aria-label="Инциденты"><span class="ic" data-icon="siren">⚠</span></button>
   <button class="icon-btn" id="sound_btn" type="button" title="Звуки панели" aria-pressed="true"><span class="ic" data-icon="volume">🔔</span></button>
   <button class="icon-btn" id="density_btn" type="button" title="Плотность интерфейса"><span class="ic" data-icon="layout">◫</span></button>
@@ -4237,11 +4246,28 @@
 </section>
 
  </main>
+ <aside id="nozza_rail" aria-hidden="true" aria-label="Nozza — помощник PrintFlow">
+  <div class="nozza-head">
+   <span class="v19-ai-dot" id="nozza_orb" aria-hidden="true"></span>
+   <div class="nozza-head-copy"><b>Nozza · PrintFlow AI</b><small><i id="nozza_status_dot"></i><span id="nozza_status">Проверяем локальный AI…</span></small></div>
+   <button class="icon-btn sm" id="nozza_close" type="button" aria-label="Закрыть Nozza">×</button>
+  </div>
+  <div class="nozza-context" id="nozza_context" aria-label="Контекст Nozza"></div>
+  <div class="nozza-messages" id="nozza_messages" role="log" aria-live="polite"></div>
+  <div class="nozza-prompts" id="nozza_prompts" aria-label="Быстрые вопросы"></div>
+  <div class="nozza-compose">
+   <form id="nozza_form">
+    <textarea id="nozza_input" rows="1" maxlength="1000" placeholder="Спросить Nozza о PrintFlow…" aria-label="Сообщение Nozza"></textarea>
+    <button id="nozza_send" type="submit" aria-label="Отправить">↑</button>
+   </form>
+   <small class="nozza-compose-note">Локальный контекст PrintFlow. Физические и финансовые действия проходят штатные проверки.</small>
+  </div>
+ </aside>
  <nav id="mobile_nav" aria-label="Основные разделы">
   <a href="#dashboard" data-view="dashboard">Сегодня</a>
   <a href="#orders" data-view="orders">Заказы</a>
   <a href="#printers" data-view="printers">Принтеры</a>
-  <a href="/assistant.html">Помощник</a>
+  <button type="button" id="mobile_nozza">Nozza</button>
   <button type="button" id="mobile_more" aria-controls="side" aria-expanded="false">Ещё</button>
  </nav>
 </div>
@@ -5734,7 +5760,7 @@
 <!-- 14.0 (47): clientbot.js грузится лениво при первом входе в раздел -->
 <script src="assets/workshop.js?v=18.23.1"></script>
 <script src="assets/app.js?v=18.23.1"></script>
-<script type="module" src="assets/dist/printflow-app.js?v=18.23.1"></script>
+<script type="module" src="assets/dist/printflow-app.js?v=18.23.1"></script>\n<script src="assets/nozza-rail.js?v=19.0.0"></script>
 <!-- 14.0 (47): ops10.js грузится лениво при первом входе в раздел -->
 <script>
 /* Служебный воркер: мгновенный старт панели и работа при мигании сети.
