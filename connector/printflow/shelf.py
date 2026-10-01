@@ -135,8 +135,10 @@ class Shelf:
         for raw_row in rows:
             row = self._with_cashier_data(raw_row)
             qty = num(row["qty"])
-            sold7 = num(self._sum_sold(row["id"], since7))
-            sold30 = num(self._sum_sold(row["id"], since30))
+            sales7 = self._sales_since(row["id"], since7)
+            sales30 = self._sales_since(row["id"], since30)
+            sold7 = num(sales7["qty"])
+            sold30 = num(sales30["qty"])
             sold_dead = num(self._sum_sold(row["id"], since_dead))
             last = self.db.one(
                 "SELECT MAX(at) a FROM shelf_moves WHERE item_id=? AND kind IN ('sale','online')",
@@ -157,7 +159,9 @@ class Shelf:
                 **row,
                 "qty": round(qty, 1),
                 "sold_7": round(sold7, 1),
+                "sold_7_money": round(num(sales7["money"]), 2),
                 "sold_30": round(sold30, 1),
+                "sold_30_money": round(num(sales30["money"]), 2),
                 "rate_per_day": round(rate, 2),
                 "days_left": days_left,
                 "stock_value": round(qty * cost, 2),
@@ -260,13 +264,27 @@ class Shelf:
         result["tag_old_price"] = max(0.0, round(num(result.get("tag_old_price")), 2))
         return result
 
-    def _sum_sold(self, item_id: str, since: str) -> float:
+    def _sales_since(self, item_id: str, since: str) -> dict[str, float]:
+        """Фактические продажи позиции после указанного момента.
+
+        Деньги считаются по цене, записанной в каждой строке продажи, а не по
+        текущей цене карточки. Иначе изменение цены задним числом переписывает
+        историческую выручку в сводке стеллажа.
+        """
         row = self.db.one(
-            "SELECT COALESCE(SUM(-qty),0) v FROM shelf_moves"
+            "SELECT COALESCE(SUM(-qty),0) qty,"
+            " COALESCE(SUM(-qty*price),0) money FROM shelf_moves"
             " WHERE item_id=? AND kind IN ('sale','online') AND qty<0"
             " AND COALESCE(undone,0)=0 AND at>=?",
             (item_id, since)) or {}
-        return num(row.get("v"))
+        return {
+            "qty": round(num(row.get("qty")), 3),
+            "money": round(num(row.get("money")), 2),
+        }
+
+    def _sum_sold(self, item_id: str, since: str) -> float:
+        """Совместимый helper для старых вызовов: только количество."""
+        return num(self._sales_since(item_id, since).get("qty"))
 
     def item(self, item_id: str) -> dict | None:
         row = self.db.one("SELECT * FROM shelf_items WHERE id=?", (item_id,))
@@ -343,6 +361,28 @@ class Shelf:
         if not data.get("id"):
             data["id"] = uid("shf")
         item_id = str(data["id"])
+
+        # v19: остаток стеллажа — результат операций, а не поле карточки.
+        # Новая позиция начинается с нуля; пополнение идёт через
+        # produce/transfer/inventory. Старому клиенту разрешено прислать
+        # неизменённый qty, но переписать остаток напрямую нельзя.
+        existing = None if new else self.db.one(
+            "SELECT qty FROM shelf_items WHERE id=?", (item_id,))
+        if new:
+            requested_qty = num(data.get("qty"))
+            if abs(requested_qty) > 1e-9:
+                raise ValueError(
+                    "Остаток нельзя задавать в карточке. Используйте приход, "
+                    "перемещение со склада или инвентаризацию.")
+            data["qty"] = 0.0
+        elif "qty" in data:
+            current_qty = num((existing or {}).get("qty"))
+            requested_qty = num(data.get("qty"))
+            if abs(requested_qty - current_qty) > 1e-9:
+                raise ValueError(
+                    "Остаток нельзя редактировать напрямую. Используйте приход, "
+                    "продажу, перемещение, списание или инвентаризацию.")
+            data.pop("qty", None)
         if not str(data.get("name") or "").strip():
             raise ValueError("Укажите название позиции")
         data["name"] = str(data["name"]).strip()[:200]
@@ -405,7 +445,7 @@ class Shelf:
         if new:
             data.setdefault("created_at", now_iso())
         data["updated_at"] = now_iso()
-        for key in ("qty", "price", "cost_per_unit", "min_qty", "tag_old_price"):
+        for key in ("price", "cost_per_unit", "min_qty", "tag_old_price"):
             if key in data:
                 data[key] = round(num(data[key]), 2)
         if "tag_old_price" in data:
@@ -416,9 +456,29 @@ class Shelf:
         return self._with_cashier_data(row)
 
     def delete_item(self, item_id: str) -> None:
+        """Убрать позицию с витрины без потери истории.
+
+        v19 запрещает физическое удаление shelf_items: старые движения должны
+        продолжать показывать имя товара. Позицию можно архивировать только при
+        нулевом остатке, чтобы скрытая карточка не прятала физический товар.
+        """
         if not item_id:
             raise ValueError("Не указана позиция")
-        self.db.delete("shelf_items", item_id)
+        item = self.db.one("SELECT * FROM shelf_items WHERE id=?", (item_id,))
+        if not item:
+            raise ValueError("Позиция стеллажа не найдена")
+        current = self._qty(item_id)
+        if abs(current) > 1e-9:
+            raise ValueError(
+                f"На позиции ещё {round(current, 2)} шт. Сначала переместите, "
+                "продайте, спишите или проинвентаризируйте остаток.")
+        self.db.execute(
+            "UPDATE shelf_items SET active=0, updated_at=? WHERE id=?",
+            (now_iso(), item_id))
+        self.db.add_event(
+            "shelf", "Позиция стеллажа архивирована",
+            str(item.get("name") or item_id),
+            data={"item_id": item_id})
 
     # ------------------------------------------------------------ движения
     def moves(self, item_id: str = "", limit: int = 100) -> list[dict]:
@@ -885,7 +945,7 @@ class Shelf:
         qty = sum(num(i["qty"]) for i in items)
         value = sum(num(i["stock_value"]) for i in items)
         sold7 = sum(num(i["sold_7"]) for i in items)
-        sold7_money = sum(num(i["sold_7"]) * num(i["price"]) for i in items)
+        sold7_money = sum(num(i.get("sold_7_money")) for i in items)
         dead = [i for i in items if i["dead"]]
         low = [i for i in items if i["low"]]
         plan = sum(int(num(i["plan_qty"])) for i in items)
