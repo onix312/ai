@@ -32,7 +32,7 @@ class PrintFlowV19ShellTests(unittest.TestCase):
         ):
             self.assertIn(f'id="{element_id}"', self.index)
         self.assertIn('data-src="/assistant.html?embed=1"', self.index)
-        self.assertIn("assets/v19-shell.js?v=19.0.0", self.index)
+        self.assertIn("assets/v19-shell.js?v=19.1.0", self.index)
 
     def test_ai_rail_is_local_and_contextual(self):
         self.assertIn("/api/assistant/status", self.js)
@@ -42,7 +42,7 @@ class PrintFlowV19ShellTests(unittest.TestCase):
         for banned in ("http://", "https://"):
             self.assertNotIn(banned, self.js)
 
-    def test_embed_reuses_existing_assistant_without_nozza_visual_shell(self):
+    def test_embed_reuses_existing_assistant_in_nozza_visual_shell(self):
         self.assertIn("pf-ai-embed", self.assistant)
         self.assertIn('.as-pane[data-pane="chat"]', self.assistant)
         self.assertIn("--accent: #8E43F0", self.assistant)
@@ -63,7 +63,7 @@ class PrintFlowV19ShellTests(unittest.TestCase):
     def test_shell_assets_are_in_offline_cache(self):
         self.assertIn("/assets/v19-shell.css", self.sw)
         self.assertIn("/assets/v19-shell.js", self.sw)
-        self.assertIn("printflow-shell-v106", self.sw)
+        self.assertIn("printflow-shell-v107", self.sw)
 
     def test_motion_and_small_screen_are_supported(self):
         self.assertIn("prefers-reduced-motion: reduce", self.css)
