@@ -102,6 +102,16 @@ class PrintFlowV19ShellTests(unittest.TestCase):
         self.assertIn("прогресс выпуска и приёмка", self.index)
         self.assertIn("какие движения требуют проверки", self.index)
 
+
+    def test_growth_and_calculator_visual_contract(self):
+        self.assertIn("PrintFlow 19 growth + calculator polish", self.css)
+        self.assertIn("#view-niches .niche-brief::before", self.css)
+        self.assertIn("#view-calc .calc-grid > .card::before", self.css)
+        self.assertIn("#view-calc .field input:focus", self.css)
+        self.assertIn("assets/v19-shell.css?v=19.6.0", self.index)
+        self.assertIn("фактической прибыли, конверсии", self.index)
+        self.assertIn("прибыль на час", self.index)
+
     def test_shell_assets_are_in_offline_cache(self):
         self.assertIn("/assets/v19-shell.css", self.sw)
         self.assertIn("/assets/v19-shell.js", self.sw)
