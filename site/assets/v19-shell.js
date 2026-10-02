@@ -1,4 +1,4 @@
-/* PrintFlow 19 shell controls: integrated local AI rail. */
+/* PrintFlow 19 shell controls: integrated Nozza rail over the local Luma core. */
 (() => {
 'use strict';
 
@@ -48,8 +48,8 @@ async function syncAssistantStatus() {
         : (reason || 'локальный AI недоступен');
     }
     trigger.title = data.available
-      ? 'PrintFlow AI готов' + (model ? ' · ' + model : '')
-      : (reason || 'PrintFlow AI недоступен');
+      ? 'Nozza готова' + (model ? ' · ' + model : '')
+      : (reason || 'Nozza недоступна');
   } catch (e) {
     trigger.classList.remove('ready');
     trigger.classList.add('warn');
