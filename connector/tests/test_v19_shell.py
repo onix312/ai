@@ -70,6 +70,17 @@ class PrintFlowV19ShellTests(unittest.TestCase):
         self.assertIn("assets/v19-shell.css?v=19.2.0", self.index)
         self.assertIn("Приоритет, срок, материал и совместимость", self.index)
 
+
+    def test_sales_and_finance_visual_contract(self):
+        self.assertIn("PrintFlow 19 sales + finance reference polish", self.css)
+        self.assertIn("#view-orders .v19-orders-pulse button::before", self.css)
+        self.assertIn("#view-customers .crm-brief::before", self.css)
+        self.assertIn("#view-finance .v19-fin-kpis .kpi::before", self.css)
+        self.assertIn("#view-finance .v19-fin-attention-card::before", self.css)
+        self.assertIn("assets/v19-shell.css?v=19.3.0", self.index)
+        self.assertIn("без лишней CRM-сложности", self.index)
+        self.assertIn("без бухгалтерского шума", self.index)
+
     def test_shell_assets_are_in_offline_cache(self):
         self.assertIn("/assets/v19-shell.css", self.sw)
         self.assertIn("/assets/v19-shell.js", self.sw)
