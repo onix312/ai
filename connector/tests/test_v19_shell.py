@@ -124,6 +124,13 @@ class PrintFlowV19ShellTests(unittest.TestCase):
         self.assertIn("<h2>Nozza</h2>", self.index)
         self.assertIn("Спросить Nozza", self.index)
 
+
+    def test_nozza_identity_has_no_legacy_printflow_ai_labels(self):
+        self.assertIn('aria-label="Nozza · AI-ассистент PrintFlow"', self.index)
+        self.assertIn('title="Nozza"', self.index)
+        self.assertIn('aria-label="Закрыть Nozza"', self.index)
+        self.assertNotIn("PrintFlow AI", self.index)
+
     def test_shell_assets_are_in_offline_cache(self):
         self.assertIn("/assets/v19-shell.css", self.sw)
         self.assertIn("/assets/v19-shell.js", self.sw)
