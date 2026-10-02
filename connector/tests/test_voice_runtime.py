@@ -10,7 +10,7 @@ import time
 import unittest
 from unittest.mock import patch
 
-from agent import config, pc, silero_tts, speech, voice_runtime
+from agent import config, pc, server, silero_tts, speech, voice_runtime
 
 
 class _Recognizer:
@@ -467,6 +467,34 @@ class SileroBayaTests(unittest.TestCase):
         self.assertEqual("v5_5_ru", silero_tts.MODEL_ID)
         self.assertEqual("baya", silero_tts.SPEAKER)
         self.assertEqual(48000, silero_tts.SAMPLE_RATE)
+
+
+class SpeechHttpRouteTests(unittest.TestCase):
+    def test_tts_settings_post_reads_json_body(self):
+        payload = {"rate": 7, "volume": 82}
+        received = {}
+
+        class FakeAgent:
+            def update_tts_settings(self, body):
+                received.update(body)
+                return {"ok": True, **body}
+
+        handler = server.AgentHandler.__new__(server.AgentHandler)
+        handler.path = "/voice/tts"
+        handler.role = "speech"
+        handler.agent = FakeAgent()
+        handler._local_request = lambda: True
+        handler._read_json = lambda: dict(payload)
+        sent = {}
+        handler._json = lambda code, body: sent.update(code=code, payload=body)
+
+        handler.do_POST()
+
+        self.assertEqual(payload, received)
+        self.assertEqual(200, sent["code"])
+        self.assertTrue(sent["payload"]["ok"])
+        self.assertEqual(7, sent["payload"]["rate"])
+        self.assertEqual(82, sent["payload"]["volume"])
 
 
 class LocalHqTtsTests(unittest.TestCase):
