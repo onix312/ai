@@ -64,6 +64,7 @@ class BackendClientTests(unittest.TestCase):
 
         with mock.patch("urllib.request.urlopen", fake):
             client.voice_status()
+            client.set_input_device("WASAPI:Headset")
             client.enable_voice()
             client.stop_voice()
             client.tune_voice(420, 1.8, 220, 0.3)
@@ -78,6 +79,7 @@ class BackendClientTests(unittest.TestCase):
             client.disable_voice()
         self.assertEqual([
             ("GET", "http://127.0.0.1:8791/voice/status"),
+            ("POST", "http://127.0.0.1:8791/voice/input"),
             ("POST", "http://127.0.0.1:8791/voice/enable"),
             ("POST", "http://127.0.0.1:8791/voice/stop"),
             ("POST", "http://127.0.0.1:8791/voice/tune"),

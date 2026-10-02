@@ -13,7 +13,7 @@ import threading
 import time
 from typing import Any
 
-from . import config, speech
+from . import audio_input, config, speech
 
 
 STOP_WORDS = frozenset(("стоп", "хватит", "тихо", "замолчи", "остановись"))
@@ -55,6 +55,8 @@ class VoiceRuntime:
         self.cancel_handler: Any = None
         self.vocabulary_provider: Any = None
         self.vocabulary_terms: list[str] = []
+        self.input_device_id = ""
+        self._restart_after_stream = False
         self.persistent_enabled = False
         self.manual_until = 0.0
         self.conversation_until = 0.0
@@ -117,7 +119,22 @@ class VoiceRuntime:
             "asr_engine": str(getattr(self.recognizer, "name", "") or ""),
             "vocabulary_count": len(self.vocabulary_terms),
             "last_error": self.last_error,
+            "input_device": self.input_device_id,
+            "input_devices": audio_input.input_devices(),
         }
+
+    def set_input_device(self, device_id: str) -> dict[str, Any]:
+        clean = str(device_id or "").strip()
+        devices = audio_input.input_devices()
+        if clean and clean not in {row["id"] for row in devices}:
+            return {"ok": False, "reason": "Выбранный микрофон не найден", **self.status()}
+        with self._lock:
+            self.input_device_id = clean
+            restart = self.listening
+            self._restart_after_stream = restart
+            if restart:
+                self._shutdown.set()
+        return {"ok": True, "input_device": clean, "restarting": restart, **self.status()}
 
     def enable(self) -> tuple[bool, str]:
         """Включить постоянный локальный wake-word режим."""
@@ -258,6 +275,7 @@ class VoiceRuntime:
                 channels=1,
                 dtype="int16",
                 blocksize=1600,
+                device=audio_input.resolve_input_device(self.input_device_id) if self.input_device_id else None,
                 callback=lambda data, *_a: frames.put(bytes(data)),
             ):
                 self.last_error = ""
@@ -296,7 +314,10 @@ class VoiceRuntime:
             self.partial_phrase = ""
             self.streaming_asr = False
             self._thread = None
-            if self.persistent_enabled and self.state == "error":
+            if self._restart_after_stream and self.armed:
+                self._restart_after_stream = False
+                self._schedule_restart()
+            elif self.persistent_enabled and self.state == "error":
                 self._schedule_retry()
             elif not self.persistent_enabled:
                 self.state = "idle"
@@ -311,6 +332,18 @@ class VoiceRuntime:
             self._ensure_thread()
 
         timer = threading.Timer(2.0, retry)
+        timer.daemon = True
+        timer.start()
+
+    def _schedule_restart(self) -> None:
+        def restart() -> None:
+            if not self.armed:
+                return
+            self._shutdown.clear()
+            self.state = "idle"
+            self._ensure_thread()
+
+        timer = threading.Timer(0.1, restart)
         timer.daemon = True
         timer.start()
 

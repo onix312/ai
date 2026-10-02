@@ -80,7 +80,7 @@ class TtsServiceTests(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertEqual({}, store.values)
         self.assertEqual(
-            ["tts.piper", "tts.model", "tts.speaker"],
+            ["tts.piper", "tts.model", "tts.speaker", "tts.output_device"],
             store.deleted,
         )
 
@@ -94,6 +94,29 @@ class TtsServiceTests(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertEqual("piper", result["speech"]["engine"])
         self.assertEqual("piper", result["engine"])
+
+    def test_output_device_is_saved_and_restored(self):
+        store = _Store()
+        service = tts_service.TtsService(store)
+        with patch.object(tts_service.pc, "configure_tts", return_value={"ok": True}), \
+             patch.object(tts_service.pc, "set_tts_output_device", return_value={"ok": True}) as select:
+            result = service.update({"op": "output_set", "device_id": "WASAPI:Headphones"})
+            self.assertTrue(result["ok"])
+            self.assertEqual("WASAPI:Headphones", store.values["tts.output_device"])
+            another = tts_service.TtsService(store)
+            another.restore()
+            select.assert_called_with("WASAPI:Headphones")
+
+    def test_preview_reports_player_failure(self):
+        service = tts_service.TtsService(_Store())
+        with patch.object(tts_service.pc, "configure_tts", return_value={"ok": True}), \
+             patch.object(tts_service.pc, "set_tts_output_device"), \
+             patch.object(tts_service.pc, "speak", return_value=({"pid": 42}, "")), \
+             patch.object(tts_service.pc, "wait_for_tts_playback", return_value=(False, "Устройство не доступно")), \
+             patch.object(tts_service.pc, "tts_status", return_value={}):
+            result = service.update({"op": "test"})
+        self.assertFalse(result["ok"])
+        self.assertEqual("Устройство не доступно", result["reason"])
 
 
 if __name__ == "__main__":

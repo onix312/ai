@@ -11,9 +11,9 @@ from pathlib import Path
 from typing import Any
 
 from PySide6.QtCore import QSettings, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
+from PySide6.QtGui import QColor, QIcon, QPainter, QPalette, QPen, QPixmap
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QDoubleSpinBox, QFrame, QHBoxLayout, QLabel, QLineEdit,
+    QBoxLayout, QCheckBox, QComboBox, QDoubleSpinBox, QFrame, QHBoxLayout, QLabel, QLineEdit,
     QListWidget, QListWidgetItem, QMainWindow, QProgressBar, QPushButton,
     QScrollArea, QSizePolicy, QSpinBox, QStackedWidget, QTabBar, QTextBrowser, QToolButton, QVBoxLayout, QWidget,
 )
@@ -1535,7 +1535,9 @@ class ChatPage(QWidget):
         persona.setAlignment(Qt.AlignCenter)
         portrait_box.addWidget(persona)
         portrait_box.addStretch(1)
-        conversation.addWidget(portrait_card, 3)
+        portrait_card.setMaximumWidth(320)
+        self.portrait_card = portrait_card
+        conversation.addWidget(portrait_card, 0)
 
         welcome = GlassCard()
         intro = QVBoxLayout(welcome)
@@ -1612,6 +1614,10 @@ class ChatPage(QWidget):
         send.clicked.connect(self._submit)
         composer_row.addWidget(send)
         layout.addWidget(composer)
+
+    def resizeEvent(self, event: Any) -> None:
+        super().resizeEvent(event)
+        self.portrait_card.setVisible(self.width() >= 1100)
 
     def _pick_prompt(self, text: str) -> None:
         self.input.setText(text)
@@ -1710,7 +1716,9 @@ class ChatPage(QWidget):
             bubble = QFrame()
             bubble.setObjectName("chatBubbleUser" if is_user else "chatBubbleAssistant")
             text_value = str(turn.get("text") or "")
-            bubble.setFixedWidth(min(450, max(190, 90 + len(text_value) * 6)))
+            bubble.setMaximumWidth(760)
+            if is_user:
+                bubble.setMinimumWidth(min(300, max(190, 90 + len(text_value) * 6)))
             body = QVBoxLayout(bubble)
             body.setContentsMargins(13, 10, 13, 10)
             body.setSpacing(4)
@@ -1726,9 +1734,7 @@ class ChatPage(QWidget):
             message.setTextInteractionFlags(Qt.TextSelectableByMouse)
             message.setWordWrap(True)
             body.addWidget(message)
-            line.addWidget(bubble, 0, Qt.AlignTop)
-            if not is_user:
-                line.addStretch(1)
+            line.addWidget(bubble, 0 if is_user else 1, Qt.AlignTop)
             self.bubble_layout.addWidget(row)
         self._has_history = bool(self._turns)
         self.content.setCurrentIndex(1 if self._has_history else 0)
@@ -2239,6 +2245,8 @@ class VoicePage(QWidget):
     tts_save = Signal(str, str, str)
     tts_reset = Signal()
     tts_test = Signal()
+    output_save = Signal(str)
+    input_save = Signal(str)
     pronunciation_add = Signal(str, str)
     pronunciation_delete = Signal(str)
     voice_tune = Signal(int, float, int, float)
@@ -2303,7 +2311,10 @@ class VoicePage(QWidget):
         hero_box.addWidget(preview)
         root.addWidget(hero)
 
-        content = QHBoxLayout()
+        content_host = QWidget()
+        content = QBoxLayout(QBoxLayout.LeftToRight, content_host)
+        self.content_layout = content
+        content.setContentsMargins(0, 0, 0, 0)
         content.setSpacing(14)
 
         left = QVBoxLayout()
@@ -2321,6 +2332,34 @@ class VoicePage(QWidget):
         self.tts_meta.setObjectName("muted")
         self.tts_meta.setWordWrap(True)
         engine.addWidget(self.tts_meta)
+
+        output_row = QHBoxLayout()
+        output_label = QLabel("Аудиовывод")
+        output_label.setObjectName("muted")
+        output_row.addWidget(output_label)
+        self.output_device = QComboBox()
+        self.output_device.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+        self.output_device.setMinimumWidth(120)
+        self.output_device.addItem("Системное устройство по умолчанию", "")
+        output_row.addWidget(self.output_device, 1)
+        save_output = QPushButton("Применить")
+        save_output.clicked.connect(lambda: self.output_save.emit(str(self.output_device.currentData() or "")))
+        output_row.addWidget(save_output)
+        engine.addLayout(output_row)
+
+        input_row = QHBoxLayout()
+        input_label = QLabel("Микрофон")
+        input_label.setObjectName("muted")
+        input_row.addWidget(input_label)
+        self.input_device = QComboBox()
+        self.input_device.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+        self.input_device.setMinimumWidth(120)
+        self.input_device.addItem("Системный микрофон по умолчанию", "")
+        input_row.addWidget(self.input_device, 1)
+        save_input = QPushButton("Применить")
+        save_input.clicked.connect(lambda: self.input_save.emit(str(self.input_device.currentData() or "")))
+        input_row.addWidget(save_input)
+        engine.addLayout(input_row)
 
         chain = QLabel("SILERO BAYA  →  PIPER  →  SYSTEM")
         chain.setObjectName("voiceChain")
@@ -2394,6 +2433,8 @@ class VoicePage(QWidget):
         pronunciation.addLayout(pronunciation_row)
 
         self.pronunciation_list = QListWidget()
+        self.pronunciation_list.setObjectName("pronunciationList")
+        self.pronunciation_list.setMinimumHeight(86)
         self.pronunciation_list.setMaximumHeight(150)
         pronunciation.addWidget(self.pronunciation_list)
         pronunciation_buttons = QHBoxLayout()
@@ -2491,7 +2532,18 @@ class VoicePage(QWidget):
 
         content.addLayout(left, 7)
         content.addWidget(diagnostics_card, 5)
-        root.addLayout(content, 1)
+        content_scroll = QScrollArea()
+        content_scroll.setWidgetResizable(True)
+        content_scroll.setFrameShape(QFrame.NoFrame)
+        content_scroll.setWidget(content_host)
+        root.addWidget(content_scroll, 1)
+
+    def resizeEvent(self, event: Any) -> None:
+        super().resizeEvent(event)
+        compact = self.width() < 1080
+        self.content_layout.setDirection(QBoxLayout.TopToBottom if compact else QBoxLayout.LeftToRight)
+        self.portrait.setFixedSize(*( (100, 120) if compact else (170, 184) ))
+        self.preview_orb.setVisible(not compact)
 
     def set_runtime_state(self, state: str, audio_level: int = 0) -> None:
         clean = str(state or "idle").casefold()
@@ -2514,6 +2566,28 @@ class VoicePage(QWidget):
             bits.append(f"{int(sample_rate) // 1000} kHz")
         bits.append("LOCAL READY" if ready else "FALLBACK")
         self.voice_profile.setText(" · ".join(bits))
+
+    @staticmethod
+    def _set_device_items(combo: QComboBox, label: str, devices: list[dict[str, str]], selected: str) -> None:
+        if combo.hasFocus() or combo.view().isVisible():
+            return
+        combo.blockSignals(True)
+        combo.clear()
+        combo.addItem(label, "")
+        for device in devices:
+            combo.addItem(str(device.get("name") or ""), str(device.get("id") or ""))
+        index = combo.findData(selected)
+        if selected and index < 0:
+            combo.addItem("Недоступно: " + selected, selected)
+            index = combo.count() - 1
+        combo.setCurrentIndex(max(0, index))
+        combo.blockSignals(False)
+
+    def set_output_devices(self, devices: list[dict[str, str]], selected: str) -> None:
+        self._set_device_items(self.output_device, "Системное устройство по умолчанию", devices, selected)
+
+    def set_input_devices(self, devices: list[dict[str, str]], selected: str) -> None:
+        self._set_device_items(self.input_device, "Системный микрофон по умолчанию", devices, selected)
 
 
 class ActivityPage(QWidget):
@@ -3315,6 +3389,8 @@ class ControlCenter(QMainWindow):
     tts_save = Signal(str, str, str)
     tts_reset = Signal()
     tts_test = Signal()
+    output_save = Signal(str)
+    input_save = Signal(str)
     pronunciation_add = Signal(str, str)
     pronunciation_delete = Signal(str)
 
@@ -3335,7 +3411,7 @@ class ControlCenter(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("Люма")
-        self.setMinimumSize(1080, 700)
+        self.setMinimumSize(980, 680)
         self.resize(1400, 820)
         root = AmbientCanvas()
         root.setObjectName("shellRoot")
@@ -3405,6 +3481,8 @@ class ControlCenter(QMainWindow):
         self.voice_page.tts_save.connect(self.tts_save.emit)
         self.voice_page.tts_reset.connect(self.tts_reset.emit)
         self.voice_page.tts_test.connect(self.tts_test.emit)
+        self.voice_page.output_save.connect(self.output_save.emit)
+        self.voice_page.input_save.connect(self.input_save.emit)
         self.voice_page.pronunciation_add.connect(self.pronunciation_add.emit)
         self.voice_page.pronunciation_delete.connect(self.pronunciation_delete.emit)
         self.voice_page.voice_tune.connect(self.voice_tune.emit)
@@ -3761,6 +3839,17 @@ class ControlCenter(QMainWindow):
         self.nav.currentRowChanged.connect(self._change)
         self.nav.setCurrentRow(0)
         self.setStyleSheet(theme.stylesheet())
+        for combo in self.findChildren(QComboBox):
+            view = combo.view()
+            palette = view.palette()
+            palette.setColor(QPalette.Base, QColor("#101225"))
+            palette.setColor(QPalette.Text, QColor("#F0EEFA"))
+            palette.setColor(QPalette.Highlight, QColor("#413583"))
+            palette.setColor(QPalette.HighlightedText, QColor("#FFFFFF"))
+            view.setPalette(palette)
+            view.setStyleSheet("QListView { background-color:#101225; color:#F0EEFA; border:1px solid #49466F; }"
+                               "QListView::item { min-height: 30px; padding: 5px 9px; }"
+                               "QListView::item:selected { background: #413583; color: #FFFFFF; }")
         for scroll in self.findChildren(QScrollArea):
             scroll.viewport().setStyleSheet("background: transparent;")
         self.appearance_tabs.currentChanged.connect(self._settings_tab_changed)
@@ -3865,6 +3954,10 @@ class ControlCenter(QMainWindow):
         self.tts_meta.setText(
             f"TTS: {engine} · HQ {'✓' if hq else '–'} · "
             f"model {'✓' if ready else '–'}" + (f" · {model}" if model else "") + voice + rate + latency
+        )
+        self.voice_page.set_output_devices(
+            list(payload.get("output_devices") or []),
+            str(payload.get("output_device") or ""),
         )
         editing = any(widget.hasFocus() for widget in (self.tts_piper, self.tts_model, self.tts_speaker))
         if not editing:

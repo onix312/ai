@@ -39,6 +39,8 @@ class UiState:
     tts_model_ready: bool = False
     tts_last_synth_ms: int = 0
     tts_last_chars: int = 0
+    input_device: str = ""
+    input_devices: list[dict[str, str]] = field(default_factory=list)
     safety_stopped: bool = False
     activity_phase: str = "idle"
     activity_heard: str = ""
@@ -67,6 +69,8 @@ class UiState:
         self.vad_threshold = max(0, int(voice.get("vad_threshold") or 0))
         self.asr_engine = str(voice.get("asr_engine") or "")
         self.vocabulary_count = max(0, int(voice.get("vocabulary_count") or 0))
+        self.input_device = str(voice.get("input_device") or "")
+        self.input_devices = list(voice.get("input_devices") or [])
         tts = payload.get("tts") if isinstance(payload.get("tts"), dict) else {}
         self.tts_engine = str(tts.get("engine") or "")
         self.tts_hq_local = bool(tts.get("hq_local"))

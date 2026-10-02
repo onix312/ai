@@ -31,6 +31,21 @@ class VoiceHelpersTests(unittest.TestCase):
         self.assertTrue(voice_runtime.is_end_phrase("всё, спасибо"))
         self.assertFalse(voice_runtime.is_end_phrase("спасибо и открой телеграм"))
 
+    def test_input_device_selection_validates_and_restarts_active_listener(self):
+        runtime = voice_runtime.VoiceRuntime(_Recognizer())
+        devices = [{"id": "WASAPI:Headset", "name": "Headset"}]
+        with patch.object(voice_runtime.audio_input, "input_devices", return_value=devices):
+            self.assertFalse(runtime.set_input_device("missing")["ok"])
+            selected = runtime.set_input_device("WASAPI:Headset")
+            self.assertTrue(selected["ok"])
+            self.assertEqual("WASAPI:Headset", runtime.status()["input_device"])
+            runtime.persistent_enabled = True
+            runtime.listening = True
+            switched = runtime.set_input_device("")
+        self.assertTrue(switched["restarting"])
+        self.assertTrue(runtime._shutdown.is_set())
+        self.assertTrue(runtime._restart_after_stream)
+
 
 class _FakeStream:
     def __init__(self):

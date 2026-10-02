@@ -688,6 +688,28 @@ def stylesheet(accent: str = "#8B5CF6") -> str:
         border-color: #6654B8;
     }
 
+    QListWidget#pronunciationList, QComboBox QAbstractItemView {
+        background: #101225;
+        color: #F0EEFA;
+        border: 1px solid #30345A;
+        selection-background-color: #413583;
+        selection-color: #FFFFFF;
+        outline: 0;
+    }
+
+    QListWidget#pronunciationList::item {
+        padding: 7px 9px;
+    }
+
+    QComboBox QAbstractItemView::item {
+        min-height: 30px;
+        color: #F0EEFA;
+    }
+
+    QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox {
+        min-height: 20px;
+    }
+
     QToolButton#capabilityTile {
         background: qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #17264A,stop:1 #10172E);
         border: 1px solid #405891;

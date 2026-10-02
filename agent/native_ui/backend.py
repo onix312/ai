@@ -242,6 +242,12 @@ class BackendClient:
     def tts_test(self) -> dict[str, Any]:
         return self.speech_post("/voice/tts", {"op": "test"})
 
+    def set_output_device(self, device_id: str) -> dict[str, Any]:
+        return self.speech_post("/voice/tts", {"op": "output_set", "device_id": device_id})
+
+    def set_input_device(self, device_id: str) -> dict[str, Any]:
+        return self.speech_post("/voice/input", {"device_id": device_id})
+
     def pronunciation_items(self) -> dict[str, Any]:
         return self.speech_post("/voice/tts", {"op": "pronunciations"})
 
