@@ -81,6 +81,17 @@ class PrintFlowV19ShellTests(unittest.TestCase):
         self.assertIn("без лишней CRM-сложности", self.index)
         self.assertIn("без бухгалтерского шума", self.index)
 
+
+    def test_stock_and_shelf_visual_contract(self):
+        self.assertIn("PrintFlow 19 stock + shelf reference polish", self.css)
+        self.assertIn("#view-products .prod-card::before", self.css)
+        self.assertIn("#view-shelf .shelf-card::before", self.css)
+        self.assertIn("#view-shelf .v19-shelf-pulse button.on::before", self.css)
+        self.assertIn("#view-inventory .inventory-extra", self.css)
+        self.assertIn("assets/v19-shell.css?v=19.4.0", self.index)
+        self.assertIn("следующий перенос на полку", self.index)
+        self.assertIn("быстрым контролем дефицита и AMS", self.index)
+
     def test_shell_assets_are_in_offline_cache(self):
         self.assertIn("/assets/v19-shell.css", self.sw)
         self.assertIn("/assets/v19-shell.js", self.sw)
