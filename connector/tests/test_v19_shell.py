@@ -45,9 +45,20 @@ class PrintFlowV19ShellTests(unittest.TestCase):
     def test_embed_reuses_existing_assistant_without_nozza_visual_shell(self):
         self.assertIn("pf-ai-embed", self.assistant)
         self.assertIn('.as-pane[data-pane="chat"]', self.assistant)
-        self.assertIn("--accent: #18b7a4", self.assistant)
+        self.assertIn("--accent: #8E43F0", self.assistant)
         self.assertIn("html.pf-ai-embed .as-top", self.assistant)
         self.assertIn("html.pf-ai-embed .as-side", self.assistant)
+
+
+    def test_approved_warm_violet_visual_tokens(self):
+        self.assertIn("--pf-accent: #8E43F0", self.css)
+        self.assertIn("--pf-accent-2: #6E2BC8", self.css)
+        self.assertIn("--pf-peach: #E9925E", self.css)
+        self.assertIn("--pf-cocoa: #31242E", self.css)
+        self.assertIn('data-accent="violet"', self.index)
+        self.assertIn("<span>Nozza</span>", self.index)
+        self.assertIn("<b>Nozza</b><small id=\"pf_ai_state\">Luma core", self.index)
+        self.assertIn("assets/v19-shell.css?v=19.1.0", self.index)
 
     def test_shell_assets_are_in_offline_cache(self):
         self.assertIn("/assets/v19-shell.css", self.sw)
