@@ -92,6 +92,16 @@ class PrintFlowV19ShellTests(unittest.TestCase):
         self.assertIn("следующий перенос на полку", self.index)
         self.assertIn("быстрым контролем дефицита и AMS", self.index)
 
+
+    def test_production_accounting_visual_contract(self):
+        self.assertIn("PrintFlow 19 production accounting polish", self.css)
+        self.assertIn("#view-batches .batch-item.printing::before", self.css)
+        self.assertIn("#view-documents > .toolbar", self.css)
+        self.assertIn("#view-warehouses .wh-card::after", self.css)
+        self.assertIn("assets/v19-shell.css?v=19.5.0", self.index)
+        self.assertIn("прогресс выпуска и приёмка", self.index)
+        self.assertIn("какие движения требуют проверки", self.index)
+
     def test_shell_assets_are_in_offline_cache(self):
         self.assertIn("/assets/v19-shell.css", self.sw)
         self.assertIn("/assets/v19-shell.js", self.sw)
