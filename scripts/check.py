@@ -73,7 +73,7 @@ def check_view_routes() -> bool:
         aliases_match = re.search(r"const VIEW_ALIASES = \{(.*?)\n\};", core, re.S)
         if not views_match or not aliases_match:
             raise ValueError("не найден реестр VIEWS или VIEW_ALIASES")
-        views = set(re.findall(r"^\s*([a-z0-9_-]+):\s*\{", views_match.group(1), re.M))
+        views = set(re.findall(r"^\s*[\'\"]?([a-z0-9_-]+)[\'\"]?\s*:\s*\{", views_match.group(1), re.M))
         aliases = set(re.findall(r"^\s*([a-z0-9_-]+):\s*'", aliases_match.group(1), re.M))
         targets = {value for value in re.findall(r'\bdata-view="([^"]+)"', html) if value}
         missing = sorted(targets - views - aliases)
