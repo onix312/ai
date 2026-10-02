@@ -1,4 +1,4 @@
-/* PrintFlow 19 shell — independent product identity, no NOZZA visual language. */
+/* PrintFlow 19 shell — warm technological surfaces with Nozza as the AI layer. */
 @media screen {
   body.pf-v19 {
     --pf-accent: #8E43F0;
@@ -101,12 +101,12 @@
     padding: 8px 9px 18px;
   }
   body.pf-v19 #side .brand b {
-    color: #f0f7f6;
+    color: #F8EEE6;
     font-size: 16px;
     font-weight: 780;
     letter-spacing: -.025em;
   }
-  body.pf-v19 #side .brand small { color: #758a88; }
+  body.pf-v19 #side .brand small { color: #A9959F; }
   body.pf-v19 #side .nav-find {
     height: 38px;
     background: #2B2029;
@@ -1214,20 +1214,20 @@
     align-items: center;
     gap: 10px;
     padding: 0 12px 0 15px;
-    border-bottom: 1px solid #1d2b30;
-    background: #0c1215;
+    border-bottom: 1px solid #493847;
+    background: #241A22;
   }
   .pf-ai-rail-title { min-width: 0; }
   .pf-ai-rail-title b {
     display: block;
-    color: #eef7f5;
+    color: #F8EEE6;
     font-size: 13px;
     letter-spacing: -.01em;
   }
   .pf-ai-rail-title small {
     display: block;
     overflow: hidden;
-    color: #738987;
+    color: #AA979F;
     font-size: 10.5px;
     white-space: nowrap;
     text-overflow: ellipsis;
