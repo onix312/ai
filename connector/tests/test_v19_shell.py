@@ -60,6 +60,16 @@ class PrintFlowV19ShellTests(unittest.TestCase):
         self.assertIn("<b>Nozza</b><small id=\"pf_ai_state\">Luma core", self.index)
         self.assertIn("assets/v19-shell.css?v=19.1.0", self.index)
 
+
+    def test_printers_and_queue_visual_contract(self):
+        self.assertIn("PrintFlow 19 printers + queue reference polish", self.css)
+        self.assertIn("#view-printers .pc-prog .track i", self.css)
+        self.assertIn(".v19-pr-operator::before", self.css)
+        self.assertIn("#view-queue .queue-item.live", self.css)
+        self.assertIn(".v19-queue-pulse button.on::before", self.css)
+        self.assertIn("assets/v19-shell.css?v=19.2.0", self.index)
+        self.assertIn("Приоритет, срок, материал и совместимость", self.index)
+
     def test_shell_assets_are_in_offline_cache(self):
         self.assertIn("/assets/v19-shell.css", self.sw)
         self.assertIn("/assets/v19-shell.js", self.sw)
