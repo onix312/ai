@@ -112,6 +112,18 @@ class PrintFlowV19ShellTests(unittest.TestCase):
         self.assertIn("фактической прибыли, конверсии", self.index)
         self.assertIn("прибыль на час", self.index)
 
+
+    def test_tools_and_settings_visual_contract(self):
+        self.assertIn("PrintFlow 19 tools + settings final polish", self.css)
+        self.assertIn("#view-print .pr-workspace-tab[aria-selected=\"true\"]", self.css)
+        self.assertIn("#view-conveyor .cv-dropzone:hover", self.css)
+        self.assertIn("#view-clientbot .clientbot-settings-card", self.css)
+        self.assertIn("#view-library .library-home", self.css)
+        self.assertIn("#view-settings .settings-quicknav button.on::before", self.css)
+        self.assertIn("assets/v19-shell.css?v=19.7.0", self.index)
+        self.assertIn("<h2>Nozza</h2>", self.index)
+        self.assertIn("Спросить Nozza", self.index)
+
     def test_shell_assets_are_in_offline_cache(self):
         self.assertIn("/assets/v19-shell.css", self.sw)
         self.assertIn("/assets/v19-shell.js", self.sw)
