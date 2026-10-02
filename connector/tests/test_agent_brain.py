@@ -82,8 +82,51 @@ class PcHelpersTests(unittest.TestCase):
                          pc.launch_plan("steam", platform="win32")[0]["command"])
         self.assertEqual(["uri:steam://rungameid/1172470"],
                          pc.launch_plan("апекс", platform="win32")[0]["command"])
-        self.assertIn("нет в списке", pc.launch_plan("rm -rf /")[1])
+        self.assertIn("не нашла", pc.launch_plan("rm -rf /")[1])
         self.assertIn("Скажите", pc.launch_plan("")[1])
+
+    def test_start_menu_apps_are_safe_dynamic_launch_targets(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            for name in ("Discord", "Spotify", "Adobe Photoshop", "Google Chrome", "Chrome Beta"):
+                (root / f"{name}.lnk").write_bytes(b"shortcut")
+            (root / "Uninstall Discord.lnk").write_bytes(b"shortcut")
+            (root / "notes.txt").write_text("not an app", encoding="utf-8")
+
+            apps = pc.start_menu_apps((tmp,))
+            self.assertEqual(
+                ["Adobe Photoshop", "Chrome Beta", "Discord", "Google Chrome", "Spotify"],
+                [row["title"] for row in apps],
+            )
+            discord = pc.resolve_installed_app("открой Discord", (tmp,))
+            self.assertEqual("Discord", discord["title"])
+            self.assertTrue(discord["target"].endswith("Discord.lnk"))
+            self.assertEqual("Google Chrome", pc.resolve_installed_app("chrome", (tmp,))["title"])
+            self.assertEqual("Discord", pc.resolve_installed_app("дискорд", (tmp,))["title"])
+            self.assertEqual("Spotify", pc.resolve_installed_app("спотифай", (tmp,))["title"])
+            self.assertEqual("Adobe Photoshop", pc.resolve_installed_app("фотошоп", (tmp,))["title"])
+
+            plan, reason = pc.launch_plan("Discord", platform="win32", app_roots=(tmp,))
+            self.assertEqual("", reason)
+            self.assertEqual(("shortcut", "Discord", "start_menu"),
+                             (plan["kind"], plan["title"], plan["source"]))
+
+    def test_start_menu_app_match_requires_a_clear_best_candidate(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            (root / "Foo Alpha.lnk").write_bytes(b"x")
+            (root / "Foo Beta.lnk").write_bytes(b"x")
+            self.assertIsNone(pc.resolve_installed_app("foo", (tmp,)))
+            plan, reason = pc.launch_plan("foo", platform="win32", app_roots=(tmp,))
+            self.assertEqual({}, plan)
+            self.assertIn("не нашла", reason)
+
+    def test_start_menu_discovery_is_windows_only_in_launch_plan(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            (pathlib.Path(tmp) / "Discord.lnk").write_bytes(b"x")
+            plan, reason = pc.launch_plan("Discord", platform="linux", app_roots=(tmp,))
+            self.assertEqual({}, plan)
+            self.assertIn("не нашла", reason)
 
     def test_window_choice_by_words_process_and_synonym(self):
         rows = [{"title": "Безымянный — Блокнот", "process": "notepad"},
@@ -291,6 +334,16 @@ class UnderstandTests(unittest.TestCase):
         for phrase in ("запусти печать", "закрой заказ 15", "открой склад", "убавь цену", "сделай звук 3d печати",
                        "что сейчас открыто на принтере", "что сейчас активно печатается", "какая погода"):
             self.assertIsNone(brain.understand(phrase), phrase)
+
+    def test_unknown_installed_app_can_become_local_open_action(self):
+        with patch.object(pc, "launch_plan", return_value=(
+            {"kind": "shortcut", "title": "Discord", "target": "Discord.lnk",
+             "source": "start_menu"}, ""
+        )):
+            plan = brain.understand("открой Discord")
+        self.assertEqual(("app.open", {"target": "discord"}),
+                         (plan["skill"], plan["params"]))
+        self.assertEqual("Discord", plan["target"]["title"])
 
     def test_follow_ups_use_previous_turn(self):
         history = [{"role": "assistant", "meta": {"skill": "system.volume", "params": {"level": 40},
