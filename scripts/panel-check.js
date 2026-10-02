@@ -255,9 +255,13 @@ fireDocumentEvents();
 lazy.forEach((name) => { const err = loadFile(name); if (err) loadErrors.push(err); });
 
 /* ====================================================== фазы исполнения */
-const VIEWS = ['dashboard', 'printers', 'queue', 'orders', 'customers', 'products', 'batches',
-  'documents', 'warehouses', 'shelf', 'finance', 'inventory', 'niches', 'calc', 'print',
-  'clientbot', 'library', 'settings', 'ops10'];
+function viewOrder() {
+  const html = fs.readFileSync(path.join(SITE, 'index.html'), 'utf8');
+  return [...html.matchAll(/<section\b[^>]*\bclass="[^"]*\bview\b[^"]*"[^>]*\bid="view-([^"]+)"/g)]
+    .map((match) => match[1]);
+}
+
+const VIEWS = viewOrder();
 
 function phaseViews() {
   if (!ctx.PF || typeof ctx.PF.go !== 'function') return;
