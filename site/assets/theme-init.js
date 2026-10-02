@@ -22,7 +22,7 @@
       (pref === 'system' && !(window.matchMedia)); /* нет matchMedia — тёмная */
     var root = document.documentElement;
     root.dataset.theme = dark ? 'dark' : 'light';
-    var accent = 'indigo';
+    var accent = 'violet';
     try {
       var a = localStorage.getItem('pf_accent');
       if (a) accent = a;
