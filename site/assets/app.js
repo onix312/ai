@@ -4194,9 +4194,16 @@ const productIdeasState = { data: null, candidates: [], busy: false, importing: 
 function isIdeaModelUrl(value) {
   try {
     const url = new URL(String(value || ''));
-    return url.protocol === 'https:' && ['thingiverse.com', 'printables.com', 'makerworld.com']
+    return url.protocol === 'https:' && !url.username && !url.password && (!url.port || url.port === '443')
+      && ['thingiverse.com', 'printables.com', 'makerworld.com']
       .some((host) => url.hostname === host || url.hostname.endsWith(`.${host}`));
   } catch (_) { return false; }
+}
+function safeIdeaHttpsUrl(value) {
+  try {
+    const url = new URL(String(value || ''));
+    return url.protocol === 'https:' && !url.username && !url.password ? url.href : '';
+  } catch (_) { return ''; }
 }
 function renderProductIdeas() {
   const data = productIdeasState.data;
@@ -4224,8 +4231,9 @@ function renderProductIdeas() {
       : 'Нет нормы граммов или времени печати';
     const modelAction = isIdeaModelUrl(row.model_url)
       ? `<button class="btn sm" type="button" data-idea-model-url="${esc(row.model_url)}" data-idea-nom-id="${esc(row.nom_id)}">Исследовать модель ↗</button>`
-      : row.model_url ? `<a class="btn sm ghost" href="${esc(row.model_url)}" target="_blank" rel="noopener noreferrer">Открыть ссылку ↗</a>`
-        : '<small>Ссылка на модель не заполнена</small>';
+      : safeIdeaHttpsUrl(row.model_url) ? `<a class="btn sm ghost" href="${esc(safeIdeaHttpsUrl(row.model_url))}" target="_blank" rel="noopener noreferrer">Открыть ссылку ↗</a>`
+        : row.model_url ? '<small>Сохранена ссылка с неподдерживаемым адресом</small>'
+          : '<small>Ссылка на модель не заполнена</small>';
     const currentSales = num(row.sold_period) > 0 ? nfmt(row.sold_period) : 'нет движений';
     const previousSales = num(row.sold_previous) > 0 ? nfmt(row.sold_previous) : 'нет движений';
     return `<article class="idea-product"><div class="idea-product-main"><button class="idea-name" type="button" data-idea-name="${esc(row.name)}">${esc(row.name)}</button><small>${estimate}</small><span class="idea-trend ${esc(row.trend)}">${trend}</span><div class="idea-product-model">${modelAction}</div></div><div class="idea-product-meta">Период <b>${currentSales}</b><br>До него <b>${previousSales}</b></div></article>`;
@@ -4270,9 +4278,11 @@ function renderIdeaCandidates() {
     const analysis = item.analysis || {};
     const facts = item.facts || {};
     const metrics = facts.external_metrics || [];
-    const ai = item.ai_status === 'ready' ? [analysis.sales_comparison, analysis.summary].filter(Boolean).join(' ')
+    const salesFact = (facts.sales_context || []).map((sale) => `${sale.name}: ${nfmt(sale.sold_period)} шт. за ${nfmt(sale.days)} дней, до этого ${nfmt(sale.sold_previous)} шт.`).join(' ');
+    const aiMessage = item.ai_status === 'ready' ? [analysis.sales_comparison, analysis.summary].filter(Boolean).join(' ')
       : item.ai_status === 'not_configured' ? 'Настройте vision-модель Ollama в разделе «Настройки», чтобы получить анализ текста и изображений.'
         : (item.ai_error || 'Анализ модели пока недоступен. Карточка и найденные изображения сохранены.');
+    const ai = [salesFact, aiMessage].filter(Boolean).join(' ');
     const unitCost = num(item.grams_per_unit) * num(item.filament_cost_per_gram)
       + num(item.hours_per_unit) * num(item.machine_cost_per_hour) + num(item.other_cost_per_unit);
     const unitProfit = num(item.price_per_unit) - unitCost;

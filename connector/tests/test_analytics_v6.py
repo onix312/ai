@@ -187,11 +187,22 @@ class ProductOpportunitiesTests(unittest.TestCase):
         self.db.upsert("nomenclature", {"id": "empty", "name": "Новая модель",
                                         "kind": "product", "model_url": "https://printables.com/model/2"})
         self.db.upsert("nomenclature", {"id": "service", "name": "Услуга", "kind": "service"})
+        self.db.upsert("statuses", {"id": "done", "name": "Готов", "is_final": 1})
         now = datetime.now()
-        self.db.upsert("stock_moves", {"id": "sale-old", "at": (now - timedelta(days=110)).isoformat(),
+        old_at = (now - timedelta(days=110)).isoformat()
+        recent_at = (now - timedelta(days=10)).isoformat()
+        self.db.upsert("orders", {"id": "order-old", "product": "Органайзер", "nom_id": "linked",
+                                   "qty": 2, "status": "done", "created_at": old_at,
+                                   "closed_at": old_at})
+        self.db.upsert("documents", {"id": "doc-new", "kind": "sale", "state": "posted",
+                                      "at": recent_at})
+        self.db.upsert("doc_items", {"id": "line-new", "doc_id": "doc-new", "nom_id": "linked",
+                                      "qty": 2})
+        self.db.upsert("shelf_items", {"id": "shelf-linked", "name": "Органайзер", "nom_id": "linked"})
+        self.db.upsert("shelf_moves", {"id": "shelf-sale", "item_id": "shelf-linked", "kind": "sale",
+                                       "qty": -2, "at": recent_at})
+        self.db.upsert("stock_moves", {"id": "shelf-register-mirror", "at": recent_at,
                                         "doc_kind": "sale", "nom_id": "linked", "qty": -2})
-        self.db.upsert("stock_moves", {"id": "sale-new", "at": (now - timedelta(days=10)).isoformat(),
-                                        "doc_kind": "sale", "nom_id": "linked", "qty": -4})
         result = self.a.product_opportunities(90)
         products = {item["nom_id"]: item for item in result["products"]}
         self.assertEqual({"linked", "empty"}, set(products))

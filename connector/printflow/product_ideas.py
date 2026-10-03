@@ -11,7 +11,7 @@ import socket
 import urllib.error
 import urllib.parse
 import urllib.request
-from datetime import datetime, timedelta
+from datetime import datetime
 from html.parser import HTMLParser
 from typing import Any
 
@@ -352,9 +352,9 @@ class ProductIdeas:
 
     def _catalog_sales_context(self, url: str, days: int) -> list[dict]:
         window = max(30, min(365, int(days or 90)))
-        now = datetime.now()
-        start = (now - timedelta(days=window)).isoformat()
-        previous_start = (now - timedelta(days=window * 2)).isoformat()
+        from .analytics import Analytics
+        comparison = Analytics(self.db).product_opportunities(window)
+        sales_by_id = {item["nom_id"]: item for item in comparison["products"]}
         products = self.db.query(
             "SELECT id,name,model_url FROM nomenclature WHERE archived=0 AND model_url<>''")
         linked = []
@@ -362,21 +362,13 @@ class ProductIdeas:
             product_url = str(product.get("model_url") or "").strip()
             if product_url != url:
                 continue
-            stats = self.db.one(
-                "SELECT SUM(CASE WHEN at>=? THEN -qty ELSE 0 END) current_qty,"
-                "SUM(CASE WHEN at>=? AND at<? THEN -qty ELSE 0 END) previous_qty"
-                " FROM stock_moves WHERE doc_kind='sale' AND qty<0 AND nom_id=? AND at>=?",
-                (start, previous_start, start, product["id"], previous_start)) or {}
-            current, previous = float(stats.get("current_qty") or 0), float(stats.get("previous_qty") or 0)
-            change = round((current / previous - 1) * 100, 1) if previous else None
-            trend = ("rising" if change is not None and change >= 20 else
-                     "falling" if change is not None and change <= -20 else
-                     "steady" if change is not None else
-                     "new" if current > 0 else "no_data" if previous == 0 else "falling")
+            stats = sales_by_id.get(product["id"], {})
             linked.append({"nom_id": product["id"], "name": product.get("name") or "Товар",
-                           "days": window, "sold_period": current, "sold_previous": previous,
-                           "change_pct": change, "trend": trend,
-                           "sales_source": "stock_moves: sale"})
+                           "days": window, "sold_period": stats.get("sold_period", 0),
+                           "sold_previous": stats.get("sold_previous", 0),
+                           "change_pct": stats.get("change_pct"),
+                           "trend": stats.get("trend", "no_data"),
+                           "sales_source": comparison["source"]["sales"]})
         return linked
 
     def _link_catalog_products(self, candidate_id: str, sales_context: list[dict]) -> None:

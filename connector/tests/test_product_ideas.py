@@ -91,10 +91,13 @@ class ProductIdeasTests(unittest.TestCase):
         self.db.upsert("nomenclature", {"id": "nom1", "name": "Настольный органайзер",
                                         "kind": "product", "model_url": url})
         now = datetime.now()
-        self.db.upsert("stock_moves", {"id": "old", "at": (now - timedelta(days=110)).isoformat(),
-                                        "doc_kind": "sale", "nom_id": "nom1", "qty": -2})
-        self.db.upsert("stock_moves", {"id": "recent", "at": (now - timedelta(days=10)).isoformat(),
-                                        "doc_kind": "sale", "nom_id": "nom1", "qty": -5})
+        for ident, at, quantity in (("old", now - timedelta(days=110), 2),
+                                    ("recent", now - timedelta(days=10), 5)):
+            doc_id = f"doc-{ident}"
+            self.db.upsert("documents", {"id": doc_id, "kind": "sale", "state": "posted",
+                                          "at": at.isoformat()})
+            self.db.upsert("doc_items", {"id": f"line-{ident}", "doc_id": doc_id,
+                                          "nom_id": "nom1", "qty": quantity})
         with patch("connector.printflow.product_ideas._read_url", return_value=(
                 b'<meta property="og:title" content="Organizer">', "text/html")), \
              patch("connector.printflow.product_ideas._public_https_url", return_value=False), \
@@ -103,7 +106,7 @@ class ProductIdeasTests(unittest.TestCase):
         sales = analyze.call_args.args[0]["sales_context"]
         self.assertEqual([{"nom_id": "nom1", "name": "Настольный органайзер", "days": 90,
                            "sold_period": 5.0, "sold_previous": 2.0, "change_pct": 150.0,
-                           "trend": "rising", "sales_source": "stock_moves: sale"}], sales)
+                           "trend": "rising", "sales_source": "PrintFlow · реестр продаж"}], sales)
         self.assertEqual([{"nom_id": "nom1", "name": "Настольный органайзер"}], item["linked_products"])
         self.assertEqual(sales, item["facts"]["sales_context"])
 
