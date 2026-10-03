@@ -4189,6 +4189,84 @@ PF.on('view', (d) => {
   if (d.view !== 'settings') return;
   renderStyleGuide();
 });
+
+const productIdeasState = { data: null, busy: false };
+function renderProductIdeas() {
+  const data = productIdeasState.data;
+  if (!data) return;
+  const products = data.products || [];
+  const rising = products.filter((row) => row.trend === 'rising').length;
+  const withSales = products.filter((row) => num(row.sold_period) > 0).length;
+  const noEstimate = (data.data_quality || {}).products_without_cost_estimate || 0;
+  put('idea_kpis', [
+    ['Товары с продажами', nfmt(withSales), `${data.source.window_days} дней`],
+    ['Темп растёт', nfmt(rising), 'к предыдущему периоду'],
+    ['Активные ниши', nfmt((data.niches || []).length), 'из базы PrintFlow'],
+    ['Нет норм печати', nfmt(noEstimate), 'нужны граммы/часы'],
+  ].map(([label, value, note]) => `<article class="idea-kpi"><span>${label}</span><b>${value}</b><small>${note}</small></article>`).join(''));
+  put('idea_data_note', `Продажи PrintFlow · ${esc(data.source.as_of)} · ${data.source.window_days} дней к предыдущим ${data.source.window_days} дням.`);
+  const host = $('idea_products');
+  if (host) host.innerHTML = products.length ? products.slice(0, 12).map((row) => {
+    const trend = row.trend === 'rising' ? `↑ рост ${pct(row.change_pct)}`
+      : row.trend === 'falling' ? `↓ снижение ${pct(Math.abs(num(row.change_pct)))}`
+        : row.trend === 'steady' ? '→ без резкого изменения' : 'Нет базы сравнения';
+    const estimate = row.has_production_estimate
+      ? `${nfmt(row.grams)} г · ${hoursText(row.hours)} · ${esc(row.material || 'материал не указан')}`
+      : 'Нет нормы граммов или времени печати';
+    return `<article class="idea-product"><div class="idea-product-main"><button class="idea-name" type="button" data-idea-name="${esc(row.name)}">${esc(row.name)}</button><small>${estimate}</small><span class="idea-trend ${esc(row.trend)}">${trend}</span></div><div class="idea-product-meta">Период <b>${nfmt(row.sold_period)}</b><br>До него <b>${nfmt(row.sold_previous)}</b></div></article>`;
+  }).join('') : '<div class="idea-empty">Продаж за выбранный период нет.</div>';
+  const status = $('idea_search_status');
+  if (status) status.textContent = `Источники моделей: ${data.source.external_marketplaces}. Интеграции площадок пока не подключены; поиск открывает сайты с вашей фразой.`;
+}
+async function loadProductIdeas() {
+  if (productIdeasState.busy) return;
+  productIdeasState.busy = true;
+  const host = $('idea_products');
+  if (host && !productIdeasState.data) host.innerHTML = U.skeletonStack(4);
+  try {
+    productIdeasState.data = await get('/api/ideas/products', { days: num(($('idea_period') || {}).value, 90) });
+    renderProductIdeas();
+  } catch (error) {
+    if (host) host.innerHTML = `<div class="idea-empty">Аналитика недоступна: ${esc(error.message || 'ошибка связи')}</div>`;
+  } finally { productIdeasState.busy = false; }
+}
+function buildIdeaPlan() {
+  const name = String(($('idea_plan_name') || {}).value || '').trim();
+  const qty = clamp(num(($('idea_plan_qty') || {}).value, 3), 1, 100);
+  const row = (productIdeasState.data?.products || []).find((item) => item.name.toLocaleLowerCase() === name.toLocaleLowerCase());
+  const host = $('idea_plan_result');
+  if (!host) return;
+  if (!name) { host.textContent = 'Введите название товара или гипотезы.'; return; }
+  const lines = [`Гипотеза: «${name}». Пробная партия: ${nfmt(qty)} шт.`];
+  if (row) {
+    lines.push(`Продажи за период: ${nfmt(row.sold_period)} шт.; за предыдущий равный период: ${nfmt(row.sold_previous)} шт.`);
+    if (row.has_production_estimate) lines.push(`Ориентир по нормам PrintFlow: ${nfmt(row.grams * qty)} г и ${hoursText(row.hours * qty)} печати.`);
+    else lines.push('Заполните нормы граммов и времени в карточке товара для расчёта партии.');
+  } else lines.push('Для идеи нет истории продаж; после теста добавьте товар в PrintFlow и сравните факт.');
+  lines.push('План ознакомительный: склад и очередь принтеров не изменены.');
+  host.textContent = lines.join(' ');
+}
+on('idea_refresh', 'click', loadProductIdeas);
+on('idea_period', 'change', loadProductIdeas);
+on('idea_plan_create', 'click', buildIdeaPlan);
+document.addEventListener('click', (event) => {
+  const button = event.target.closest('[data-idea-name]');
+  if (button && $('idea_plan_name')) $('idea_plan_name').value = button.dataset.ideaName || '';
+});
+on('idea_search_form', 'submit', (event) => {
+  event.preventDefault();
+  const query = String(($('idea_search_query') || {}).value || '').trim();
+  if (!query) return;
+  const value = encodeURIComponent(query);
+  const links = [
+    ['Thingiverse', `https://www.thingiverse.com/search?q=${value}&type=things`],
+    ['Printables', `https://www.printables.com/search/models?q=${value}`],
+    ['MakerWorld', `https://makerworld.com/en/search/models?keyword=${value}`],
+  ];
+  const host = $('idea_candidates');
+  if (host) host.innerHTML = links.map(([label, url]) => `<a class="btn sm" href="${url}" target="_blank" rel="noopener">Искать на ${label} ↗</a>`).join(' ');
+});
+PF.on('view', (detail) => { if (detail.view === 'product-ideas') loadProductIdeas(); });
 document.addEventListener('click', (e) => {
   const sw = e.target.closest('[data-copy]');
   if (!sw || e.target.closest('[data-nocopy]')) return;
