@@ -4190,7 +4190,7 @@ PF.on('view', (d) => {
   renderStyleGuide();
 });
 
-const productIdeasState = { data: null, busy: false };
+const productIdeasState = { data: null, candidates: [], busy: false, importing: false };
 function renderProductIdeas() {
   const data = productIdeasState.data;
   if (!data) return;
@@ -4216,7 +4216,7 @@ function renderProductIdeas() {
     return `<article class="idea-product"><div class="idea-product-main"><button class="idea-name" type="button" data-idea-name="${esc(row.name)}">${esc(row.name)}</button><small>${estimate}</small><span class="idea-trend ${esc(row.trend)}">${trend}</span></div><div class="idea-product-meta">Период <b>${nfmt(row.sold_period)}</b><br>До него <b>${nfmt(row.sold_previous)}</b></div></article>`;
   }).join('') : '<div class="idea-empty">Продаж за выбранный период нет.</div>';
   const status = $('idea_search_status');
-  if (status) status.textContent = `Источники моделей: ${data.source.external_marketplaces}. Интеграции площадок пока не подключены; поиск открывает сайты с вашей фразой.`;
+  if (status) status.textContent = 'Добавьте ссылку с Thingiverse, Printables или MakerWorld: страница и изображения будут разобраны, затем кандидат сохранится в этой панели.';
 }
 async function loadProductIdeas() {
   if (productIdeasState.busy) return;
@@ -4246,6 +4246,45 @@ function buildIdeaPlan() {
   lines.push('План ознакомительный: склад и очередь принтеров не изменены.');
   host.textContent = lines.join(' ');
 }
+const ideaStatusLabel = { candidate: 'Новый', shortlist: 'В подборке', trial: 'Пробная партия', rejected: 'Отклонён' };
+function renderIdeaCandidates() {
+  const host = $('idea_candidate_list');
+  if (!host) return;
+  host.innerHTML = productIdeasState.candidates.length ? productIdeasState.candidates.map((item) => {
+    const image = (item.image_urls || []).find((url) => String(url).startsWith('https://'));
+    const analysis = item.analysis || {};
+    const facts = item.facts || {};
+    const metrics = facts.external_metrics || [];
+    const ai = item.ai_status === 'ready' ? analysis.summary
+      : item.ai_status === 'not_configured' ? 'Настройте vision-модель Ollama в разделе «Настройки», чтобы получить анализ текста и изображений.'
+        : (item.ai_error || 'Анализ модели пока недоступен. Карточка и найденные изображения сохранены.');
+    const unitCost = num(item.grams_per_unit) * num(item.filament_cost_per_gram)
+      + num(item.hours_per_unit) * num(item.machine_cost_per_hour) + num(item.other_cost_per_unit);
+    const unitProfit = num(item.price_per_unit) - unitCost;
+    const note = item.status === 'rejected' ? item.decision_note : '';
+    const complete = num(item.price_per_unit) > 0 && num(item.grams_per_unit) > 0 && num(item.hours_per_unit) > 0
+      && num(item.filament_cost_per_gram) > 0 && num(item.machine_cost_per_hour) > 0;
+    const history = item.metric_history || [];
+    const metricTrail = metrics.map((metric) => {
+      const trail = history.filter((entry) => entry.type === metric.type);
+      let delta = '';
+      if (trail.length > 1 && Number.isFinite(Number(trail.at(-1).count)) && Number.isFinite(Number(trail.at(-2).count))) {
+        delta = ` · изменение ${nfmt(Number(trail.at(-1).count) - Number(trail.at(-2).count))}`;
+      }
+      return `<span>Площадка: ${esc(metric.count)} · ${esc(metric.type.split('/').pop())}${delta}</span>`;
+    }).join('');
+    return `<article class="idea-candidate" data-candidate="${esc(item.id)}"><div class="idea-candidate-top">${image ? `<img src="${esc(image)}" alt="Превью: ${esc(item.title)}" loading="lazy" referrerpolicy="no-referrer">` : ''}<div><div class="idea-candidate-meta"><span>${esc(item.source)}</span><span>${esc(ideaStatusLabel[item.status] || 'Новый')}</span>${analysis.category ? `<span>${esc(analysis.category)}</span>` : ''}<span>Обновлено ${esc(item.updated_at || '—')}</span>${item.ai_model ? `<span>Модель ${esc(item.ai_model)}</span>` : ''}${metricTrail}</div><h3><a href="${esc(item.url)}" target="_blank" rel="noopener noreferrer">${esc(item.title)} ↗</a></h3><p>${esc(item.author ? `Автор: ${item.author} · ` : '')}${esc(item.description || 'Описание не найдено.')}</p><p class="idea-ai-summary">${esc(ai || 'ИИ не вернул описание.')}</p></div></div>${analysis.use_cases?.length ? `<p><b>Варианты применения:</b> ${analysis.use_cases.map(esc).join(' · ')}</p>` : ''}${analysis.assembly_signals?.length ? `<p><b>Сборка:</b> ${analysis.assembly_signals.map(esc).join(' · ')}</p>` : ''}${analysis.print_risks?.length ? `<p class="idea-warning"><b>Проверить перед печатью:</b> ${analysis.print_risks.map(esc).join(' · ')}</p>` : ''}${analysis.missing_data?.length ? `<p class="idea-muted"><b>Неизвестно:</b> ${analysis.missing_data.map(esc).join(' · ')}</p>` : ''}<div class="idea-trial-fields"><label>Штук<input type="number" min="1" max="100" value="${num(item.trial_qty, 3) || 3}" data-field="quantity"></label><label>Цена за штуку, ₽<input type="number" min="0" step="1" value="${num(item.price_per_unit)}" data-field="price"></label><label>Граммов на штуку<input type="number" min="0" step="0.1" value="${num(item.grams_per_unit)}" data-field="grams"></label><label>Часов печати<input type="number" min="0" step="0.1" value="${num(item.hours_per_unit)}" data-field="hours"></label><label>Пластик, ₽/г<input type="number" min="0" step="0.01" value="${num(item.filament_cost_per_gram)}" data-field="filament-cost"></label><label>Принтер, ₽/ч<input type="number" min="0" step="0.01" value="${num(item.machine_cost_per_hour)}" data-field="machine-cost"></label><label>Прочие затраты, ₽/шт<input type="number" min="0" step="1" value="${num(item.other_cost_per_unit)}" data-field="other-cost"></label></div><div class="idea-economics">${complete ? `Оценка по вашим вводным: себестоимость ${money(unitCost)} за штуку, прибыль ${money(unitProfit)} за штуку (${pct(unitProfit / num(item.price_per_unit) * 100)} маржи); партия займёт ${hoursText(num(item.hours_per_unit) * num(item.trial_qty))}.` : 'Заполните цену, нормы граммов и часов, стоимость пластика за грамм и принтера за час. Расчёт будет ориентировочным; очередь печати не меняется.'}</div><label class="idea-reject-note">Причина решения<input type="text" maxlength="300" value="${esc(note)}" data-field="note" placeholder="Например: долго печатается или нет свободного спроса"></label><div class="idea-candidate-actions"><button class="btn sm" type="button" data-idea-refresh>Обновить данные</button><button class="btn sm" type="button" data-idea-decision="shortlist">В подборку</button><button class="btn sm primary" type="button" data-idea-decision="trial">В пробную партию</button><button class="btn sm ghost" type="button" data-idea-decision="rejected">Отклонить</button></div>${item.status === 'trial' ? `<details class="idea-outcome"><summary>Записать результат теста</summary><div class="idea-trial-fields"><label>Продано, шт.<input type="number" min="0" max="1000" value="${num(item.trial_sold)}" data-field="sold"></label><label>Возвраты, шт.<input type="number" min="0" max="1000" value="${num(item.trial_returns)}" data-field="returns"></label><label>Брак, шт.<input type="number" min="0" max="1000" value="${num(item.trial_defects)}" data-field="defects"></label><label>Выручка, ₽<input type="number" min="0" step="1" value="${num(item.trial_revenue)}" data-field="revenue"></label><button class="btn sm" type="button" data-idea-outcome>Сохранить факт</button></div></details>` : ''}</article>`;
+  }).join('') : '<div class="idea-empty">Сохранённых моделей пока нет. Вставьте ссылку на карточку выше, чтобы разобрать её.</div>';
+}
+async function loadIdeaCandidates() {
+  try {
+    const data = await get('/api/ideas/models');
+    productIdeasState.candidates = data.items || [];
+    renderIdeaCandidates();
+  } catch (error) {
+    put('idea_candidate_list', `<div class="idea-empty">Не удалось загрузить кандидатов: ${esc(error.message || 'ошибка связи')}</div>`);
+  }
+}
 on('idea_refresh', 'click', loadProductIdeas);
 on('idea_period', 'change', loadProductIdeas);
 on('idea_plan_create', 'click', buildIdeaPlan);
@@ -4264,9 +4303,61 @@ on('idea_search_form', 'submit', (event) => {
     ['MakerWorld', `https://makerworld.com/en/search/models?keyword=${value}`],
   ];
   const host = $('idea_candidates');
-  if (host) host.innerHTML = links.map(([label, url]) => `<a class="btn sm" href="${url}" target="_blank" rel="noopener">Искать на ${label} ↗</a>`).join(' ');
+  if (host) host.innerHTML = links.map(([label, url]) => `<a class="btn sm" href="${url}" target="_blank" rel="noopener noreferrer">Искать на ${label} ↗</a>`).join(' ');
 });
-PF.on('view', (detail) => { if (detail.view === 'product-ideas') loadProductIdeas(); });
+on('idea_import_form', 'submit', async (event) => {
+  event.preventDefault();
+  if (productIdeasState.importing) return;
+  const field = $('idea_model_url'), button = event.currentTarget.querySelector('button[type="submit"]');
+  productIdeasState.importing = true;
+  if (button) { button.disabled = true; button.textContent = 'Разбираю страницу…'; }
+  try {
+    const result = await post('/api/ideas/models/import', { url: field.value.trim() });
+    field.value = '';
+    toast('Модель добавлена', result.item.title || result.item.source);
+    await loadIdeaCandidates();
+  } catch (error) {
+    toast('Не удалось разобрать модель', error.message || 'Проверьте ссылку и доступность сайта', 'bad');
+  } finally {
+    productIdeasState.importing = false;
+    if (button) { button.disabled = false; button.textContent = 'Импортировать'; }
+  }
+});
+const ideaCandidateHost = $('idea_candidate_list');
+if (ideaCandidateHost) ideaCandidateHost.addEventListener('click', async (event) => {
+  const card = event.target.closest('[data-candidate]');
+  if (!card) return;
+    const field = (name) => card.querySelector(`[data-field="${name}"]`)?.value || '';
+    const id = card.dataset.candidate;
+    try {
+    if (event.target.closest('[data-idea-refresh]')) {
+      const item = productIdeasState.candidates.find((row) => row.id === id);
+      if (!item) return;
+      await post('/api/ideas/models/import', { url: item.url, refresh: true });
+      await loadIdeaCandidates();
+      toast('Карточка обновлена', 'Добавлен новый замер доступных показателей');
+      return;
+    }
+    if (event.target.closest('[data-idea-decision]')) {
+      const status = event.target.closest('[data-idea-decision]').dataset.ideaDecision;
+      const note = field('note').trim();
+      if (status === 'rejected' && !note) return toast('Укажите причину', 'Это поможет улучшать следующие рекомендации', 'warn');
+      await post('/api/ideas/models/decision', { id, status, note, quantity: num(field('quantity'), 3),
+        price: num(field('price')), grams: num(field('grams')), hours: num(field('hours')),
+        other_cost: num(field('other-cost')), filament_cost: num(field('filament-cost')),
+        machine_cost: num(field('machine-cost')) });
+      await loadIdeaCandidates();
+      return;
+    }
+    if (event.target.closest('[data-idea-outcome]')) {
+      await post('/api/ideas/models/outcome', { id, sold: num(field('sold')), returns: num(field('returns')),
+        defects: num(field('defects')), revenue: num(field('revenue')) });
+      await loadIdeaCandidates();
+      toast('Результат теста сохранён');
+    }
+  } catch (error) { toast('Не удалось сохранить', error.message || 'Проверьте поля', 'bad'); }
+});
+PF.on('view', (detail) => { if (detail.view === 'product-ideas') { loadProductIdeas(); loadIdeaCandidates(); } });
 document.addEventListener('click', (e) => {
   const sw = e.target.closest('[data-copy]');
   if (!sw || e.target.closest('[data-nocopy]')) return;
