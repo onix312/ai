@@ -35,23 +35,27 @@ class Analytics:
             "SUM(CASE WHEN at>=? AND at<? THEN -qty ELSE 0 END) previous_qty "
             "FROM stock_moves WHERE doc_kind='sale' AND qty<0 AND at>=? GROUP BY nom_id",
             (start, previous_start, start, previous_start))
+        sales_by_product = {row["nom_id"]: row for row in totals}
         ranked = []
-        for row in totals:
-            product = names.get(row["nom_id"])
-            if not product or product.get("kind") not in ("product", "showcase", "kit"):
+        for nom_id, product in names.items():
+            if product.get("kind") not in ("product", "showcase", "kit"):
                 continue
+            row = sales_by_product.get(nom_id, {})
             current = num(row.get("current_qty"))
             previous = num(row.get("previous_qty"))
             change = round((current / previous - 1) * 100, 1) if previous else None
             trend = "rising" if change is not None and change >= 20 else (
-                "falling" if change is not None and change <= -20 else "steady" if change is not None else "new")
-            ranked.append({"nom_id": row["nom_id"], "name": product.get("name") or "Товар",
+                "falling" if change is not None and change <= -20 else "steady" if change is not None
+                else "new" if current > 0 else "no_data" if previous == 0 else "falling")
+            ranked.append({"nom_id": nom_id, "name": product.get("name") or "Товар",
                            "sold_period": current, "sold_previous": previous,
                            "change_pct": change, "trend": trend,
                            "grams": num(product.get("grams")), "hours": num(product.get("hours")),
                            "material": product.get("material") or "",
+                           "model_url": product.get("model_url") or "",
                            "has_production_estimate": bool(num(product.get("grams")) or num(product.get("hours")))})
-        ranked.sort(key=lambda row: (row["sold_period"], row["sold_previous"]), reverse=True)
+        ranked.sort(key=lambda row: (bool(row["model_url"]), row["sold_period"],
+                                     row["sold_previous"]), reverse=True)
         niches = self.db.query(
             "SELECT n.id,n.name,n.hypothesis,n.target,n.views,n.leads,"
             "COUNT(o.id) orders,COALESCE(SUM(o.price),0) revenue "
@@ -59,9 +63,9 @@ class Analytics:
             "WHERE n.active=1 GROUP BY n.id ORDER BY orders DESC,n.position,n.name", (start,))
         return {"ok": True, "source": {"sales": "PrintFlow · движения продаж",
                 "window_days": window, "as_of": now.isoformat(timespec="seconds"),
-                "external_marketplaces": "не подключены"},
-                "products": ranked[:30], "niches": niches[:20],
-                "data_quality": {"products_with_sales": len(ranked),
+                "external_marketplaces": "импорт страниц по ссылкам товаров"},
+                "products": ranked[:300], "niches": niches[:20],
+                "data_quality": {"products_with_sales": sum(row["sold_period"] > 0 for row in ranked),
                     "products_without_cost_estimate": sum(not row["has_production_estimate"] for row in ranked),
                     "warning": "Сравнение двух равных периодов показывает динамику, но не учитывает сезонность."}}
 

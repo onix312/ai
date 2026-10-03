@@ -4191,32 +4191,47 @@ PF.on('view', (d) => {
 });
 
 const productIdeasState = { data: null, candidates: [], busy: false, importing: false };
+function isIdeaModelUrl(value) {
+  try {
+    const url = new URL(String(value || ''));
+    return url.protocol === 'https:' && ['thingiverse.com', 'printables.com', 'makerworld.com']
+      .some((host) => url.hostname === host || url.hostname.endsWith(`.${host}`));
+  } catch (_) { return false; }
+}
 function renderProductIdeas() {
   const data = productIdeasState.data;
   if (!data) return;
   const products = data.products || [];
   const rising = products.filter((row) => row.trend === 'rising').length;
   const withSales = products.filter((row) => num(row.sold_period) > 0).length;
+  const withModels = products.filter((row) => String(row.model_url || '').trim()).length;
   const noEstimate = (data.data_quality || {}).products_without_cost_estimate || 0;
   put('idea_kpis', [
-    ['Товары с продажами', nfmt(withSales), `${data.source.window_days} дней`],
+    ['Товары со ссылкой на модель', nfmt(withModels), 'из номенклатуры PrintFlow'],
+    ['С продажами в периоде', nfmt(withSales), `${data.source.window_days} дней`],
     ['Темп растёт', nfmt(rising), 'к предыдущему периоду'],
-    ['Активные ниши', nfmt((data.niches || []).length), 'из базы PrintFlow'],
     ['Нет норм печати', nfmt(noEstimate), 'нужны граммы/часы'],
   ].map(([label, value, note]) => `<article class="idea-kpi"><span>${label}</span><b>${value}</b><small>${note}</small></article>`).join(''));
   put('idea_data_note', `Продажи PrintFlow · ${esc(data.source.as_of)} · ${data.source.window_days} дней к предыдущим ${data.source.window_days} дням.`);
   const host = $('idea_products');
-  if (host) host.innerHTML = products.length ? products.slice(0, 12).map((row) => {
+  if (host) host.innerHTML = products.length ? products.map((row) => {
     const trend = row.trend === 'rising' ? `↑ рост ${pct(row.change_pct)}`
       : row.trend === 'falling' ? `↓ снижение ${pct(Math.abs(num(row.change_pct)))}`
-        : row.trend === 'steady' ? '→ без резкого изменения' : 'Нет базы сравнения';
+        : row.trend === 'steady' ? '→ без резкого изменения'
+          : row.trend === 'no_data' ? 'Нет записанных продаж' : 'Новый товар в продажах';
     const estimate = row.has_production_estimate
       ? `${nfmt(row.grams)} г · ${hoursText(row.hours)} · ${esc(row.material || 'материал не указан')}`
       : 'Нет нормы граммов или времени печати';
-    return `<article class="idea-product"><div class="idea-product-main"><button class="idea-name" type="button" data-idea-name="${esc(row.name)}">${esc(row.name)}</button><small>${estimate}</small><span class="idea-trend ${esc(row.trend)}">${trend}</span></div><div class="idea-product-meta">Период <b>${nfmt(row.sold_period)}</b><br>До него <b>${nfmt(row.sold_previous)}</b></div></article>`;
-  }).join('') : '<div class="idea-empty">Продаж за выбранный период нет.</div>';
+    const modelAction = isIdeaModelUrl(row.model_url)
+      ? `<button class="btn sm" type="button" data-idea-model-url="${esc(row.model_url)}" data-idea-nom-id="${esc(row.nom_id)}">Исследовать модель ↗</button>`
+      : row.model_url ? `<a class="btn sm ghost" href="${esc(row.model_url)}" target="_blank" rel="noopener noreferrer">Открыть ссылку ↗</a>`
+        : '<small>Ссылка на модель не заполнена</small>';
+    const currentSales = num(row.sold_period) > 0 ? nfmt(row.sold_period) : 'нет движений';
+    const previousSales = num(row.sold_previous) > 0 ? nfmt(row.sold_previous) : 'нет движений';
+    return `<article class="idea-product"><div class="idea-product-main"><button class="idea-name" type="button" data-idea-name="${esc(row.name)}">${esc(row.name)}</button><small>${estimate}</small><span class="idea-trend ${esc(row.trend)}">${trend}</span><div class="idea-product-model">${modelAction}</div></div><div class="idea-product-meta">Период <b>${currentSales}</b><br>До него <b>${previousSales}</b></div></article>`;
+  }).join('') : '<div class="idea-empty">В номенклатуре нет активных товаров для анализа.</div>';
   const status = $('idea_search_status');
-  if (status) status.textContent = 'Добавьте ссылку с Thingiverse, Printables или MakerWorld: страница и изображения будут разобраны, затем кандидат сохранится в этой панели.';
+  if (status) status.textContent = 'Ссылки из карточек номенклатуры показываются рядом с продажами. Нажмите «Исследовать модель», чтобы ИИ сопоставил страницу с динамикой продаж товара.';
 }
 async function loadProductIdeas() {
   if (productIdeasState.busy) return;
@@ -4255,7 +4270,7 @@ function renderIdeaCandidates() {
     const analysis = item.analysis || {};
     const facts = item.facts || {};
     const metrics = facts.external_metrics || [];
-    const ai = item.ai_status === 'ready' ? analysis.summary
+    const ai = item.ai_status === 'ready' ? [analysis.sales_comparison, analysis.summary].filter(Boolean).join(' ')
       : item.ai_status === 'not_configured' ? 'Настройте vision-модель Ollama в разделе «Настройки», чтобы получить анализ текста и изображений.'
         : (item.ai_error || 'Анализ модели пока недоступен. Карточка и найденные изображения сохранены.');
     const unitCost = num(item.grams_per_unit) * num(item.filament_cost_per_gram)
@@ -4285,6 +4300,33 @@ async function loadIdeaCandidates() {
     put('idea_candidate_list', `<div class="idea-empty">Не удалось загрузить кандидатов: ${esc(error.message || 'ошибка связи')}</div>`);
   }
 }
+const ideaProductsHost = $('idea_products');
+if (ideaProductsHost) ideaProductsHost.addEventListener('click', async (event) => {
+  const button = event.target.closest('[data-idea-model-url]');
+  if (!button || productIdeasState.importing) return;
+  productIdeasState.importing = true;
+  button.disabled = true;
+  button.textContent = 'ИИ исследует страницу…';
+  try {
+    const result = await post('/api/ideas/models/import', {
+      url: button.dataset.ideaModelUrl,
+      nom_id: button.dataset.ideaNomId,
+      days: num(($('idea_period') || {}).value, 90),
+      refresh: true,
+    });
+    await loadIdeaCandidates();
+    toast(result.item.ai_status === 'ready' ? 'Исследование завершено' : 'Карточка сохранена',
+      result.item.ai_status === 'ready' ? (result.item.title || 'Модель связана с товаром PrintFlow')
+        : 'Подключите vision-модель Ollama, чтобы получить анализ текста и изображений',
+      result.item.ai_status === 'ready' ? 'ok' : 'warn');
+  } catch (error) {
+    toast('Не удалось исследовать модель', error.message || 'Проверьте ссылку и доступность сайта', 'bad');
+  } finally {
+    productIdeasState.importing = false;
+    button.disabled = false;
+    button.textContent = 'Исследовать модель ↗';
+  }
+});
 on('idea_refresh', 'click', loadProductIdeas);
 on('idea_period', 'change', loadProductIdeas);
 on('idea_plan_create', 'click', buildIdeaPlan);

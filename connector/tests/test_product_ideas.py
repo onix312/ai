@@ -4,6 +4,7 @@ import json
 import pathlib
 import sys
 import unittest
+from datetime import datetime, timedelta
 from unittest.mock import patch
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -70,6 +71,7 @@ class ProductIdeasTests(unittest.TestCase):
     def test_ollama_receives_structured_prompt_and_image_without_page_instructions(self, config, loopback, post):
         analysis = {"category": "органайзер", "use_cases": [], "visual_summary": "лоток",
                     "assembly_signals": [], "print_risks": [], "missing_data": ["время печати"],
+                    "sales_comparison": "Продажи не переданы",
                     "summary": "Нужна проверка слайсером"}
         post.return_value = (True, {"message": {"content": json.dumps(analysis, ensure_ascii=False)}}, "")
         page = {"url": "https://printables.com/model/2", "title": "Tray",
@@ -83,6 +85,27 @@ class ProductIdeasTests(unittest.TestCase):
         self.assertIn("Injected page instructions", prompt)
         self.assertEqual(["aW1hZ2U="], payload["messages"][0]["images"])
         self.assertEqual(4096, payload["options"]["num_ctx"])
+
+    def test_import_joins_existing_catalog_sales_to_the_model_analysis(self):
+        url = "https://www.makerworld.com/model/linked"
+        self.db.upsert("nomenclature", {"id": "nom1", "name": "Настольный органайзер",
+                                        "kind": "product", "model_url": url})
+        now = datetime.now()
+        self.db.upsert("stock_moves", {"id": "old", "at": (now - timedelta(days=110)).isoformat(),
+                                        "doc_kind": "sale", "nom_id": "nom1", "qty": -2})
+        self.db.upsert("stock_moves", {"id": "recent", "at": (now - timedelta(days=10)).isoformat(),
+                                        "doc_kind": "sale", "nom_id": "nom1", "qty": -5})
+        with patch("connector.printflow.product_ideas._read_url", return_value=(
+                b'<meta property="og:title" content="Organizer">', "text/html")), \
+             patch("connector.printflow.product_ideas._public_https_url", return_value=False), \
+             patch.object(self.ideas, "_analyze", return_value=({}, "not_configured", "no model")) as analyze:
+            item = self.ideas.import_url(url, refresh=True, days=90)
+        sales = analyze.call_args.args[0]["sales_context"]
+        self.assertEqual([{"nom_id": "nom1", "name": "Настольный органайзер", "days": 90,
+                           "sold_period": 5.0, "sold_previous": 2.0, "change_pct": 150.0,
+                           "trend": "rising", "sales_source": "stock_moves: sale"}], sales)
+        self.assertEqual([{"nom_id": "nom1", "name": "Настольный органайзер"}], item["linked_products"])
+        self.assertEqual(sales, item["facts"]["sales_context"])
 
     def test_decisions_reject_invalid_state_or_non_numeric_estimates(self):
         with self.assertRaises(ValueError):

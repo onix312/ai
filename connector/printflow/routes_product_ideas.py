@@ -17,7 +17,7 @@ def ideas_models_import(api: Any, ctx: Ctx):
     from .product_ideas import ProductIdeas
     try:
         item = ProductIdeas(api.db).import_url(ctx.body.get("url", ""),
-                                               bool(ctx.body.get("refresh")))
+                             bool(ctx.body.get("refresh")), ctx.body.get("days", 90))
     except ValueError as exc:
         return 400, {"ok": False, "error": str(exc)}
     return 200, {"ok": True, "item": item}
