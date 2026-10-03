@@ -11,14 +11,14 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="PrintFlow">
-<script src="assets/theme-init.js?v=18.23.1"></script>
-<link rel="stylesheet" href="assets/tokens.css?v=18.23.1">
-<link rel="stylesheet" href="assets/fonts.css?v=18.23.1">
-<link rel="stylesheet" href="assets/theme.css?v=18.23.1">
-<link rel="stylesheet" href="assets/app.css?v=18.23.1">
-<link rel="stylesheet" href="assets/more.css?v=18.23.1">
-<link rel="stylesheet" href="assets/controls.css?v=18.23.1">
-<link rel="stylesheet" href="assets/refine.css?v=18.23.1">
+<script src="assets/theme-init.js?v=18.23.2"></script>
+<link rel="stylesheet" href="assets/tokens.css?v=18.23.2">
+<link rel="stylesheet" href="assets/fonts.css?v=18.23.2">
+<link rel="stylesheet" href="assets/theme.css?v=18.23.2">
+<link rel="stylesheet" href="assets/app.css?v=18.23.2">
+<link rel="stylesheet" href="assets/more.css?v=18.23.2">
+<link rel="stylesheet" href="assets/controls.css?v=18.23.2">
+<link rel="stylesheet" href="assets/refine.css?v=18.23.2">
 <link rel="stylesheet" href="assets/v19-shell.css?v=19.7.0">
 </head><body class="pf-v19">
 <a class="skip-link" href="#views" id="skip_link">Перейти к содержимому</a>
@@ -57,6 +57,7 @@
      <a class="nav-link" href="#ops10" data-view="ops10" data-find="центр 10.0 смена inbox воронка автоматизация правила dry run производство"><span class="ic" data-icon="hexagon">◆</span>Центр смены</a>
      <a class="nav-link" href="#calc" data-view="calc" data-find="калькулятор цена себестоимость наценка"><span class="ic" data-icon="calculator">⌁</span>Калькулятор</a>
      <a class="nav-link" href="#niches" data-view="niches" data-find="ниша гипотеза спрос конверсия прибыль тест"><span class="ic" data-icon="target">◫</span>Ниши</a>
+     <a class="nav-link" href="#product-ideas" data-view="product-ideas" data-find="идеи товаров тренд продажи модель пробная партия спрос"><span class="ic" data-icon="target">✦</span>Идеи товаров</a>
      <a class="nav-link nav-link-featured" href="#print" data-view="print" data-find="печать формы ценники стикеры наклейки таблички визитки гарантия отчёт бланк штрихкод бумага"><span class="ic" data-icon="page">▤</span>Печатные формы</a>
      <a class="nav-link" href="#clientbot" data-view="clientbot" data-find="клиентский бот telegram покупатель витрина заказ статус каталог"><span class="ic" data-icon="send">✈</span>Клиент-бот</a>
      <a class="nav-link" href="#library" data-view="library" data-find="библиотека инструкция faq помощь материалы чеклист"><span class="ic" data-icon="book">▤</span>Библиотека</a>
@@ -1131,6 +1132,22 @@
  </div>
  <div id="niche_summary" class="niche-summary" aria-live="polite"></div>
  <div class="niche-grid" id="niche_grid"></div>
+</section>
+
+<!-- ================================================== ИДЕИ ТОВАРОВ -->
+<section class="view" id="view-product-ideas">
+ <div class="view-head">
+  <div><span class="eyebrow">Спрос → модель → пробный запуск</span><h1>Идеи товаров</h1><p>Сопоставляйте фактические продажи, модели для печати и возможности мастерской.</p></div>
+  <div class="head-actions"><select id="idea_period" aria-label="Период анализа"><option value="30">30 дней</option><option value="90" selected>90 дней</option><option value="180">180 дней</option><option value="365">365 дней</option></select><button class="btn" id="idea_refresh" type="button">↻ Обновить</button></div>
+ </div>
+ <div class="idea-banner"><div class="idea-banner-icon">✦</div><div><b>Рекомендации основаны на фактах PrintFlow</b><span>Продажи сравниваются с предыдущим равным периодом. Сезонность не учитывается.</span></div></div>
+ <div class="idea-kpis" id="idea_kpis" aria-live="polite"></div>
+ <div class="idea-layout">
+  <section class="card idea-section"><div class="card-head"><div><span class="card-kicker">Факты PrintFlow</span><h2>Что продаётся и меняется</h2><p id="idea_data_note"></p></div></div><div id="idea_products" class="idea-products"></div></section>
+  <section class="card idea-section"><div class="card-head"><div><span class="card-kicker">Внешний спрос</span><h2>Поиск моделей</h2><p>Откройте поиск на выбранных площадках.</p></div></div><form id="idea_search_form" class="idea-search"><input id="idea_search_query" type="search" maxlength="120" placeholder="Например: модульный органайзер" aria-label="Что найти"><button class="btn primary" type="submit">Найти</button></form><div class="idea-sources"><a href="https://www.thingiverse.com/" target="_blank" rel="noopener">Thingiverse ↗</a><a href="https://www.printables.com/" target="_blank" rel="noopener">Printables ↗</a><a href="https://makerworld.com/" target="_blank" rel="noopener">MakerWorld ↗</a></div><div id="idea_search_status" class="idea-search-status">Автоматические карточки и превью появятся после подключения доступных интерфейсов площадок.</div><div id="idea_candidates" class="idea-candidates"></div></section>
+ </div>
+ <section class="card idea-section idea-plan"><div class="card-head"><div><span class="card-kicker">Проверка гипотезы</span><h2>План пробной партии</h2><p>Черновик для оценки, без списания материалов и запуска печати.</p></div></div><div class="idea-plan-grid"><label>Товар или гипотеза<input id="idea_plan_name" maxlength="120" placeholder="Название товара или идеи"></label><label>Количество<input id="idea_plan_qty" type="number" min="1" max="100" value="3"></label><button class="btn" id="idea_plan_create" type="button">Собрать план</button></div><div id="idea_plan_result" class="idea-plan-result" aria-live="polite">Укажите товар, чтобы увидеть данные спроса и известные нормы печати.</div></section>
+ <p class="idea-footnote">Внешняя популярность моделей — отдельный сигнал и не равна спросу ваших покупателей.</p>
 </section>
 
 <!-- ================================================== КАЛЬКУЛЯТОР -->
@@ -5882,38 +5899,38 @@
 
 <div id="toasts"></div>
 
-<script src="assets/qr.js?v=18.23.1"></script>
-<script src="assets/core.js?v=18.23.1"></script>
+<script src="assets/qr.js?v=18.23.2"></script>
+<script src="assets/core.js?v=18.23.2"></script>
 <script src="assets/v19-shell.js?v=19.1.0"></script>
-<script src="assets/colors.js?v=18.23.1"></script>
-<script src="assets/icons.js?v=18.23.1"></script>
-<script src="assets/sound.js?v=18.23.1"></script>
-<script src="assets/knob.js?v=18.23.1"></script>
-<script src="assets/amspath.js?v=18.23.1"></script>
-<script src="assets/layers.js?v=18.23.1"></script>
-<script src="assets/incidents.js?v=18.23.1"></script>
-<script src="assets/gpuslice.js?v=18.23.1"></script>
-<script src="assets/printer.js?v=18.23.1"></script>
-<script src="assets/ams-autopilot.js?v=18.23.1"></script>
-<script src="assets/queue.js?v=18.23.1"></script>
-<script src="assets/ops.js?v=18.23.1"></script>
-<script src="assets/money.js?v=18.23.1"></script>
-<script src="assets/finance.js?v=18.23.1"></script>
-<script src="assets/shelf.js?v=18.23.1"></script>
-<script src="assets/products.js?v=18.23.1"></script>
-<script src="assets/bridge.js?v=18.23.1"></script>
+<script src="assets/colors.js?v=18.23.2"></script>
+<script src="assets/icons.js?v=18.23.2"></script>
+<script src="assets/sound.js?v=18.23.2"></script>
+<script src="assets/knob.js?v=18.23.2"></script>
+<script src="assets/amspath.js?v=18.23.2"></script>
+<script src="assets/layers.js?v=18.23.2"></script>
+<script src="assets/incidents.js?v=18.23.2"></script>
+<script src="assets/gpuslice.js?v=18.23.2"></script>
+<script src="assets/printer.js?v=18.23.2"></script>
+<script src="assets/ams-autopilot.js?v=18.23.2"></script>
+<script src="assets/queue.js?v=18.23.2"></script>
+<script src="assets/ops.js?v=18.23.2"></script>
+<script src="assets/money.js?v=18.23.2"></script>
+<script src="assets/finance.js?v=18.23.2"></script>
+<script src="assets/shelf.js?v=18.23.2"></script>
+<script src="assets/products.js?v=18.23.2"></script>
+<script src="assets/bridge.js?v=18.23.2"></script>
 <!-- 14.0 (47): print.js грузится лениво при первом входе в раздел -->
 <!-- 14.0 (47): clientbot.js грузится лениво при первом входе в раздел -->
-<script src="assets/workshop.js?v=18.23.1"></script>
-<script src="assets/app.js?v=18.23.1"></script>
-<script type="module" src="assets/dist/printflow-app.js?v=18.23.1"></script>
+<script src="assets/workshop.js?v=18.23.2"></script>
+<script src="assets/app.js?v=18.23.2"></script>
+<script type="module" src="assets/dist/printflow-app.js?v=18.23.2"></script>
 <!-- 14.0 (47): ops10.js грузится лениво при первом входе в раздел -->
 <script>
 /* Служебный воркер: мгновенный старт панели и работа при мигании сети.
    Регистрируется только там, где браузер это разрешает (localhost/HTTPS). */
 if ('serviceWorker' in navigator && window.isSecureContext) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js?v=18.23.1').catch(() => {});
+    navigator.serviceWorker.register('/sw.js?v=18.23.2').catch(() => {});
   });
 }
 </script>

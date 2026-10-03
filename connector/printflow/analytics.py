@@ -20,6 +20,51 @@ class Analytics:
         self.db = db
         self.acc = Accounting(db)
 
+    def product_opportunities(self, days: int = 90) -> dict[str, Any]:
+        """Продажи товаров за выбранный период и изменение к предыдущему периоду."""
+        window = max(30, min(365, int(days or 90)))
+        now = datetime.now()
+        start = (now - timedelta(days=window)).isoformat()
+        previous_start = (now - timedelta(days=window * 2)).isoformat()
+        names = {row["id"]: row for row in self.db.query(
+            "SELECT id, name, kind, grams, hours, material, photo, model_url"
+            " FROM nomenclature WHERE archived=0")}
+        totals = self.db.query(
+            "SELECT nom_id,"
+            "SUM(CASE WHEN at>=? THEN -qty ELSE 0 END) current_qty,"
+            "SUM(CASE WHEN at>=? AND at<? THEN -qty ELSE 0 END) previous_qty "
+            "FROM stock_moves WHERE doc_kind='sale' AND qty<0 AND at>=? GROUP BY nom_id",
+            (start, previous_start, start, previous_start))
+        ranked = []
+        for row in totals:
+            product = names.get(row["nom_id"])
+            if not product or product.get("kind") not in ("product", "showcase", "kit"):
+                continue
+            current = num(row.get("current_qty"))
+            previous = num(row.get("previous_qty"))
+            change = round((current / previous - 1) * 100, 1) if previous else None
+            trend = "rising" if change is not None and change >= 20 else (
+                "falling" if change is not None and change <= -20 else "steady" if change is not None else "new")
+            ranked.append({"nom_id": row["nom_id"], "name": product.get("name") or "Товар",
+                           "sold_period": current, "sold_previous": previous,
+                           "change_pct": change, "trend": trend,
+                           "grams": num(product.get("grams")), "hours": num(product.get("hours")),
+                           "material": product.get("material") or "",
+                           "has_production_estimate": bool(num(product.get("grams")) or num(product.get("hours")))})
+        ranked.sort(key=lambda row: (row["sold_period"], row["sold_previous"]), reverse=True)
+        niches = self.db.query(
+            "SELECT n.id,n.name,n.hypothesis,n.target,n.views,n.leads,"
+            "COUNT(o.id) orders,COALESCE(SUM(o.price),0) revenue "
+            "FROM niches n LEFT JOIN orders o ON o.niche_id=n.id AND o.created_at>=? "
+            "WHERE n.active=1 GROUP BY n.id ORDER BY orders DESC,n.position,n.name", (start,))
+        return {"ok": True, "source": {"sales": "PrintFlow · движения продаж",
+                "window_days": window, "as_of": now.isoformat(timespec="seconds"),
+                "external_marketplaces": "не подключены"},
+                "products": ranked[:30], "niches": niches[:20],
+                "data_quality": {"products_with_sales": len(ranked),
+                    "products_without_cost_estimate": sum(not row["has_production_estimate"] for row in ranked),
+                    "warning": "Сравнение двух равных периодов показывает динамику, но не учитывает сезонность."}}
+
     # =========================================================== OEE (R)
     def oee(self, days: int = 30, printer_id: str = "") -> dict[str, Any]:
         """Overall Equipment Effectiveness — эффективность принтера.
