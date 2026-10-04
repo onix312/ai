@@ -11,12 +11,15 @@ const nav = $('pf_ai_nav');
 const close = $('pf_ai_close');
 const frame = $('pf_ai_frame');
 const stateText = $('pf_ai_state');
+let lastActivator = trigger;
 
 if (!rail || !trigger) return;
 
-function setOpen(open, focus = true) {
+function setOpen(open, focus = true, activator = null) {
+  if (open && activator && typeof activator.focus === 'function') lastActivator = activator;
   body.classList.toggle('pf-ai-open', !!open);
   rail.setAttribute('aria-hidden', open ? 'false' : 'true');
+  rail.toggleAttribute('inert', !open);
   trigger.setAttribute('aria-expanded', open ? 'true' : 'false');
   if (nav) nav.setAttribute('aria-expanded', open ? 'true' : 'false');
   try { localStorage.setItem('pf_v19_ai_open', open ? '1' : '0'); } catch (e) {}
@@ -27,11 +30,15 @@ function setOpen(open, focus = true) {
     window.setTimeout(() => {
       try { frame.contentWindow && frame.contentWindow.focus(); } catch (e) {}
     }, 180);
+  } else if (!open && focus && lastActivator) {
+    window.setTimeout(() => {
+      try { lastActivator.focus(); } catch (e) {}
+    }, 0);
   }
 }
 
-function toggle() {
-  setOpen(!body.classList.contains('pf-ai-open'));
+function toggle(activator = trigger) {
+  setOpen(!body.classList.contains('pf-ai-open'), true, activator);
 }
 
 async function syncAssistantStatus() {
@@ -47,24 +54,25 @@ async function syncAssistantStatus() {
         ? (model ? 'локальный · ' + model : 'локальный · готов')
         : (reason || 'локальный AI недоступен');
     }
-    trigger.title = data.available
+    trigger.title = (data.available
       ? 'Nozza готова' + (model ? ' · ' + model : '')
-      : (reason || 'Nozza недоступна');
+      : (reason || 'Nozza недоступна')) + ' · Alt+A';
   } catch (e) {
     trigger.classList.remove('ready');
     trigger.classList.add('warn');
     if (stateText) stateText.textContent = 'нет связи с AI';
+    trigger.title = 'Nozza недоступна · Alt+A';
   }
 }
 
-trigger.addEventListener('click', toggle);
+trigger.addEventListener('click', () => toggle(trigger));
 ['system_map_ai', 'system_map_ai_bottom'].forEach((id) => {
   const button = document.getElementById(id);
-  if (button) button.addEventListener('click', () => setOpen(true));
+  if (button) button.addEventListener('click', () => setOpen(true, true, button));
 });
 if (nav) nav.addEventListener('click', (event) => {
   event.preventDefault();
-  setOpen(true);
+  setOpen(true, true, nav);
 });
 if (close) close.addEventListener('click', () => setOpen(false));
 if (scrim) scrim.addEventListener('click', () => setOpen(false));
@@ -76,7 +84,7 @@ document.addEventListener('keydown', (event) => {
   }
   if (event.altKey && String(event.key || '').toLowerCase() === 'a') {
     event.preventDefault();
-    toggle();
+    toggle(trigger);
   }
 });
 
@@ -91,5 +99,5 @@ window.setInterval(syncAssistantStatus, 30000);
 
 let restore = false;
 try { restore = localStorage.getItem('pf_v19_ai_open') === '1'; } catch (e) {}
-if (restore && window.innerWidth > 1180) setOpen(true, false);
+if (restore && window.innerWidth > 1180) setOpen(true, false, trigger);
 })();

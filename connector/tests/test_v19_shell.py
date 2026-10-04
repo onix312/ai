@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import pathlib
+import re
 import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -16,6 +17,10 @@ class PrintFlowV19ShellTests(unittest.TestCase):
         cls.js = (SITE / "assets" / "v19-shell.js").read_text(encoding="utf-8")
         cls.assistant = (SITE / "assistant.html").read_text(encoding="utf-8")
         cls.sw = (SITE / "sw.js").read_text(encoding="utf-8")
+        version_match = re.search(r'assets/core\.js\?v=([^"]+)', cls.index)
+        if not version_match:
+            raise AssertionError("index.html: не найден version pin assets/core.js")
+        cls.asset_version = version_match.group(1)
 
     def test_primary_shell_uses_printflow_identity(self):
         head = self.index[:9000]
@@ -32,7 +37,7 @@ class PrintFlowV19ShellTests(unittest.TestCase):
         ):
             self.assertIn(f'id="{element_id}"', self.index)
         self.assertIn('data-src="/assistant.html?embed=1"', self.index)
-        self.assertIn("assets/v19-shell.js?v=19.1.0", self.index)
+        self.assertIn(f"assets/v19-shell.js?v={self.asset_version}", self.index)
 
     def test_ai_rail_is_local_and_contextual(self):
         self.assertIn("/api/assistant/status", self.js)
@@ -58,7 +63,7 @@ class PrintFlowV19ShellTests(unittest.TestCase):
         self.assertIn('data-accent="violet"', self.index)
         self.assertIn("<span>Nozza</span>", self.index)
         self.assertIn("<b>Nozza</b><small id=\"pf_ai_state\">Luma core", self.index)
-        self.assertIn("assets/v19-shell.css?v=19.1.0", self.index)
+        self.assertIn(f"assets/v19-shell.css?v={self.asset_version}", self.index)
 
 
     def test_printers_and_queue_visual_contract(self):
@@ -67,7 +72,6 @@ class PrintFlowV19ShellTests(unittest.TestCase):
         self.assertIn(".v19-pr-operator::before", self.css)
         self.assertIn("#view-queue .queue-item.live", self.css)
         self.assertIn(".v19-queue-pulse button.on::before", self.css)
-        self.assertIn("assets/v19-shell.css?v=19.2.0", self.index)
         self.assertIn("Приоритет, срок, материал и совместимость", self.index)
 
 
@@ -77,7 +81,6 @@ class PrintFlowV19ShellTests(unittest.TestCase):
         self.assertIn("#view-customers .crm-brief::before", self.css)
         self.assertIn("#view-finance .v19-fin-kpis .kpi::before", self.css)
         self.assertIn("#view-finance .v19-fin-attention-card::before", self.css)
-        self.assertIn("assets/v19-shell.css?v=19.3.0", self.index)
         self.assertIn("без лишней CRM-сложности", self.index)
         self.assertIn("без бухгалтерского шума", self.index)
 
@@ -88,7 +91,6 @@ class PrintFlowV19ShellTests(unittest.TestCase):
         self.assertIn("#view-shelf .shelf-card::before", self.css)
         self.assertIn("#view-shelf .v19-shelf-pulse button.on::before", self.css)
         self.assertIn("#view-inventory .inventory-extra", self.css)
-        self.assertIn("assets/v19-shell.css?v=19.4.0", self.index)
         self.assertIn("следующий перенос на полку", self.index)
         self.assertIn("быстрым контролем дефицита и AMS", self.index)
 
@@ -98,7 +100,6 @@ class PrintFlowV19ShellTests(unittest.TestCase):
         self.assertIn("#view-batches .batch-item.printing::before", self.css)
         self.assertIn("#view-documents > .toolbar", self.css)
         self.assertIn("#view-warehouses .wh-card::after", self.css)
-        self.assertIn("assets/v19-shell.css?v=19.5.0", self.index)
         self.assertIn("прогресс выпуска и приёмка", self.index)
         self.assertIn("какие движения требуют проверки", self.index)
 
@@ -108,7 +109,6 @@ class PrintFlowV19ShellTests(unittest.TestCase):
         self.assertIn("#view-niches .niche-brief::before", self.css)
         self.assertIn("#view-calc .calc-grid > .card::before", self.css)
         self.assertIn("#view-calc .field input:focus", self.css)
-        self.assertIn("assets/v19-shell.css?v=19.6.0", self.index)
         self.assertIn("фактической прибыли, конверсии", self.index)
         self.assertIn("прибыль на час", self.index)
 
@@ -120,7 +120,6 @@ class PrintFlowV19ShellTests(unittest.TestCase):
         self.assertIn("#view-clientbot .clientbot-settings-card", self.css)
         self.assertIn("#view-library .library-home", self.css)
         self.assertIn("#view-settings .settings-quicknav button.on::before", self.css)
-        self.assertIn("assets/v19-shell.css?v=19.7.0", self.index)
         self.assertIn("<h2>Nozza</h2>", self.index)
         self.assertIn("Спросить Nozza", self.index)
 
@@ -131,10 +130,30 @@ class PrintFlowV19ShellTests(unittest.TestCase):
         self.assertIn('aria-label="Закрыть Nozza"', self.index)
         self.assertNotIn("PrintFlow AI", self.index)
 
+    def test_shell_assets_follow_main_release_pin(self):
+        versions = set(re.findall(
+            r'(?:src|href)="[^"]+\?v=([^"&]+)"',
+            self.index,
+        ))
+        self.assertEqual({self.asset_version}, versions)
+        self.assertIn(f"assets/v19-shell.css?v={self.asset_version}", self.index)
+        self.assertIn(f"assets/v19-shell.js?v={self.asset_version}", self.index)
+
+    def test_ai_rail_is_removed_from_focus_order_while_hidden(self):
+        self.assertIn('id="pf_ai_nav"', self.index)
+        self.assertIn('aria-controls="pf_ai_rail"', self.index)
+        self.assertRegex(
+            self.index,
+            r'<aside class="pf-ai-rail"[^>]*\bid="pf_ai_rail"[^>]*\binert\b',
+        )
+        self.assertIn("rail.toggleAttribute('inert', !open)", self.js)
+        self.assertIn("lastActivator", self.js)
+        self.assertIn("Nozza недоступна · Alt+A", self.js)
+
     def test_shell_assets_are_in_offline_cache(self):
         self.assertIn("/assets/v19-shell.css", self.sw)
         self.assertIn("/assets/v19-shell.js", self.sw)
-        self.assertIn("printflow-shell-v107", self.sw)
+        self.assertRegex(self.sw, r"const CACHE = 'printflow-shell-v\d+';")
 
     def test_motion_and_small_screen_are_supported(self):
         self.assertIn("prefers-reduced-motion: reduce", self.css)
