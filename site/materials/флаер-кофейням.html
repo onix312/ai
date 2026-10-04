@@ -6,6 +6,113 @@
 <link rel="stylesheet" href="../assets/fonts.css?v=18.23.1">
 <link rel="stylesheet" href="generator.css?v=18.23.1">
 <style>
+  /* NOZZA v2: рабочая поверхность редактора. Печатные стили флаера ниже
+     остаются независимыми и продолжают опираться на геометрию в миллиметрах. */
+  :root { --ink:#F8EEE6; --ink-soft:#BFAFB7; --line:#5B465C; --brand:#B52BFF; --brand-2:#8638ED; --canvas:#1D161F; --surface:#2C232E; --surface-deep:#18131B; --peach:#F0A368; }
+  body { min-height:100vh; background:radial-gradient(ellipse at 62% 20%,#322137 0,transparent 38%),#1D161F; color:var(--ink); font-family:Inter,"Segoe UI",Arial,sans-serif; }
+  body::before { content:""; position:fixed; inset:0; pointer-events:none; opacity:.12; background-image:radial-gradient(#bda6c1 .55px,transparent .55px); background-size:7px 7px; mask-image:linear-gradient(115deg,#000,transparent 72%); }
+  .panel { position:relative; z-index:1; max-width:1480px; margin:0 auto; padding:20px 28px 0; background:transparent; border:0; box-shadow:none; }
+  .panel-row { gap:10px; }
+  .panel-row:first-child { min-height:64px; padding-bottom:14px; border-bottom:1px solid rgba(190,153,193,.18); }
+  .panel h1 { margin-right:auto; color:var(--ink); font-size:20px; letter-spacing:-.025em; gap:12px; }
+  .panel h1 img { width:30px; height:30px; padding:6px; border:1px solid rgba(181,43,255,.42); border-radius:10px; background:#302137; }
+  .panel label { color:#C8B9C6; flex-direction:column; align-items:stretch; gap:6px; font-size:11px; font-weight:650; letter-spacing:.025em; }
+  .panel label.inline { flex-direction:row; align-items:center; }
+  .panel select,.panel input[type="text"],.panel input[type="number"],.panel textarea,.btn { min-height:38px; border:1px solid #5B465C; border-radius:9px; background:#2C232E; color:#F8EEE6; font:500 12px Inter,"Segoe UI",Arial,sans-serif; }
+  .panel select,.panel input[type="text"],.panel input[type="number"] { padding:8px 10px; }
+  .panel input[type="text"] { min-width:0; }
+  .panel input::placeholder,.panel textarea::placeholder { color:#9D8D9B; }
+  .panel input:focus-visible,.panel textarea:focus-visible,.panel select:focus-visible,.btn:focus-visible { outline:2px solid #D5AAFF; outline-offset:2px; }
+  .panel .btn { padding:8px 14px; font-size:12px; font-weight:700; cursor:pointer; }
+  .panel .btn:hover { border-color:#A46EB5; background:#382A3B; }
+  .panel .btn.primary { color:#fff; background:linear-gradient(135deg,#B52BFF,#8638ED); border-color:#CE8BFF; box-shadow:0 0 18px rgba(164,62,246,.28); }
+  .panel .btn.primary:disabled { opacity:.48; box-shadow:none; cursor:not-allowed; }
+  .panel .btn.danger { color:#FFC1C6; border-color:#794650; background:#3A252D; }
+  .panel .panel-row:first-child > label { min-width:130px; }
+  .panel-row:nth-child(2) { align-items:end; padding:14px 0 12px; }
+  .panel-row:nth-child(2) label:nth-of-type(1) { min-width:180px; }
+  .panel-row:nth-child(2) label:nth-of-type(2) { min-width:240px; }
+  .panel-row:nth-child(2) label:nth-of-type(3) { min-width:154px; }
+  .panel-row:nth-child(2) label:nth-of-type(4) { min-width:108px; }
+  #plan { align-self:end; min-height:38px; display:flex; align-items:center; padding:0 12px; border:1px solid rgba(181,43,255,.28); border-radius:9px; background:rgba(126,49,164,.13); color:#E7C5FA; font-size:11px; font-weight:650; }
+  #overWarn { flex-basis:100%; padding:9px 12px; border:1px solid #884650; border-radius:8px; background:#3B242D; }
+  .panel-row:nth-child(3) { padding:12px; border:1px solid rgba(190,153,193,.19); border-radius:12px; background:rgba(44,35,46,.74); }
+  .panel-row:nth-child(3)>label:first-child { flex:1 1 340px!important; }
+  .panel-row:nth-child(3) textarea { width:100%; min-width:0!important; min-height:62px!important; line-height:1.5!important; resize:vertical; }
+  #placesInfo { align-self:center; }
+  .editor { margin-top:14px; padding:16px; border:1px solid #66506A; border-radius:13px; background:linear-gradient(145deg,rgba(48,40,50,.98),rgba(33,27,37,.98)); box-shadow:0 1px 0 rgba(255,238,231,.06) inset,0 14px 40px rgba(8,4,10,.24); }
+  .editor-head { align-items:center; margin-bottom:14px; }
+  .editor h3 { color:#F6EAF4; font-size:14px; letter-spacing:.015em; text-transform:none; }
+  .editor-head .sub { max-width:500px; color:#BAAAB8; font-size:11px; line-height:1.55; }
+  .editor-tools { gap:7px; align-items:end; }
+  .editor-tools label { color:#C8B9C6; font-size:10px; }
+  .editor .btn { min-height:34px; padding:7px 10px; }
+  .editor .btn.primary { background:linear-gradient(135deg,#B52BFF,#8638ED); }
+  .editor .btn.danger { background:#3A252D; }
+  .editor-status { min-height:30px; padding:0 10px; border:1px solid #5B465C; border-radius:8px; background:#221B25; }
+  .editor-status.ok { color:#B7E5CC; }
+  .editor-status.warn { color:#F7CF91; }
+  .editor-status.bad { color:#FF929F; }
+  .editor .row[data-editor-section] { gap:10px; }
+  .editor .row { gap:10px; margin-bottom:10px; }
+  .editor .blk { min-width:0; border:1px solid #5B465C; border-radius:10px; padding:12px; background:rgba(24,19,27,.62); }
+  .editor .blk> b { margin-bottom:10px; color:#D88BFF; font-size:10px; letter-spacing:.1em; }
+  .editor label { color:#C8B9C6; font-size:10.5px; }
+  .editor input,.editor textarea,.editor select { min-height:36px; padding:8px 10px; border:1px solid #5B465C; border-radius:8px; background:#211B25; color:#F8EEE6; font:500 12px Inter,"Segoe UI",Arial,sans-serif; }
+  .editor textarea { min-width:min(320px,100%); min-height:70px; line-height:1.5; }
+  .editor input::placeholder,.editor textarea::placeholder { color:#9D8D9B; }
+  .editor input.w1 { width:min(180px,100%); }
+  .editor input.w2 { width:min(240px,100%); }
+  .editor .counter { color:#9D8D9B; }
+  .editor .counter.warn { color:#F7CF91; }
+  .editor .counter.bad { color:#FF929F; }
+  .editor .blk .row { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); }
+  .editor .blk .row label { min-width:0; }
+  .editor .blk .row label input,.editor .blk .row label textarea { width:100%; min-width:0; }
+  .editor>.row[data-editor-section="back"] { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .editor>.row[data-editor-section="back"] .blk .row { grid-template-columns:minmax(130px,.62fr) minmax(0,1.38fr); }
+  .editor>.row[data-editor-section="back"] .blk .row textarea { min-height:74px; }
+  .editor>[data-editor-section="back"]:last-child { align-items:center; }
+  .note { position:relative; z-index:1; max-width:1424px; margin:14px auto 0; padding:11px 14px; border:1px solid #695340; border-radius:9px; background:#30251F; color:#D9C8B8; font-size:11px; }
+  .note b { color:#F0A368; }
+  #sheets { position:relative; z-index:1; }
+  .sheet { margin-block:24px; border-radius:2px; background:#fff; color:#31242E; box-shadow:0 18px 60px rgba(0,0,0,.35); }
+  .sheet-title { color:#66555F; }
+  .cutnote { color:#8B7A84; }
+  .json-flier-block { font-family:Arial,sans-serif; }
+  .json-flier-block[style*="background: rgb(246, 240, 248)"],.json-flier-block[style*="background:#F6F0F8"] { padding:1mm 2mm!important; }
+  @media (min-width:900px) {
+    .panel { padding-inline:32px; }
+    .editor { display:grid; grid-template-columns:minmax(0,1.12fr) minmax(390px,.88fr); gap:14px 18px; }
+    .editor-head { grid-column:1/-1; display:grid; grid-template-columns:minmax(230px,.55fr) minmax(0,1.45fr); }
+    .editor-tools { justify-content:flex-end; }
+    .editor>.row[data-editor-section="front"] { grid-column:1; grid-row:2; align-content:start; }
+    .editor>.row[data-editor-section="back"] { grid-column:1; grid-row:3; align-content:start; }
+    .editor>[data-editor-section="back"]:last-child { grid-column:1; grid-row:4; }
+    .editor>.row[data-editor-section="front"] .blk { width:100%; }
+  }
+  @media (max-width:899px) {
+    .panel { padding:12px 14px 0; }
+    .panel-row:first-child { align-items:center; }
+    .panel-row:first-child>label { flex:1 1 145px; }
+    .panel-row:first-child>label:nth-of-type(2) { flex-basis:190px; }
+    .editor { padding:12px; }
+    .editor>.row[data-editor-section="back"] { grid-template-columns:1fr; }
+    .editor .blk .row { grid-template-columns:repeat(2,minmax(0,1fr)); }
+    .editor>.row[data-editor-section="back"] .blk .row { grid-template-columns:minmax(110px,.6fr) minmax(0,1.4fr); }
+    .note { margin-inline:14px; }
+  }
+  @media (max-width:560px) {
+    .panel h1 { flex-basis:100%; font-size:18px; }
+    .panel-row:nth-child(2)>label { flex:1 1 44%; }
+    .panel-row:nth-child(3)>label:first-child { flex-basis:100%!important; }
+    .editor .blk .row,.editor>.row[data-editor-section="back"] .blk .row { grid-template-columns:1fr; }
+    .editor>.row[data-editor-section="back"] .blk .row textarea { min-height:88px; }
+    .editor-tools>* { flex:1 1 42%; min-width:0!important; }
+    .editor-tools .btn { min-height:40px; }
+    .sheet { max-width:calc(100vw - 20px); overflow:auto; }
+  }
+  @media (prefers-reduced-motion:reduce) { *,*::before,*::after { scroll-behavior:auto!important; transition-duration:.01ms!important; animation-duration:.01ms!important; } }
   /* ------------------------------------------------------------------ лист
      Формат A6 (105 × 148) на A4 не встаёт «по 4 штуки»: с полями принтера
      8 мм печатное поле портретного A4 — 194 × 281 мм, две карточки в ряд
@@ -37,17 +144,13 @@
   .cut { outline: 1px dashed #c3cbdd; outline-offset: 0; }
 
   /* лицо: три темы */
-  .fl.front.t-grad { background: linear-gradient(148deg, #4f46e5 0%, #6d3fea 52%, #7c3aed 100%); color: #fff; }
-  .fl.front.t-ink  { background: #101420; color: #fff; }
-  .fl.front.t-air  { background: #fff; color: var(--ink); border: 1.1px solid #c9cfe2; }
-  .fl.front.t-grad .soft, .fl.front.t-ink .soft { color: rgba(255,255,255,.82); }
+  .fl.front.t-grad { background: #FEF9F3; color: var(--ink); }
+  .fl.front.t-ink  { background: #FEF9F3; color: #000; }
+  .fl.front.t-air  { background: #FEF9F3; color: var(--ink); border: 1.1px solid #c9cfe2; }
+  .fl.front.t-grad .soft { color:var(--ink-soft); }
+  .fl.front.t-ink .soft { color: var(--ink-soft); }
   .fl.front.t-air .soft { color: var(--ink-soft); }
-  .fl.front::after {
-    content: ""; position: absolute; right: -14mm; top: -16mm; width: 58mm; height: 58mm;
-    border-radius: 18mm; transform: rotate(22deg);
-    background: linear-gradient(135deg, #fff, rgba(255,255,255,0)); opacity: .1;
-  }
-  .fl.front.t-air::after { background: linear-gradient(135deg, var(--brand), rgba(124,58,237,0)); opacity: .12; }
+  .fl.front::after { content:none; }
 
   /* шапка бренда */
   .brandline { display: flex; align-items: center; gap: 2.4mm; flex: none; }
@@ -61,24 +164,25 @@
   .hero .h1 { font-size: 3.05em; font-weight: 900; letter-spacing: -.02em; line-height: .96; }
   .hero .h2 { font-size: 1.32em; font-weight: 800; letter-spacing: .015em; line-height: 1.12; margin-top: 1.4mm; }
   .fl.front.t-air .hero .h1 { color: var(--brand); }
+  .fl.front.t-grad .hero .h1 { color:var(--brand); }
   .hero .lead { font-size: .96em; margin-top: 2.6mm; max-width: 78mm; }
 
   /* плашка-подарок и «кому» */
   .chip {
     display: inline-block; font-size: .74em; font-weight: 800; letter-spacing: .06em; text-transform: uppercase;
     border-radius: 20mm; padding: .5em 1.1em; margin-top: 3.2mm;
-    background: rgba(255,255,255,.17); border: .8px solid rgba(255,255,255,.5);
+    background:#FBE8D9; border:.8px solid #E9925E; color:#6E2BC8;
   }
   .fl.front.t-air .chip { background: #eeecff; border-color: #cdc7ff; color: var(--brand); }
   .wholine { font-size: .8em; margin-top: 2.4mm; font-weight: 700; letter-spacing: .02em; }
 
   /* рисунок: стакан с напечатанной фигуркой */
-  .art { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; margin: 2mm 0; }
+  .art { flex:1; min-height:0; display:flex; align-items:center; justify-content:center; margin:2mm 0; }
   .art svg { width: 44mm; height: auto; max-height: 100%; opacity: .95; }
   .fl.compact .art svg { width: 39mm; }
 
   /* низ карточки: QR + призыв */
-  .foot { flex: none; display: flex; align-items: flex-end; gap: 3.4mm; padding-top: 3mm; border-top: 1px solid rgba(255,255,255,.28); }
+  .foot { display:none; }
   .fl.front.t-air .foot, .fl.back .foot { border-top-color: var(--line); }
   .foot .qr { flex: none; background: #fff; border-radius: 1.6mm; padding: 1.1mm; line-height: 0; }
   .foot .qr svg { width: 19mm; height: 19mm; display: block; }
@@ -166,6 +270,198 @@
   .editor .blk > b { display: block; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--brand); margin-bottom: 6px; }
   .btn.danger { background: #fef2f2; border-color: #f4b4b4; color: #b42318; }
   .hintline { font-size: 11.5px; color: var(--ink-soft); line-height: 1.5; }
+  .json-flier { position:relative; display:block; flex:none; box-sizing:border-box; overflow:hidden; padding:0; background:#fff; color:#31242e; font-family:Arial,sans-serif; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+  .fl.json-flier.compact { display:block; width:95mm !important; height:135mm !important; padding:0; font-size:3mm; }
+  .panel { position:static; }
+  .json-flier-block { position:absolute; box-sizing:border-box; overflow:hidden; white-space:pre-line; line-height:1.25; }
+  .json-flier-block.logo img { display:block; width:100%; height:100%; object-fit:contain; object-position:left center; }
+  .json-flier-block.qr { display:grid; place-items:center; border:.2mm solid #d9c8ce; color:#66555f; text-align:center; }
+  .json-flier-block.qr svg { display:block; width:100%; height:100%; }
+  .json-flier,.flyer-preview-card { background:#FEF9F3; }
+  .json-flier.t-air { background:#FEF9F3; }
+  .json-flier[data-layout="cafe-front"],.json-flier[data-layout="cafe-back"] { background-color:#FEF9F3; }
+  .json-flier[data-layout="cafe-front"]::before,.json-flier[data-layout="cafe-back"]::before { content:""; position:absolute; z-index:0; top:0; left:0; right:0; height:36mm; background:#FEF9F3; border-bottom:.35mm solid #E9925E; }
+  .json-flier[data-layout="cafe-front"]::after,.json-flier[data-layout="cafe-back"]::after { content:""; position:absolute; z-index:2; top:0; left:0; width:18mm; height:1.1mm; background:#6E2BC8; }
+  .json-flier [data-block="cafe"] { font-weight:700!important; letter-spacing:.015em; }
+  .json-flier[data-layout="cafe-front"] [data-block="cafe"] { display:none; }
+  .json-flier [data-block="title"] { font-weight:800!important; letter-spacing:-.025em; line-height:1.08!important; }
+  .json-flier [data-block="lead"] { display:flex; flex-direction:column; justify-content:flex-start; gap:1.2mm; line-height:1.3!important; }
+  .cafe-lead-main { color:#31242E; font-size:9.2pt; font-weight:600; line-height:1.3; }
+  .cafe-lead-offer { display:block; width:max-content; max-width:100%; padding:1mm 1.6mm; border-left:1mm solid #E9925E; background:#FBE8D9; color:#6E2BC8; font-size:8.2pt; font-weight:700; line-height:1.25; }
+  .json-flier [data-block="contact"] { display:flex; flex-direction:column; justify-content:center; gap:1.3mm; line-height:1.25!important; }
+  .cafe-contact-cta { color:#31242E; font-size:11.5pt; font-weight:700; line-height:1.16; }
+  .cafe-contact-hint { color:#66555F; font-size:8.2pt; line-height:1.25; }
+  .cafe-contact-tg { color:#6E2BC8; font-size:8.6pt; font-weight:700; line-height:1.2; }
+  .json-flier[data-layout="cafe-back"] [data-block^="step-"] { display:flex; flex-direction:column; justify-content:center; gap:.75mm; padding:1mm 2mm 1mm 3mm!important; border-left:1.1mm solid #6E2BC8; }
+  .json-flier[data-layout="cafe-back"] [data-block="step-0"],.json-flier[data-layout="cafe-back"] [data-block="step-2"] { border-left-color:#E9925E; }
+  .cafe-step-title { color:#6E2BC8; font-size:9pt; font-weight:700; line-height:1.15; }
+  .cafe-step-copy { color:#31242E; font-size:8.1pt; line-height:1.22; }
+  .cafe-step-fine { color:#66555F; font-size:6.8pt; line-height:1.15; }
+  .json-flier[data-layout="cafe-back"] [data-block="step-3"] { gap:.3mm; padding:.6mm 2mm .6mm 3mm!important; }
+  .json-flier[data-layout="cafe-front"] [data-block="title"] { background:#6E2BC8!important; color:#fff!important; padding:2.2mm 3mm!important; line-height:1.03!important; }
+  .json-flier.t-grad[data-layout="cafe-front"] { background:#FEF9F3; color:#31242E; }
+  .json-flier.t-grad[data-layout="cafe-front"]::before { height:21mm; background:#FEF9F3; border-bottom-color:#E9925E; }
+  .json-flier.t-grad[data-layout="cafe-front"] [data-block="title"] { background:#6E2BC8!important; color:#fff!important; padding:2mm 3mm!important; font-size:25pt!important; line-height:1!important; }
+  .json-flier.t-grad[data-layout="cafe-front"] [data-block="lead"] { gap:.5mm!important; }
+  .json-flier.t-grad[data-layout="cafe-front"] [data-block="cafe"] { display:none!important; color:#fff!important; }
+  .json-flier.t-grad[data-layout="cafe-front"] [data-block="lead"] { color:#31242E!important; }
+  .json-flier.t-grad[data-layout="cafe-front"] .cafe-lead-main { color:#31242E; font-size:8.4pt; font-weight:500; line-height:1.22; }
+  .json-flier.t-grad[data-layout="cafe-front"] .cafe-lead-offer { border-left-color:#E9925E; background:#FBE8D9; color:#6E2BC8; font-size:7.2pt; font-weight:600; letter-spacing:0; }
+  .json-flier.t-grad[data-layout="cafe-front"]::before { background:#FEF9F3; border-bottom-color:#E9925E; }
+  .json-flier.t-grad[data-layout="cafe-front"]::after { background:#6E2BC8; }
+  .json-flier-coffee-art { position:absolute; z-index:1; display:grid; place-items:center; color:#6E2BC8; pointer-events:none; }
+  .json-flier-coffee-art svg { display:block; width:44mm; height:auto; max-height:100%; color:#6E2BC8; }
+  .json-flier-coffee-art svg g { color:#6E2BC8; }
+  .json-flier.t-air[data-layout="cafe-front"] [data-block="title"] { background:#FBE8D9!important; color:#6E2BC8!important; }
+  .json-flier[data-layout="cafe-back"] [data-block="contact"] { padding:1mm 1.5mm!important; border-left:1mm solid #E9925E; background:#FBE8D9!important; }
+  .json-flier.t-grad { background:#FEF9F3; color:#31242E; }
+  .json-flier.t-ink { background:#FEF9F3; color:#000; }
+  .json-flier.t-ink .json-flier-block:not(.qr):not(.logo) { color:#000!important; }
+  .json-flier.t-ink[data-layout="cafe-front"] [data-block="title"] { background:#EFEFEF!important; color:#000!important; }
+
+  /* Экранная система переопределяет старую общую тему генераторов. */
+  body { min-height:100vh; background:radial-gradient(ellipse at 54% 18%,#302139 0,transparent 43%),#1D161F; color:#F8EEE6; font-family:Inter,"Segoe UI",Arial,sans-serif; }
+  body::before { content:""; position:fixed; inset:0; z-index:0; pointer-events:none; opacity:.08; background-image:radial-gradient(#bda6c1 .55px,transparent .55px); background-size:7px 7px; }
+  body .panel { position:relative; z-index:1; max-width:1480px; margin:0 auto; padding:20px 28px 0; background:transparent; border:0; box-shadow:none; }
+  body .panel-row { gap:10px; }
+  body .panel-row:first-child { min-height:64px; padding-bottom:14px; border-bottom:1px solid rgba(190,153,193,.18); }
+  body .panel h1 { margin-right:auto; color:#F8EEE6; font-size:20px; letter-spacing:-.025em; gap:12px; }
+  body .panel h1 img { width:30px; height:30px; padding:6px; border:1px solid rgba(181,43,255,.42); border-radius:10px; background:#302137; }
+  body .panel label { color:#C8B9C6; flex-direction:column; align-items:stretch; gap:6px; font-size:11px; font-weight:650; letter-spacing:.025em; }
+  body .panel label.inline { flex-direction:row; align-items:center; }
+  body .panel select,body .panel input[type="text"],body .panel input[type="number"],body .panel textarea,body .panel .btn { min-height:38px; border:1px solid #5B465C; border-radius:9px; background:#2C232E; color:#F8EEE6; font:500 12px Inter,"Segoe UI",Arial,sans-serif; }
+  body .panel select,body .panel input[type="text"],body .panel input[type="number"] { padding:8px 10px; }
+  body .panel input[type="text"] { min-width:0; }
+  body .panel input::placeholder,body .panel textarea::placeholder { color:#9D8D9B; }
+  body .panel input:focus-visible,body .panel textarea:focus-visible,body .panel select:focus-visible,body .panel .btn:focus-visible { outline:2px solid #D5AAFF; outline-offset:2px; }
+  body .panel .btn { padding:8px 14px; font-size:12px; font-weight:700; cursor:pointer; }
+  body .panel .btn:hover { border-color:#A46EB5; background:#382A3B; }
+  body .panel .btn.primary { color:#fff; background:linear-gradient(135deg,#B52BFF,#8638ED); border-color:#CE8BFF; box-shadow:0 0 18px rgba(164,62,246,.28); }
+  body .panel .btn.primary:disabled { opacity:.48; box-shadow:none; cursor:not-allowed; }
+  body .panel .btn.danger { color:#FFC1C6; border-color:#794650; background:#3A252D; }
+  body .panel .panel-row:first-child>label { min-width:130px; }
+  body .panel-row:nth-child(2) { align-items:end; padding:14px 0 12px; }
+  body .panel-row:nth-child(2) label:nth-of-type(1) { min-width:180px; }
+  body .panel-row:nth-child(2) label:nth-of-type(2) { min-width:240px; }
+  body .panel-row:nth-child(2) label:nth-of-type(3) { min-width:154px; }
+  body .panel-row:nth-child(2) label:nth-of-type(4) { min-width:108px; }
+  body #plan { align-self:end; min-height:38px; display:flex; align-items:center; padding:0 12px; border:1px solid rgba(181,43,255,.28); border-radius:9px; background:rgba(126,49,164,.13); color:#E7C5FA; font-size:11px; font-weight:650; }
+  body #overWarn { flex-basis:100%; padding:9px 12px; border:1px solid #884650; border-radius:8px; background:#3B242D; }
+  body .panel-row:nth-child(3) { padding:12px; border:1px solid rgba(190,153,193,.19); border-radius:12px; background:rgba(44,35,46,.74); }
+  body .panel-row:nth-child(3)>label:first-child { flex:1 1 340px!important; }
+  body .panel-row:nth-child(3) textarea { width:100%; min-width:0!important; min-height:62px!important; line-height:1.5!important; resize:vertical; }
+  body #placesInfo { align-self:center; }
+  .flyer-workspace { display:grid; grid-template-columns:180px minmax(300px,1fr) minmax(350px,430px); gap:12px; align-items:start; margin-top:14px; }
+  .flyer-steps,.flyer-preview-workspace,.flyer-inspector>.editor { min-width:0; border:1px solid #5B465C; border-radius:12px; background:linear-gradient(145deg,rgba(48,40,50,.98),rgba(33,27,37,.98)); box-shadow:0 1px 0 rgba(255,238,231,.06) inset,0 14px 40px rgba(8,4,10,.2); }
+  .flyer-steps { position:sticky; top:12px; padding:10px; }
+  .flyer-steps-title { display:block; padding:7px 8px 12px; color:#A994AB; font-size:9px; font-weight:800; letter-spacing:.14em; }
+  .flyer-step { position:relative; display:grid; grid-template-columns:28px minmax(0,1fr); gap:2px 8px; width:100%; min-height:58px; margin-bottom:5px; padding:9px 8px; border:1px solid transparent; border-radius:9px; background:transparent; color:#EDE1EC; text-align:left; cursor:pointer; }
+  .flyer-step>span { grid-row:1/3; align-self:start; color:#A28FA2; font:700 10px "JetBrains Mono",monospace; }
+  .flyer-step b { font-size:11px; font-weight:700; }
+  .flyer-step small { color:#AF9EAC; font-size:9px; line-height:1.35; }
+  .flyer-step:hover { background:rgba(125,79,139,.14); }
+  .flyer-step.is-active { border-color:#8B5AA1; background:linear-gradient(105deg,rgba(181,43,255,.19),rgba(240,163,104,.08)); box-shadow:inset 2px 0 #B52BFF; }
+  .flyer-step.is-active>span { color:#E4A8FF; }
+  .flyer-step-note { display:flex; gap:8px; margin:12px 5px 4px; padding-top:11px; border-top:1px solid rgba(190,153,193,.17); color:#AFA0AF; font-size:9px; line-height:1.5; }
+  .flyer-step-note i,.flyer-dot { flex:none; width:7px; height:7px; margin-top:3px; border-radius:50%; background:#B7E5CC; box-shadow:0 0 8px rgba(183,229,204,.5); }
+  .flyer-preview-workspace { min-height:570px; padding:16px; overflow:hidden; }
+  .flyer-preview-head { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; padding-bottom:13px; border-bottom:1px solid rgba(190,153,193,.17); }
+  .flyer-preview-head h2 { margin:0; color:#F8EEE6; font-size:16px; line-height:1.3; }
+  .flyer-preview-head p { margin:4px 0 0; color:#BFAFB7; font-size:10px; line-height:1.45; }
+  #flyerPreviewSize { flex:none; padding:6px 8px; border:1px solid rgba(181,43,255,.26); border-radius:7px; color:#E5B8F6; background:rgba(126,49,164,.12); font-size:9px; font-weight:700; }
+  .flyer-preview-scene { display:grid; place-items:center; min-height:470px; padding:18px 8px; }
+  .flyer-preview-cards { display:flex; align-items:flex-start; justify-content:center; gap:14px; width:100%; }
+  .flyer-preview-card { position:relative; flex:none; overflow:hidden; border-radius:2px; background:#fff; box-shadow:0 18px 48px rgba(0,0,0,.45),0 0 0 1px rgba(255,255,255,.22); }
+  .flyer-preview-card>.json-flier { position:absolute!important; inset:0 auto auto 0; transform-origin:top left; }
+  .flyer-preview-cards:has(.preview-front:only-child),.flyer-preview-cards:has(.preview-back:only-child) { grid-template-columns:1fr; }
+  .flyer-preview-cards:has(.preview-front:only-child)>.preview-front,.flyer-preview-cards:has(.preview-back:only-child)>.preview-back { justify-self:center; }
+  .flyer-preview-card.is-dim { display:none; }
+  .flyer-preview-cards:has(.preview-front:only-child),.flyer-preview-cards:has(.preview-back:only-child) { display:grid; grid-template-columns:1fr; }
+  .flyer-preview-cards:has(.preview-front:only-child)>.preview-front,.flyer-preview-cards:has(.preview-back:only-child)>.preview-back { justify-self:center; }
+  .flyer-preview-foot { display:flex; align-items:center; justify-content:space-between; gap:10px; padding-top:10px; border-top:1px solid rgba(190,153,193,.15); color:#BFAFB7; font-size:9px; }
+  .flyer-preview-foot>span { display:flex; align-items:center; gap:7px; }
+  .flyer-preview-foot .flyer-dot { width:6px; height:6px; margin:0; }
+  body .flyer-preview-foot .btn { min-height:30px; padding:5px 9px; font-size:10px; }
+  body .flyer-inspector>.editor { position:sticky; top:12px; display:block; max-height:calc(100vh - 24px); margin:0; padding:12px; overflow:auto; scrollbar-color:#76577D #211B25; }
+  .flyer-inspector .editor-head { display:block; margin-bottom:10px; }
+  .flyer-inspector .editor h3 { margin:0; color:#F6EAF4; font-size:13px; text-transform:none; letter-spacing:0; }
+  .flyer-inspector .editor-head .sub { display:block; margin-top:4px; color:#BAAAB8; font-size:9px; line-height:1.45; }
+  .flyer-inspector .editor-tools { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:7px; margin-top:10px; }
+  .flyer-inspector .editor-tools label { min-width:0; color:#C8B9C6; font-size:9px; }
+  .flyer-inspector .editor-tools .wide { min-width:0; }
+  .flyer-inspector .editor-tools input,.flyer-inspector .editor-tools select { width:100%; min-width:0; }
+  .flyer-inspector .editor-tools .btn { min-height:32px; align-self:end; padding:6px 8px; font-size:10px; }
+  .flyer-inspector .editor-status { grid-column:1/-1; min-height:28px; padding:5px 8px; font-size:9px; }
+  .flyer-inspector .editor>.row[data-editor-section] { display:none; }
+  .flyer-inspector[data-section="front"] .editor>.row[data-editor-section="front"],.flyer-inspector[data-section="back"] .editor>.row[data-editor-section="back"] { display:grid; grid-template-columns:minmax(0,1fr); }
+  .flyer-inspector[data-section="back"] .editor>.row[data-editor-section="back"] .blk { display:block; }
+  .flyer-inspector[data-section="back"] .editor>.row[data-editor-section="back"] .blk .row { display:grid; grid-template-columns:minmax(0,1fr); gap:8px; }
+  .flyer-inspector .editor .row { gap:8px; margin-bottom:8px; }
+  .flyer-inspector>.editor>.row[data-editor-section="back"]:last-child { display:grid!important; grid-template-columns:1fr 1fr; gap:8px; }
+  .flyer-inspector .editor .blk { min-width:0; padding:10px; border:1px solid #5B465C; border-radius:9px; background:rgba(24,19,27,.62); }
+  .flyer-inspector .editor .blk>b { display:block; margin-bottom:8px; color:#D88BFF; font-size:9px; letter-spacing:.1em; }
+  .flyer-inspector .editor label { min-width:0; color:#C8B9C6; font-size:9px; }
+  .flyer-inspector .editor input,.flyer-inspector .editor textarea,.flyer-inspector .editor select { width:100%; min-width:0; min-height:34px; padding:7px 9px; border:1px solid #5B465C; border-radius:8px; background:#211B25; color:#F8EEE6; font:500 11px Inter,"Segoe UI",Arial,sans-serif; }
+  .flyer-inspector .editor textarea { min-height:76px; line-height:1.45; }
+  .flyer-inspector .editor input::placeholder,.flyer-inspector .editor textarea::placeholder { color:#9D8D9B; }
+  .flyer-inspector .editor .counter { color:#9D8D9B; font-size:9px; }
+  .flyer-inspector .editor .counter.warn { color:#F7CF91; }
+  .flyer-inspector .editor .counter.bad { color:#FF929F; }
+  .flyer-inspector .editor .btn { min-height:34px; padding:7px 9px; border:1px solid #5B465C; border-radius:8px; background:#2C232E; color:#F8EEE6; font-size:10px; }
+  .flyer-inspector .editor .btn.danger { color:#FFC1C6; border-color:#794650; background:#3A252D; }
+  .flyer-inspector .editor .btn.primary { color:#fff; background:linear-gradient(135deg,#B52BFF,#8638ED); border-color:#CE8BFF; }
+  body .note { position:relative; z-index:1; max-width:1424px; margin:14px auto 0; padding:11px 14px; border:1px solid #695340; border-radius:9px; background:#30251F; color:#D9C8B8; font-size:11px; }
+  body .note b { color:#F0A368; }
+  #sheets { position:relative; z-index:1; }
+  body .sheet { margin-block:24px; border-radius:2px; background:#fff; color:#31242E; box-shadow:0 18px 60px rgba(0,0,0,.35); }
+  .sheet-title { color:#66555F; }
+  .cutnote { color:#8B7A84; }
+  .json-flier-block { font-family:Arial,sans-serif; }
+  .json-flier-block[style*="F6F0F8"] { padding:1mm 2mm!important; }
+  @media (max-width:1180px) {
+    body .panel { padding-inline:18px; }
+    .flyer-workspace { grid-template-columns:150px minmax(280px,1fr) minmax(320px,380px); gap:9px; }
+    .flyer-preview-workspace { padding:12px; }
+    .flyer-preview-cards { gap:9px; }
+  }
+  @media (max-width:900px) {
+    .flyer-workspace { grid-template-columns:135px minmax(0,1fr); }
+    .flyer-inspector { grid-column:1/-1; }
+    body .flyer-inspector>.editor { position:static; max-height:none; }
+    .flyer-inspector .editor>.row[data-editor-section] { display:none; }
+    .flyer-inspector .editor>.row[data-editor-section][data-editor-hidden="0"] { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); }
+    .flyer-inspector .editor>.row[data-editor-section="front"] .blk { grid-column:1/-1; }
+    .flyer-inspector .editor>.row[data-editor-section="back"] .blk .row { grid-template-columns:minmax(110px,.6fr) minmax(0,1.4fr); }
+    .flyer-step-note { display:none; }
+  }
+  @media (max-width:600px) {
+    body .panel { padding:10px 12px 0; }
+    body .panel h1 { flex:1 1 100%; font-size:17px; }
+    body .panel-row:first-child>label { flex:1 1 42%; min-width:0; }
+    body .panel-row:first-child>label:nth-of-type(2) { flex-basis:52%; }
+    body .panel-row:nth-child(2)>label { flex:1 1 44%; min-width:0!important; }
+    body .panel-row:nth-child(3)>label:first-child { flex-basis:100%!important; }
+    .flyer-workspace { grid-template-columns:1fr; }
+    .flyer-steps { position:static; display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:5px; padding:7px; }
+    .flyer-steps-title,.flyer-step-note { display:none; }
+    .flyer-step { grid-template-columns:1fr; justify-items:center; gap:2px; min-height:56px; margin:0; padding:7px 3px; text-align:center; }
+    .flyer-step>span { grid-row:auto; }
+    .flyer-step b { font-size:9px; }
+    .flyer-step small { display:none; }
+    .flyer-preview-workspace { min-height:0; padding:12px 9px; }
+    .flyer-preview-head { align-items:center; }
+    .flyer-preview-head h2 { font-size:14px; }
+    .flyer-preview-head p { max-width:210px; font-size:9px; }
+    .flyer-preview-scene { min-height:360px; padding:12px 2px; }
+    .flyer-preview-cards { gap:6px; }
+    .flyer-preview-foot { align-items:flex-start; font-size:8px; }
+    body .flyer-preview-foot .btn { font-size:9px; }
+    .flyer-inspector .editor-tools { grid-template-columns:repeat(2,minmax(0,1fr)); }
+    .flyer-inspector .editor>.row[data-editor-section][data-editor-hidden="0"] { grid-template-columns:1fr; }
+    .flyer-inspector .editor>.row[data-editor-section="back"] .blk .row { grid-template-columns:1fr; }
+    .sheet { max-width:calc(100vw - 20px); overflow:auto; }
+  }
+  @media (prefers-reduced-motion:reduce) { *,*::before,*::after { scroll-behavior:auto!important; transition-duration:.01ms!important; animation-duration:.01ms!important; } }
 </style>
 </head><body>
 
@@ -175,9 +471,9 @@
     <label>Telegram <input type="text" data-nz="tg" style="width:120px"></label>
     <label>Ссылка QR <input type="text" id="qrlink" data-page="qrlink" placeholder="по умолчанию — ваш Telegram" style="width:200px"></label>
     <label>Город <input type="text" data-nz="city" style="width:110px"></label>
-    <button class="btn primary" data-nz-print>Печать</button>
+    <button class="btn primary" data-nz-print disabled>Печать</button>
   </div>
-  <div class="panel-row">
+  <div class="panel-row" id="panelPrintSettings">
     <label>Формат <select id="size" data-page="size">
       <option value="a6">A6 105 × 148 — альбомный лист</option>
       <option value="compact">Компакт 95 × 135 — портретный лист</option>
@@ -187,9 +483,9 @@
       <option value="duplex">Двусторонняя — лицо и оборот отдельно</option>
     </select></label>
     <label>Тема лица <select id="theme" data-page="theme">
-      <option value="grad">Градиент (фирменный)</option>
-      <option value="ink">Тёмный</option>
-      <option value="air">Светлый</option>
+      <option value="air">Светлый (макет v2)</option>
+      <option value="grad">Цветной акцент</option>
+      <option value="ink">Монохромный текст</option>
     </select></label>
     <label>Сколько флаеров <input type="number" id="count" data-page="count" min="1" max="60" value="4" style="width:70px"></label>
     <label class="inline" id="mirrorWrap" hidden><input type="checkbox" id="mirror" data-page="mirror" checked> зеркальный оборот</label>
@@ -204,6 +500,20 @@
     <span class="hintline" id="placesInfo"></span>
   </div>
 
+  <section class="flyer-workspace" aria-label="Рабочее место флаера">
+   <nav class="flyer-steps" aria-label="Этапы работы с флаером">
+    <span class="flyer-steps-title">МАКЕТ</span>
+    <button type="button" class="flyer-step is-active" data-flyer-view="front"><span>01</span><b>Лицевая сторона</b><small>Заголовок и предложение</small></button>
+    <button type="button" class="flyer-step" data-flyer-view="back"><span>02</span><b>Оборот</b><small>Четыре шага и условия</small></button>
+    <button type="button" class="flyer-step" data-flyer-view="print"><span>03</span><b>Тираж и печать</b><small>Формат, рез и спуск</small></button>
+    <div class="flyer-step-note"><i></i><span>Предпросмотр обновляется вместе с текстом. Физический размер задаётся листом ниже.</span></div>
+   </nav>
+   <main class="flyer-preview-workspace">
+    <div class="flyer-preview-head"><div><h2 id="flyerPreviewTitle">Лицевая сторона</h2><p id="flyerPreviewDesc">Проверьте заголовок, предложение и читаемость кода.</p></div><span id="flyerPreviewSize">A6 · 105 × 148 мм</span></div>
+    <div class="flyer-preview-scene"><div id="flyerPreview" class="flyer-preview-cards" aria-live="polite"></div></div>
+    <div class="flyer-preview-foot"><span><i class="flyer-dot"></i>Макет в натуральных пропорциях</span><button class="btn" type="button" data-flyer-view="print">К настройкам тиража ↓</button></div>
+   </main>
+   <aside class="flyer-inspector" id="flyerInspector" aria-label="Редактор содержимого">
   <div class="editor">
     <div class="editor-head">
       <div>
@@ -243,13 +553,11 @@
         <b>Лицо</b>
         <div class="row" style="margin-bottom:8px">
           <label>Заголовок <input class="w1" id="f_h1" data-page="f_h1" data-editor-limit="28" value="3D-ПЕЧАТЬ"></label>
-          <label>Вторая строка <input class="w2" id="f_h2" data-page="f_h2" data-editor-limit="42" value="ДЛЯ ВАШЕГО БИЗНЕСА"></label>
+          <label>Вторая строка <input class="w2" id="f_h2" data-page="f_h2" data-editor-limit="42" value="ДЛЯ КОФЕЕН"></label>
           <label>Плашка <input class="w2" id="f_chip" data-page="f_chip" data-editor-limit="58" value="Образцы в коробке — вам в подарок"></label>
         </div>
         <div class="row" style="margin-bottom:0">
-          <label>Подзаголовок <textarea id="f_lead" data-page="f_lead" data-editor-limit="180">Игрушки на стакан, таблички с QR и фирменный декор для кофеен. Печатаем сами, на своих принтерах.</textarea></label>
-          <label>Призыв <input class="w1" id="f_cta" data-page="f_cta" data-editor-limit="32" value="Давайте обсудим?"></label>
-          <label>Подпись под QR <input class="w1" id="f_qrcap" data-page="f_qrcap" data-editor-limit="52" value="наведите камеру — откроется чат"></label>
+          <label>Подзаголовок <textarea id="f_lead" data-page="f_lead" data-editor-limit="180">Фигурки на стакан, QR-таблички и декор в стиле вашего заведения.</textarea></label>
         </div>
       </div>
     </div>
@@ -258,14 +566,14 @@
         <b>Оборот · 01</b>
         <div class="row" style="margin-bottom:0">
           <label>Заголовок <input class="w1" id="s1t" data-page="s1t" data-editor-limit="42" value="Привет!"></label>
-          <label>Текст <textarea id="s1d" data-page="s1d" data-editor-limit="260">Мы NOZZA — мастерская 3D-печати. Печатаем сами: от одной штуки до партии, без посредников и ожидания доставки.</textarea></label>
+          <label>Текст <textarea id="s1d" data-page="s1d" data-editor-limit="260">NOZZA — мастерская 3D-печати. Печатаем сами: от детали до партии.</textarea></label>
         </div>
       </div>
       <div class="blk">
         <b>Оборот · 02</b>
         <div class="row" style="margin-bottom:0">
           <label>Заголовок <input class="w1" id="s2t" data-page="s2t" data-editor-limit="42" value="Это вам, бесплатно"></label>
-          <label>Текст <textarea id="s2d" data-page="s2d" data-editor-limit="260">В коробке — тестовые образцы игрушек на стакан. Простая и прикольная фишка: гость надевает фигурку, фотографирует кофе и выкладывает в сторис — с отметкой вашей кофейни.</textarea></label>
+          <label>Текст <textarea id="s2d" data-page="s2d" data-editor-limit="260">В коробке — тестовые образцы. Их можно надеть на стакан и показать команде.</textarea></label>
         </div>
       </div>
     </div>
@@ -274,23 +582,27 @@
         <b>Оборот · 03</b>
         <div class="row" style="margin-bottom:0">
           <label>Заголовок <input class="w1" id="s3t" data-page="s3t" data-editor-limit="42" value="Можем сделать своё"></label>
-          <label>Текст <textarea id="s3d" data-page="s3d" data-editor-limit="260">Сейчас печатаем по готовым моделям. Понравится идея — нарисуем оригинальный дизайн под вас: фирменного персонажа, таблички с QR на столы, держатели и декор.</textarea></label>
+          <label>Текст <textarea id="s3d" data-page="s3d" data-editor-limit="260">Адаптируем цвет и форму, подготовим собственную модель, QR-табличку или декор.</textarea></label>
         </div>
       </div>
       <div class="blk">
         <b>Оборот · 04</b>
         <div class="row" style="margin-bottom:0">
           <label>Заголовок <input class="w1" id="s4t" data-page="s4t" data-editor-limit="42" value="Тестовая партия"></label>
-          <label>Текст <textarea id="s4d" data-page="s4d" data-editor-limit="260">Сделаем небольшую партию 10–20 штук, чтобы вы просто посмотрели, как на это реагируют гости. Сроки и условия обсудим в Telegram.</textarea></label>
+          <label>Текст <textarea id="s4d" data-page="s4d" data-editor-limit="260">Начнём с небольшой партии. Состав, сроки и условия обсудим в Telegram.</textarea></label>
         </div>
       </div>
     </div>
     <div class="row" data-editor-section="back">
-      <label style="flex:1">Сноска на обороте <textarea id="fine" data-page="fine" data-editor-limit="240" style="min-width:420px;min-height:44px">Фигурка надевается на стакан снаружи и не касается напитка. Пластик PLA, моется тёплой водой. Ставить в микроволновку и посудомойку нельзя.</textarea></label>
+      <label style="flex:1">Сноска на обороте <textarea id="fine" data-page="fine" data-editor-limit="240" style="min-width:420px;min-height:44px">PLA: тёплая вода, без СВЧ и посудомойки.</textarea></label>
+      <label>Призыв <input class="w1" id="f_cta" data-page="f_cta" data-editor-limit="32" value="Обсудим тестовую партию"></label>
+      <label>Подпись под QR <input class="w1" id="f_qrcap" data-page="f_qrcap" data-editor-limit="52" value="Покажите идею — обсудим формат"></label>
       <label class="inline"><input type="checkbox" id="fineon" data-page="fineon" checked> печатать сноску</label>
       <button class="btn danger" id="btnReset" type="button">↺ Вернуть исходные тексты</button>
     </div>
   </div>
+   </aside>
+  </section>
 </div>
 
 <div class="note noprint">
@@ -311,19 +623,19 @@ const $ = (id) => document.getElementById(id);
 /* Исходные тексты: кнопка «вернуть» и первый запуск берут их отсюда,
    поля страницы сохраняются в localStorage движком nz.js. */
 const START = {
-  f_h1: '3D-ПЕЧАТЬ', f_h2: 'ДЛЯ ВАШЕГО БИЗНЕСА',
+  f_h1: '3D-ПЕЧАТЬ', f_h2: 'ДЛЯ КОФЕЕН',
   f_chip: 'Образцы в коробке — вам в подарок',
-  f_lead: 'Игрушки на стакан, таблички с QR и фирменный декор для кофеен. Печатаем сами, на своих принтерах.',
-  f_cta: 'Давайте обсудим?', f_qrcap: 'наведите камеру — откроется чат',
-  s1t: 'Привет!',
-  s1d: 'Мы NOZZA — мастерская 3D-печати. Печатаем сами: от одной штуки до партии, без посредников и ожидания доставки.',
-  s2t: 'Это вам, бесплатно',
-  s2d: 'В коробке — тестовые образцы игрушек на стакан. Простая и прикольная фишка: гость надевает фигурку, фотографирует кофе и выкладывает в сторис — с отметкой вашей кофейни.',
-  s3t: 'Можем сделать своё',
-  s3d: 'Сейчас печатаем по готовым моделям. Понравится идея — нарисуем оригинальный дизайн под вас: фирменного персонажа, таблички с QR на столы, держатели и декор.',
-  s4t: 'Тестовая партия',
-  s4d: 'Сделаем небольшую партию 10–20 штук, чтобы вы просто посмотрели, как на это реагируют гости. Сроки и условия обсудим в Telegram.',
-  fine: 'Фигурка надевается на стакан снаружи и не касается напитка. Пластик PLA, моется тёплой водой. Ставить в микроволновку и посудомойку нельзя.',
+  f_lead: 'Фигурки на стакан и детали с символикой вашей кофейни.',
+  f_cta: 'Обсудим тестовую партию', f_qrcap: 'Покажите идею — обсудим формат',
+  s1t: 'Выберите задачу',
+  s1d: 'Фигурки на стакан, QR-таблички, держатели или декор для кофейни.',
+  s2t: 'Получите образцы',
+  s2d: 'Готовые образцы в коробке: проверьте посадку, цвет и реакцию команды.',
+  s3t: 'Согласуем решение',
+  s3d: 'Подберём форму и цвет под стиль заведения. Оригинальный дизайн обсудим отдельно.',
+  s4t: 'Начните с теста',
+  s4d: 'Партию, сроки и стоимость согласуем в Telegram.',
+  fine: 'Не касается напитка. Без СВЧ и посудомоечной машины.',
 };
 
 const PRESETS = {
@@ -436,9 +748,53 @@ function updateEditorHealth(layoutOverflow) {
   setEditorStatus('✓ Макет готов к пробной печати', 'ok');
 }
 function setEditorSection(value) {
+  const inspector=$('flyerInspector');
+  if(inspector) inspector.dataset.section=value;
   document.querySelectorAll('[data-editor-section]').forEach((row) => {
     const section = row.dataset.editorSection;
-    row.dataset.editorHidden = value !== 'all' && section !== value ? '1' : '0';
+    row.dataset.editorHidden = value === 'all' || section === value ? '0' : '1';
+  });
+}
+function setFlyerView(value) {
+  const section=value==='print'?'print':value;
+  document.body.dataset.flyerView=value;
+  $('editorSection').value=section==='print'?'all':section;
+  setEditorSection(section);
+  document.querySelectorAll('[data-flyer-view]').forEach((button)=>button.classList.toggle('is-active',button.dataset.flyerView===value));
+  const titles={front:['Лицевая сторона','Яркий заголовок, предложение и подарок для кофейни.'],back:['Оборот','Четыре шага, QR-код, контакт для обсуждения и условия.'],print:['Проверка тиража','Сверьте лицо и оборот, формат листа и порядок спуска.']};
+  $('flyerPreviewTitle').textContent=titles[value][0];
+  $('flyerPreviewDesc').textContent=titles[value][1];
+  const size=$('size').value==='compact'?'95 × 135':'105 × 148';
+  $('flyerPreviewSize').textContent=`${$('size').value==='compact'?'Компакт':'A6'} · ${size} мм`;
+  renderFlyerPreview();
+  if(value==='print') $('panelPrintSettings').scrollIntoView({behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth',block:'center'});
+}
+function renderFlyerPreview() {
+  const target=$('flyerPreview');
+  const sample=document.querySelector('#sheets .pair')||document.querySelector('#sheets .grid4')||document.querySelector('#sheets .row2');
+  if(!target||!sample)return;
+  let sourceCards=[...sample.querySelectorAll('.fl')].slice(0,2);
+  if(sourceCards.length===1&&sample.classList.contains('pair')) sourceCards=[sample.querySelector('[data-layout="cafe-back"]'),sample.querySelector('[data-layout="cafe-front"]')].filter(Boolean);
+  const view=document.body.dataset.flyerView||'front';
+  const visibleCards=sourceCards.filter((source)=>view==='print'||(view==='front'?source.dataset.layout==='cafe-front':source.dataset.layout==='cafe-back'));
+  if(!sourceCards.length)return;
+  const available=Math.max(120,target.clientWidth-(visibleCards.length-1)*12-10);
+  const sourceWidth=sourceCards[0].getBoundingClientRect().width;
+  const scale=Math.min(.86,available/sourceWidth);
+  target.replaceChildren(...visibleCards.map((source)=>{
+    const card=document.createElement('div');
+    const isFront=source.dataset.layout==='cafe-front';
+    card.className='flyer-preview-card'+(isFront?' preview-front':' preview-back');
+    const clone=source.cloneNode(true);
+    clone.querySelectorAll('.overbadge').forEach((badge)=>badge.remove());
+    clone.style.transform=`scale(${scale})`;
+    card.style.width=`${sourceWidth*scale}px`;
+    card.style.height=`${source.getBoundingClientRect().height*scale}px`;
+    card.append(clone);
+    return card;
+  }));
+  target.querySelectorAll('.flyer-preview-card').forEach((card)=>{
+    card.classList.toggle('is-dim',view==='front'&&!card.classList.contains('preview-front')||view==='back'&&!card.classList.contains('preview-back'));
   });
 }
 function setupEditor() {
@@ -449,7 +805,9 @@ function setupEditor() {
 
   const section = $('editorSection');
   section.addEventListener('change', () => setEditorSection(section.value));
-  setEditorSection(section.value);
+  document.querySelectorAll('[data-flyer-view]').forEach((button)=>button.addEventListener('click',()=>setFlyerView(button.dataset.flyerView)));
+  setFlyerView('front');
+  if(window.ResizeObserver){new ResizeObserver(renderFlyerPreview).observe($('flyerPreview'));}
 
   $('btnPreset').addEventListener('click', () => {
     const preset = PRESETS[$('editorPreset').value] || PRESETS.standard;
@@ -539,11 +897,36 @@ function placeList() {
   return ($('places').value || '').split('\n').map((s) => s.trim()).filter(Boolean);
 }
 
+let flyerLayoutsV2=null;
+const flyerMm=(value)=>`${Number(value)||0}mm`;
+function flyerRecipe(id, values, extraClass='', compact=false) {
+  const spec=flyerLayoutsV2?.documents?.find((doc)=>doc.id===id);
+  if(!spec) return '';
+  const scaleX=compact?95/105:1, scaleY=compact?135/148:1, scaleText=compact?.92:1;
+  const blocks=(spec.blocks||[]).map((block)=>{
+    let x=(Number(block.x_mm)||0)*scaleX,y=(Number(block.y_mm)||0)*scaleY,width=(Number(block.width_mm)||0)*scaleX,height=(Number(block.height_mm)||0)*scaleY;
+    if(compact&&block.kind==='qr'){width=height=19;}
+    const styles=`left:${flyerMm(x)};top:${flyerMm(y)};width:${flyerMm(width)};height:${flyerMm(height)};font-size:${(Number(block.font_pt)||8)*scaleText}pt;font-weight:${/bold/i.test(block.font||'')?700:400};line-height:${Number(block.line_height)||1.25};color:${block.color||'#31242e'};background:${block.background||'transparent'};text-align:${block.align||'left'};padding:${flyerMm((Number(block.text_padding_mm)||0)*scaleText)};border-radius:${flyerMm((Number(block.radius_mm)||0)*scaleText)}`;
+    if(block.kind==='logo') return `<div class="json-flier-block logo" style="${styles}"><img src="../assets/brand/nozza-print-crop-${(block.source_crop_px||[]).join('-')}.png" alt="NOZZA"></div>`;
+    if(block.kind==='illustration'&&id==='cafe-front') return `<div class="json-flier-block json-flier-coffee-art" aria-hidden="true" style="${styles}">${cupArt()}</div>`;
+    if(block.kind==='qr') {const qr=qrTarget()?NZ.qr(qrTarget(),{ecl:'M',margin:1}):'';return `<div class="json-flier-block qr" data-flyer-text style="${styles}">${qr||'QR\nместо кода'}</div>`;}
+    if(block.id==='lead') {const lines=String(values.lead||'').split('\n').filter(Boolean);return `<div class="json-flier-block" data-block="lead" data-flyer-text style="${styles}"><span class="cafe-lead-main">${NZ.esc(lines[0]||'')}</span><span class="cafe-lead-offer">${NZ.esc(lines.slice(1).join(' '))}</span></div>`;}
+    if(block.id==='contact') {const lines=String(values.contact||'').split('\n').filter(Boolean);return `<div class="json-flier-block" data-block="contact" data-flyer-text style="${styles}"><span class="cafe-contact-cta">${NZ.esc(lines[0]||'')}</span><span class="cafe-contact-hint">${NZ.esc(lines[1]||'')}</span><span class="cafe-contact-tg">${NZ.esc(lines.slice(2).join(' · '))}</span></div>`;}
+    if(/^step-[0-3]$/.test(block.id)) {const lines=String(values[block.id]||'').split('\n').filter(Boolean);return `<div class="json-flier-block" data-block="${NZ.esc(block.id)}" data-flyer-text style="${styles}"><span class="cafe-step-title">${NZ.esc(lines[0]||'')}</span><span class="cafe-step-copy">${NZ.esc(lines[1]||'')}</span>${lines[2]?`<span class="cafe-step-fine">${NZ.esc(lines[2])}</span>`:''}</div>`;}
+    return `<div class="json-flier-block" data-block="${NZ.esc(block.id)}" data-flyer-text style="${styles}">${NZ.esc(values[block.id]||'')}</div>`;
+  }).join('');
+  const width=compact?95:spec.width_mm, height=compact?135:spec.height_mm;
+  return `<div class="json-flier fl ${extraClass}" data-layout="${id}" style="width:${flyerMm(width)};height:${flyerMm(height)}">${blocks}</div>`;
+}
+
 function frontCard(extraClass, who) {
   const c = NZ.contact();
   const theme = $('theme').value || 'grad';
   const white = theme !== 'air';
   who = (who || '').trim();
+  if(flyerLayoutsV2) return flyerRecipe('cafe-front',{
+    cafe:'',title:[$('f_h1').value,$('f_h2').value].filter(Boolean).join('\n'),lead:[$('f_lead').value,$('f_chip').value].filter(Boolean).join('\n')
+  },`${extraClass} t-${theme}`,extraClass.split(/\s+/).includes('compact'));
   const chip = ($('f_chip').value || '').trim();
   const link = qrTarget();
   const qr = link ? NZ.qr(link, { ecl: 'M', margin: 1 }) : '';
@@ -563,7 +946,7 @@ function frontCard(extraClass, who) {
       ${chip ? `<div class="chip">${NZ.esc(chip)}</div>` : ''}
       ${who ? `<div class="wholine">Для: ${NZ.esc(who)}</div>` : ''}
     </div>
-    <div class="art">${cupArt()}</div>
+    <div class="art" aria-hidden="true"></div>
     <div class="foot">
       ${qr ? `<div class="qr">${qr}</div>` : ''}
       <div class="cta">
@@ -578,6 +961,11 @@ function frontCard(extraClass, who) {
 function backCard(extraClass, who) {
   const c = NZ.contact();
   who = (who || '').trim();
+  if(flyerLayoutsV2) {
+    const values={cafe:who?`Для ${who}`:(c.city?`3D-печать · ${c.city}`:'3D-печать для кофеен'),contact:[$('f_cta').value,$('f_qrcap').value,c.tg&&`Telegram ${c.tg}`].filter(Boolean).join('\n')};
+    [1,2,3,4].forEach((i)=>{values[`step-${i-1}`]=[$(`s${i}t`).value,$(`s${i}d`).value,(i===4&&$('fineon').checked)?$('fine').value:''].filter(Boolean).join('\n');});
+    return flyerRecipe('cafe-back',values,`${extraClass} back`,extraClass.split(/\s+/).includes('compact'));
+  }
   const link = qrTarget();
   const qr = link ? NZ.qr(link, { ecl: 'M', margin: 1 }) : '';
   const steps = [1, 2, 3, 4].map((i) => {
@@ -743,8 +1131,12 @@ function draw() {
   }
 
   $('sheets').innerHTML = out.join('');
-  const overflow = fitBacks();
+  const textOverflow=[...$('sheets').querySelectorAll('.json-flier-block[data-flyer-text]')].some((el)=>el.scrollWidth>el.clientWidth+1||el.scrollHeight>el.clientHeight+1);
+  const overflow = fitBacks() + (textOverflow ? 1 : 0);
+  renderFlyerPreview();
+  if(textOverflow){$('overWarn').hidden=false;$('overWarn').textContent='⚠ Текст не помещается в координатные блоки макета v2 — сократите его перед печатью.';}
   updateEditorHealth(overflow);
+  document.querySelectorAll('[data-nz-print]').forEach((button)=>{button.disabled=!flyerLayoutsV2||!qrTarget()||overflow>0;});
 
   const perSheet = fold ? (compact ? 2 : 1) : (compact ? 4 : 2);
   const paper = fold ? Math.ceil(count / perSheet) : Math.ceil(count / perSheet) * 2;
@@ -765,8 +1157,14 @@ document.querySelectorAll('[data-nz="tg"]').forEach((el) => {
   el.addEventListener('input', () => { $('qrlink').placeholder = tgLink(el.value) || 'по умолчанию — ваш Telegram'; });
 });
 
+const savedPage=NZ.pageState();
+if(!savedPage.f_cta) savedPage.f_cta=START.f_cta;
+if(!savedPage.f_qrcap) savedPage.f_qrcap=START.f_qrcap;
+if(savedPage.f_lead==='Фигурки на стакан, QR-таблички и декор в стиле вашего заведения.') savedPage.f_lead=START.f_lead;
+NZ.pageStateSave(savedPage);
 NZ.mount(draw);
 setupEditor();
 $('qrlink').placeholder = tgLink(NZ.contact().tg) || 'по умолчанию — ваш Telegram';
+fetch('../assets/print-layouts-v2.json',{cache:'no-store'}).then((response)=>{if(!response.ok)throw Error('layouts unavailable');return response.json();}).then((data)=>{flyerLayoutsV2=data;draw();}).catch((error)=>{console.error('Не загрузилась геометрия флаера из print-layouts-v2.json',error);document.querySelectorAll('[data-nz-print]').forEach((button)=>{button.disabled=true;});});
 </script>
 </body></html>

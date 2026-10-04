@@ -5,6 +5,20 @@
 <link rel="icon" href="../assets/brand/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="generator.css?v=18.23.1">
 <style>
+  .grid { align-items: flex-start; }
+  .recipe-item { position: relative; flex: none; box-sizing: border-box; background: #fff; color: #31242e; overflow: hidden; font-family: Arial, sans-serif; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .recipe-item[data-layout="business-front"].variant-color { background: #fff; color: #31242e; }
+  .recipe-item[data-layout="business-front"].variant-mono { background: #fff; color: #111; }
+  .recipe-item[data-layout="business-front"].variant-mono .recipe-block.text,
+  .recipe-item[data-layout="business-front"].variant-mono .recipe-block.text * { color: #111 !important; }
+  .recipe-block { position: absolute; box-sizing: border-box; overflow: hidden; white-space: pre-line; line-height: 1.25; padding: 0; }
+  .recipe-block.logo img { display: block; width: 100%; height: 100%; object-fit: contain; object-position: left center; }
+  .recipe-block.qr { display: grid; place-items: center; border: .2mm solid #d9c8ce; color: #66555f; text-align: center; font-size: 7pt; }
+  .recipe-block.qr svg { width: 100%; height: 100%; display: block; }
+  .recipe-item.variant-mono { filter: grayscale(1); }
+  .recipe-item.variant-air { background: #fff; }
+  .recipe-item .recipe-text { display: block; }
+  @media print { .recipe-item { outline: none !important; } }
   .grid { display: flex; flex-wrap: wrap; gap: 4mm; align-content: flex-start; }
   .cut { outline: 1px dashed #c3cbdd; }
   .sheet-title { font-size: 11px; font-weight: 700; color: var(--ink-soft); letter-spacing: .06em; text-transform: uppercase; margin: 0 0 3mm; }
@@ -79,18 +93,19 @@
   <div class="panel-row">
     <h1><img id="panelMark" src="../assets/brand/nozza-mark-1.svg" alt="">Визитки, таблички, вкладыш</h1>
     <label>Имя <input type="text" id="who" value="" placeholder="Ваше имя" style="min-width:130px"></label>
-    <label>Роль <input type="text" id="role" value="3D-печать на заказ" style="min-width:140px"></label>
-    <label>Город <input type="text" id="city" value="Симферополь" style="min-width:110px"></label>
+    <label>Роль <input type="text" id="role" value="" placeholder="Роль / назначение" style="min-width:140px"></label>
+    <label>Город <input type="text" id="city" value="" placeholder="Город" style="min-width:110px"></label>
     <label>Телефон <input type="tel" id="phone" value="" placeholder="+7 978 000-00-00" style="min-width:120px"></label>
-    <label>Telegram <input type="text" id="tg" value="@nozza_shop" style="min-width:110px"></label>
+    <label>Telegram <input type="text" id="tg" value="" placeholder="@username" style="min-width:110px"></label>
     <label>Ссылка <input type="text" id="site" value="" placeholder="сайт, если появится" style="width:110px"></label>
-    <label>Ссылка для QR <input type="text" id="qrlink" value="" title="Куда ведут QR на визитке и вкладыше. По умолчанию — ваш Telegram; можно любую ссылку." style="min-width:170px"></label>
+    <label>Ссылка для QR <input type="text" id="qrlink" value="" title="Куда ведут QR-коды. Оставьте пустым, пока адрес не подтверждён." style="min-width:170px"></label>
     <label>Лицо визитки <select id="variant">
-      <option value="grad">Градиент (фирменный)</option>
+      <option value="color">Цветной</option>
       <option value="mono">Монохром (ч/б)</option>
-      <option value="air">Светлый минимум</option>
+      <option value="air">Белый</option>
     </select></label>
-    <button class="btn primary" id="print">Печать</button>
+    <button class="btn primary" id="print" disabled>Печать</button>
+    <span class="warn" id="contentWarn" role="status" aria-live="polite" hidden>Есть переполнение текста: сократите содержимое перед печатью.</span>
     <span class="warn" id="phoneWarn" hidden>⚠ телефон не вбит — на печати останется пусто</span>
   </div>
   <div class="panel-row">
@@ -102,7 +117,7 @@
     </fieldset>
   </div>
 </div>
-<div class="note noprint"><b>Печать:</b> визитки 90 × 50 мм — картон 300 г/м², лицо и оборот на разных листах (при двусторонней печати ставьте «переворот по длинной стороне»). Печатаете в копицентре: в диалоге печати выберите «Сохранить как PDF» и отдайте файл. Город и контакты сохраняются автоматически.</div>
+<div class="note noprint"><b>Печать:</b> форматы и координаты карточек задаются `print-layouts-v2.json`. Лицо и оборот визитки выводятся отдельными листами; для двусторонней печати проверьте переворот по длинной стороне. Печать доступна после загрузки геометрии. Контакты сохраняются только после ручного изменения полей.</div>
 <div id="sheets"></div>
 <script src="../assets/qr.js?v=18.23.1"></script>
 <script>window.QR_FALLBACK=1;if(!window.QR)window.QR={svg:function(){return '<div style="font-size:10px;color:#94a3b8">QR…</div>';}};</script>
@@ -130,68 +145,91 @@ const SIGNS=[
 function tgOf(tg){ tg=(tg||'').trim(); if(!tg) return ''; if(/^https?:\/\//.test(tg)) return tg; return 'https://t.me/'+tg.replace(/^@/,''); }
 function qrSvg(link){ if(!link) return ''; return QR.svg(link,{ecl:'M',margin:1}); }
 
+let layoutsV2=null;
+const mm=(n)=>`${Number(n)||0}mm`;
+function recipe(id, values={}, variant=''){
+  const spec=layoutsV2?.documents?.find(x=>x.id===id);
+  if(!spec) return `<div class="recipe-item" data-layout="${esc(id)}"></div>`;
+  const item=document.createElement('div');
+  item.className=`recipe-item cut ${variant?`variant-${variant}`:''}`;
+  item.dataset.layout=id; item.style.width=mm(spec.width_mm); item.style.height=mm(spec.height_mm);
+  for(const b of spec.blocks||[]){
+    const node=document.createElement('div'); node.className=`recipe-block ${b.kind||''}`;
+    Object.assign(node.style,{left:mm(b.x_mm),top:mm(b.y_mm),width:mm(b.width_mm),height:mm(b.height_mm),fontSize:`${b.font_pt||8}pt`,fontWeight:/bold/i.test(b.font||'')?'700':'400',color:b.color||'#31242e',background:b.background||'transparent',textAlign:b.align||'left',padding:mm(b.text_padding_mm),borderRadius:mm(b.radius_mm)});
+    if(b.kind==='logo') { const img=document.createElement('img'); img.src=`../assets/brand/nozza-print-crop-${(b.source_crop_px||[]).join('-')}.png`; img.alt='NOZZA'; node.append(img); }
+    else if(b.kind==='qr') { const svg=qrSvg(values.qrlink||''); if(svg) node.innerHTML=svg; else node.textContent='QR\nместо кода'; }
+    else node.textContent=values[b.id]!=null?values[b.id]:String(b.text||'').replace(/\[[^\]]+\]/g,'').trim();
+    item.append(node);
+  }
+  return item.outerHTML;
+}
 function render(){
-  const who=$('who').value.trim(); const role=$('role').value.trim()||'3D-печать на заказ';
-  const city=$('city').value.trim()||'Симферополь';
+  const who=$('who').value.trim(); const role=$('role').value.trim();
+  const city=$('city').value.trim();
   const phone=$('phone').value.trim(); const tg=$('tg').value.trim();
   const site=$('site').value.trim();
   const link=$('qrlink').value.trim();
   const variant=$('variant').value;
-  saveContact({who, role, city, phone, tg, site});
 
   // метка «телефон не вбит»: на панели красным, поле в красной рамке
   const empty=!phone;
   $('phoneWarn').hidden=!empty;
   $('phone').classList.toggle('bad', empty);
 
-  const qrLink=qrSvg(link);
-  const qrCap=tg && link===tgOf(tg) ? 'напишите в Telegram' : 'подробности по QR';
   const shortSite=site.replace(/^https?:\/\//,'');
-  const frontMark=(variant==='air')?MARK:MARK_WHITE;
-
-  const front=`<div class="card front ${variant} cut"><div class="c-top"><img src="${frontMark}" alt=""><div><div class="c-word">NOZZA</div><div class="c-slogan">ТАМ, ГДЕ РОЖДАЕТСЯ ФОРМА · ${esc(city.toUpperCase())}</div></div></div><div class="c-what">3D-печать на заказ в ${esc(city)} · изделия по вашим размерам<br>ремонт деталей · партии для бизнеса</div>${link?`<div class="c-qr">${qrLink}<div class="cap">${qrCap}</div></div>`:''}</div>`;
-  const phoneLine=phone?`<div class="c-phone">${esc(phone)}</div>`:`<div class="c-phone empty">телефон не вбит</div>`;
-  const back=`<div class="card back cut"><div class="c-info"><div class="c-head"><img src="${MARK}" alt=""><div>${who?`<div class="c-name">${esc(who)}</div>`:'<div class="c-name">NOZZA · '+esc(city)+'</div>'}<div class="c-role">${esc(role)}</div></div></div><div class="c-lines">${phoneLine}${shortSite?esc(shortSite)+'<br>':''}Telegram ${esc(tg)} · ${esc(city)}</div></div>${link?`<div class="c-qr">${qrLink}<div class="c-qrcap">${qrCap}</div></div>`:''}</div>`;
-
-  const signHtml=s=>`<div class="sign cut"><div class="s-kicker">${esc(s.k)}</div><div class="s-title">${esc(s.t)}</div><div class="s-text">${esc(s.d)}</div><div class="s-foot"><div><div class="s-brand">NOZZA · ${esc(city)}</div><div style="font-size:7.5px;color:var(--ink-soft);margin-top:.6mm">${shortSite?esc(shortSite)+' · ':''}${esc(tg)}</div></div>${qrLink}</div></div>`;
+  const slogan=`3D-производство\n${role&&role!=='3D-производство'?role:'[СЛОГАН / НАЗНАЧЕНИЕ]'}`;
+  const contact=[phone||'[ТЕЛЕФОН / КОД]',tg||'[TELEGRAM]',[who,shortSite,city].filter(Boolean).join(' · ')||'[АДРЕС / ИМЯ]'].join('\n');
+  const frontValues={slogan,contact,qrlink:link};
+  const backValues={slogan,contact,qrlink:link};
+  const front=recipe('business-front',frontValues,variant), back=recipe('business-back',backValues,'air');
+  const signDescriptions=['Можно потрогать и примерить','Изготовим под ваш размер','Поможем заменить деталь','Печать по STL, 3MF или STEP','Партии и оснастка для бизнеса','PLA, PETG и другие материалы'];
+  const signHtml=(s,i)=>recipe('shelf-sign',{title:s.t,text:signDescriptions[i]||s.k});
   const customs=[];
   [['c1t','c1d'],['c2t','c2d']].forEach(([tid,did],i)=>{
     const t=$(tid).value.trim(), d=$(did).value.trim();
     if(t||d) customs.push(signHtml({k:'NOZZA · '+city, t:t||'…', d:d||''}));
   });
 
-  const insert=`<div class="insert"><img class="mark" src="${MARK}" alt=""><div class="i-word">NOZZA</div><div class="i-slogan">ТАМ, ГДЕ РОЖДАЕТСЯ ФОРМА · ${esc(city)}</div><div class="i-thanks">Спасибо<br>за покупку!</div><div class="i-body">Это изделие напечатано слой за слоем в мастерской NOZZA, ${esc(city)} — возможно, прямо в тот день, когда вы зашли. Если что-то не подошло по размеру или цвету, <b>вернитесь к нам: переделаем или подгоним</b>.</div><div class="i-care"><b>Как ухаживать</b>• Мыть тёплой водой, без кипятка и посудомойки.<br>• Не оставлять в машине на солнце: PLA размягчается.<br>• Клеить — секундным клеем или эпоксидкой.<br>• Царапину можно затереть мелкой наждачкой.</div><div class="i-qr">${link?qrLink:''}<div class="t"><b>Нужно ещё что-то?</b><br>${shortSite?esc(shortSite)+'<br>':''}Telegram ${esc(tg)}<br>${esc(phone)}<br>${esc(city)}</div></div></div>`;
+  const insertBody=`Это изделие напечатано слой за слоем в мастерской NOZZA${city?', '+city:''}. Если размер или цвет не подошёл, вернитесь к нам — поможем подогнать.`;
+  const insertCare='Мыть тёплой водой, без кипятка и ПММ.\nНе оставлять PLA в нагретой машине.\nСклеивать секундным клеем или эпоксидкой.\nЦарапину убрать мелкой наждачкой.';
+  const insert=recipe('insert',{thanks:'Спасибо за покупку',body:insertBody,care:insertCare,contact:['Нужно ещё что-то?',phone,tg,shortSite,city].filter(Boolean).join('\n'),qrlink:link});
 
-  const variantName={grad:'градиент',mono:'монохром',air:'светлый'}[variant];
-  $('sheets').innerHTML=`<div class="sheet"><div class="sheet-title">Визитки 90 × 50 мм — лицевая сторона <em>вариант «${variantName}», 10 шт.</em></div><div class="grid">${Array.from({length:10},()=>front).join('')}</div></div><div class="sheet"><div class="sheet-title">Визитки — оборот <em>10 шт.</em></div><div class="grid">${Array.from({length:10},()=>back).join('')}</div></div><div class="sheet"><div class="sheet-title">Таблички на полку 90 × 55 мм <em>6 готовых${customs.length?' + '+customs.length+' своих':''}</em></div><div class="grid">${SIGNS.map(signHtml).join('')+customs.join('')}</div></div><div class="sheet"><div class="sheet-title">Вкладыш «спасибо за покупку» 95 × 135 мм <em>4 шт.</em></div><div class="grid">${insert}${insert}${insert}${insert}</div></div>`;
+  const variantName={color:'цветной',grad:'цветной',mono:'монохромный',air:'белый'}[variant];
+  $('sheets').innerHTML=`<div class="sheet"><div class="sheet-title">Визитки 90 × 50 мм — лицевая сторона <em>«${variantName}», 8 шт.</em></div><div class="grid">${Array.from({length:8},()=>front).join('')}</div></div><div class="sheet"><div class="sheet-title">Визитки 90 × 50 мм — оборот <em>8 шт.; отдельный лист для двусторонней печати</em></div><div class="grid">${Array.from({length:8},()=>back).join('')}</div></div><div class="sheet"><div class="sheet-title">Таблички на полку 90 × 55 мм <em>6 готовых${customs.length?' + '+customs.length+' своих':''}</em></div><div class="grid">${SIGNS.map(signHtml).join('')+customs.join('')}</div></div><div class="sheet"><div class="sheet-title">Вкладыш «спасибо за покупку» 95 × 130 мм <em>4 шт.</em></div><div class="grid">${insert}${insert}${insert}${insert}</div></div>`;
+  const textBlocks=[...$('sheets').querySelectorAll('.recipe-block:not(.logo):not(.qr)')];
+  const overflow=textBlocks.some(el=>el.scrollWidth>el.clientWidth+1||el.scrollHeight>el.clientHeight+1);
+  $('contentWarn').hidden=!overflow;
+  $('print').disabled=!layoutsV2||overflow;
 }
 
 function init(){
   const c=loadContact(), p=loadPage();
   if(c.who) $('who').value=c.who;
-  if(c.role) $('role').value=c.role;
-  $('city').value=c.city||'Симферополь';
+  if(c.role && c.role!=='3D-печать на заказ') $('role').value=c.role;
+  $('city').value=c.city && c.city!=='Симферополь' ? c.city : '';
   if(c.phone) $('phone').value=c.phone;
   if(c.site) $('site').value=c.site;
-  const tg=c.tg||'@nozza_shop';
+  const tg=c.tg && c.tg!=='@nozza_shop' ? c.tg : '';
   $('tg').value=tg;
-  if(p.variant) $('variant').value=p.variant;
+  if(p.variant) $('variant').value=p.variant==='grad'?'color':p.variant;
   // ссылка для QR: вбитая вручную имеет приоритет, иначе — Telegram
-  $('qrlink').value=(p.qrlink!=null)?p.qrlink:tgOf(tg);
+  $('qrlink').value=p.qrcustom && p.qrlink ? p.qrlink : '';
   ['c1t','c1d','c2t','c2d'].forEach(id=>{ if(p[id]) $(id).value=p[id]; });
 }
 
-['who','role','city','phone','site'].forEach(id=>{ const el=$(id); if(el) el.addEventListener('input', render); });
+['who','role','city','phone','site'].forEach(id=>{ const el=$(id); if(el) el.addEventListener('input', ()=>{saveContact({[id]:el.value});render();}); });
 $('tg').addEventListener('input', ()=>{
   // Telegram двигает QR-ссылку, пока владелец не вбил свою
+  saveContact({tg:$('tg').value});
   if(!loadPage().qrcustom){ $('qrlink').value=tgOf($('tg').value); savePage({qrlink:$('qrlink').value}); }
   render();
 });
 $('qrlink').addEventListener('input', ()=>{ savePage({qrlink:$('qrlink').value, qrcustom:1}); render(); });
 $('variant').addEventListener('change', ()=>{ savePage({variant:$('variant').value}); render(); });
 ['c1t','c1d','c2t','c2d'].forEach(id=>{ const el=$(id); el.addEventListener('input', ()=>{ savePage({[id]:el.value}); render(); }); });
-$('print').addEventListener('click', ()=>window.print());
+$('print').addEventListener('click', ()=>{if(layoutsV2 && $('sheets').querySelector('.recipe-item'))window.print();});
 
 init(); render();
+fetch('../assets/print-layouts-v2.json',{cache:'no-store'}).then(r=>{if(!r.ok)throw Error('layout');return r.json();}).then(data=>{layoutsV2=data;$('print').disabled=false;render();}).catch(()=>{$('sheets').innerHTML='<div class="note">Не удалось загрузить геометрию из print-layouts-v2.json. Печать недоступна.</div>';});
 </script>
 </body></html>

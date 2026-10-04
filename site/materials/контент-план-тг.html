@@ -4,6 +4,7 @@
 <title>NOZZA — контент-план на неделю для Telegram</title>
 <link rel="icon" href="../assets/brand/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="generator.css?v=18.23.1">
+<link rel="stylesheet" href="../assets/nozza-design-v2.css?v=18.23.1">
 <style>
   body { background: #eef1f7; }
   .wrap { max-width: 1020px; margin: 0 auto; padding: 18px 18px 70px; }
@@ -59,8 +60,39 @@
     background: #f4f6fc; border: 1px dashed #b9c2d8; border-radius: 10px;
     padding: 10px 14px; font-size: 12.5px; line-height: 1.7; color: var(--ink);
   }
+  body.pf-utility { min-height: 100vh; background: #1D161F; color: #F8EEE6; color-scheme: dark; }
+  .wrap { padding-bottom: 52px; }
+  .intro { align-items: flex-start; background: linear-gradient(145deg, #392C3B, #251D27); border: 1px solid #745970; border-radius: 12px; box-shadow: inset 0 1px 0 rgba(255,238,231,.07); }
+  .intro .big { color: #D2A1FF; font-size: 30px; }
+  .intro h1 { color: #F8EEE6; }
+  .intro p { color: #E2D2D9; opacity: 1; }
+  .plan-controls, .day, .block { background: #2C232E; border-color: #5B465C; border-radius: 12px; box-shadow: inset 0 1px 0 rgba(255,238,231,.04); }
+  .plan-controls label, .day .hint, .counter, .sheet-title em { color: #BFAFB7; }
+  .plan-controls input, .plan-controls select, .day header input.time, .day textarea { background: #241B25; border-color: #59445B; border-radius: 8px; color: #F8EEE6; }
+  .plan-controls input:focus-visible, .plan-controls select:focus-visible, .day textarea:focus-visible, .day header input.time:focus-visible { outline: 2px solid #D5AAFF; outline-offset: 2px; }
+  .day .date, .block h2 { color: #F8EEE6; }
+  .day .badge { color: #E5C2FF; background: rgba(181,43,255,.16); }
+  .day textarea { min-height: 184px; line-height: 1.6; }
+  .block li { color: #BFAFB7; }
+  .block li b { color: #F8EEE6; }
+  .formula { background: #352A37; border-color: #745970; color: #E2D2D9; }
+  .btn.danger { border: 1px solid rgba(255,146,159,.4) !important; background: rgba(255,100,125,.1) !important; color: #FF929F !important; box-shadow: none; }
+  @media (max-width: 640px) {
+    .wrap { padding: 14px 12px 40px; }
+    .intro { gap: 12px; padding: 16px; }
+    .intro h1 { font-size: 18px; }
+    .intro p { font-size: 12px; }
+    .plan-controls { align-items: stretch; padding: 12px; gap: 10px; }
+    .plan-controls label { flex: 1 1 100%; justify-content: space-between; }
+    .plan-controls select, .plan-controls input { min-height: 42px; }
+    .plan-controls .btn { flex: 1 1 100%; min-height: 42px; }
+    .day { padding: 12px; }
+    .day textarea { min-height: 210px; font-size: 16px; }
+    .day .row .btn { min-height: 40px; }
+  }
+  @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; } }
 </style>
-</head><body>
+</head><body class="pf-utility">
 
 <div class="panel noprint">
   <div class="panel-row">
@@ -91,7 +123,7 @@
     <button class="btn" id="btnShuffleAll">↻ Другие варианты постов</button>
     <button class="btn" id="btnCopyAll">Копировать весь план</button>
     <button class="btn" id="btnMd">Скачать .md</button>
-    <button class="btn danger" id="btnReset" style="background:#fef2f2;border-color:#f4b4b4;color:#b42318">Сбросить правки</button>
+    <button class="btn danger" id="btnReset">Сбросить правки</button>
     <span class="counter">Один пост — одна проблема и одно действие</span>
   </div>
 
@@ -529,7 +561,7 @@ function render() {
       <div class="row">
         <button class="btn primary" data-copy="${i}">Копировать пост</button>
         <button class="btn" data-shuffle="${i}">↻ Другой вариант</button>
-        <button class="btn danger" data-original="${i}" style="background:#fef2f2;border-color:#f4b4b4;color:#b42318">Вернуть исходный</button>
+        <button class="btn danger" data-original="${i}">Вернуть исходный</button>
         <span class="counter" data-count="${i}"></span>
       </div>
     </div>`;

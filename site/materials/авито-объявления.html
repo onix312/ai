@@ -4,6 +4,7 @@
 <title>NOZZA — объявления для Авито</title>
 <link rel="icon" href="../assets/brand/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="generator.css?v=18.23.1">
+<link rel="stylesheet" href="../assets/nozza-design-v2.css?v=18.23.1">
 <style>
   body { background: #eef1f7; }
   .wrap { max-width: 1020px; margin: 0 auto; padding: 18px 18px 70px; }
@@ -63,8 +64,45 @@
     background: #fff8e5; border: 1px solid #f0d99a; border-radius: 10px;
     padding: 10px 14px; font-size: 12px; line-height: 1.55; color: #8a6516; margin-bottom: 14px;
   }
+  body.pf-avito-workbench { min-height:100vh;background:#1D161F;font-family:Arial,Helvetica,sans-serif;color:#F8EEE6; }
+  .pf-avito-workbench .wrap { max-width:1180px;padding:22px 24px 64px; }
+  .pf-avito-workbench .intro { gap:14px;border:1px solid #5B465C;border-left:4px solid #B52BFF;border-radius:12px;padding:18px 20px;background:linear-gradient(145deg,#352A37,#241B25);color:#F8EEE6; }
+  .pf-avito-workbench .intro .big { display:grid;place-items:center;flex:0 0 42px;width:42px;height:42px;border:1px solid #CE8BFF;border-radius:11px;background:rgba(181,43,255,.16);color:#E5C2FF;font-size:13px;font-weight:800;letter-spacing:.04em; }
+  .pf-avito-workbench .intro h1 { color:#F8EEE6;font-size:20px; }
+  .pf-avito-workbench .intro p { color:#BFAFB7;font-size:12px; }
+  body.pf-avito-workbench .panel [data-nz-common] input,body.pf-avito-workbench .panel [data-nz-common] select { border-color:#59445B!important;border-radius:8px!important;background:#241B25!important;color:#F8EEE6!important; }
+  body.pf-avito-workbench .panel [data-nz-common] input::placeholder { color:#BFAFB7!important; }
+  .pf-avito-workbench .warn { border-color:rgba(244,188,128,.35);border-radius:10px;background:rgba(244,188,128,.1);color:#F4BC80; }
+  .pf-avito-workbench .listing,.pf-avito-workbench .block { border-color:#493949;border-radius:12px;background:linear-gradient(145deg,#2C232E,#241B25);box-shadow:inset 0 1px 0 rgba(255,238,231,.035); }
+  .pf-avito-workbench .listing header h2,.pf-avito-workbench .block h2 { color:#F8EEE6; }
+  .pf-avito-workbench .listing header .ic { display:grid;place-items:center;width:34px;height:34px;border:1px solid #493949;border-radius:9px;background:#241B25;font-size:17px; }
+  .pf-avito-workbench .listing label,.pf-avito-workbench .block p.hint,.pf-avito-workbench .counter { color:#BFAFB7; }
+  .pf-avito-workbench .listing input,.pf-avito-workbench .listing textarea { border-color:#59445B;border-radius:8px;background:#241B25;color:#F8EEE6; }
+  .pf-avito-workbench .listing input::placeholder,.pf-avito-workbench .listing textarea::placeholder { color:#BFAFB7; }
+  .pf-avito-workbench .listing .actions { align-items:center; }
+  .pf-avito-workbench .photos { gap:8px 16px; }
+  .pf-avito-workbench .photos label { color:#E2D2D9; }
+  .pf-avito-workbench input[type="checkbox"] { accent-color:#B52BFF; }
+  .pf-avito-workbench .reply { border-color:#493949;border-radius:10px;background:#241B25; }
+  .pf-avito-workbench .reply h3 { color:#CE8BFF; }
+  .pf-avito-workbench .reply pre { color:#E2D2D9; }
+  .pf-avito-workbench .check li { color:#E2D2D9; }
+  .pf-avito-workbench .check li.done { color:#8C7C88; }
+  .pf-avito-workbench .btn { border:1px solid #59445B;border-radius:8px;background:#352A37;color:#F8EEE6;box-shadow:none; }
+  .pf-avito-workbench .btn:hover { border-color:#745970;background:#403241; }
+  .pf-avito-workbench :focus-visible { outline:2px solid #D5AAFF;outline-offset:2px; }
+  @media (max-width:640px) {
+    .pf-avito-workbench .wrap { padding:18px 14px 48px; }
+    .pf-avito-workbench .intro { align-items:flex-start;padding:16px; }
+    .pf-avito-workbench .listing { padding:14px; }
+    .pf-avito-workbench .listing .fields { grid-template-columns:minmax(0,1fr); }
+    .pf-avito-workbench .listing label.full { grid-column:auto; }
+    .pf-avito-workbench .listing textarea { min-height:200px; }
+    .pf-avito-workbench .photos { align-items:flex-start; }
+  }
+  @media (prefers-reduced-motion:reduce) { .pf-avito-workbench *, .pf-avito-workbench *::before, .pf-avito-workbench *::after { scroll-behavior:auto!important;transition:none!important; } }
 </style>
-</head><body>
+</head><body class="pf-utility pf-avito-workbench">
 
 <div class="panel noprint">
   <div class="panel-row">
@@ -76,7 +114,7 @@
 <div class="wrap">
 
   <div class="intro">
-    <div class="big">🟢</div>
+    <div class="big" aria-hidden="true">AV</div>
     <div>
       <h1>Авито-комплект NOZZA</h1>
       <p>Четыре готовых объявления под направления производства, быстрые ответы, чек-листы фото и публикации. Все тексты редактируются и сохраняются. Баннер магазина 1200 × 400 — на странице «Шапки Telegram и Авито».</p>

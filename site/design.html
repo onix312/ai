@@ -49,8 +49,27 @@
  .hint { margin-top:12px; font-size:12px; color:var(--muted); line-height:1.5; }
 </style>
 <link rel="stylesheet" href="assets/refine.css?v=18.23.1">
+<link rel="stylesheet" href="/assets/nozza-design-v2.css?v=20.1.35">
+<style>
+@media screen {
+ body.pf-public.pf-design-page { --bg:#0B121B;--panel:#16212E;--line:#2D4052;--text:#F2F6FB;--muted:#A0B2C5;--accent:#818CF8;min-height:100vh;background:#0B121B;color:#F2F6FB; }
+ body.pf-public.pf-design-page .wrap { max-width:760px;padding:26px 16px 60px; }
+ body.pf-public.pf-design-page .logo { color:#F2F6FB; }
+ body.pf-public.pf-design-page .logo small,body.pf-public.pf-design-page .sub { color:#A0B2C5; }
+ body.pf-public.pf-design-page .card { padding:18px;border:1px solid #2D4052;border-radius:0;background:#16212E;color:#F2F6FB;box-shadow:none; }
+ body.pf-public.pf-design-page h2 { color:#F2F6FB; }
+ body.pf-public.pf-design-page label { color:#A0B2C5; }
+ body.pf-public.pf-design-page input,body.pf-public.pf-design-page select { min-height:46px;border-color:#2D4052;border-radius:11px;background:#16212E;color:#F2F6FB; }
+ body.pf-public.pf-design-page .preview { position:relative;background:repeating-conic-gradient(#0B121B 0 25%,#F0F3FA 0 50%) 50%/28px 28px;border:1px solid #2D4052; }
+ body.pf-public.pf-design-page .preview-state { position:absolute;right:8px;bottom:8px;left:8px;padding:6px 9px;border:1px solid rgba(45,64,82,.9);border-radius:7px;background:rgba(11,18,27,.88);color:#A0B2C5;font-size:11px;text-align:center; }
+ body.pf-public.pf-design-page .btn { min-height:44px;margin-top:16px;border-radius:11px;background:#818CF8;color:#fff; }
+ body.pf-public.pf-design-page .hint { color:#A0B2C5; }
+ body.pf-public.pf-design-page :focus-visible { outline:2px solid #A5B4FC;outline-offset:2px; }
+}
+@media (max-width:640px) { body.pf-public.pf-design-page .wrap { padding:22px 14px 44px; } }
+</style>
 </head>
-<body class="pf-public">
+<body class="pf-public pf-design-page">
 <div class="wrap">
  <div class="logo">NOZZA<small>конструктор изделий · PrintFlow 8.2</small></div>
  <p class="sub">Параметры → живой предпросмотр → STL для слайсера. Без внешних программ.</p>
@@ -85,7 +104,7 @@
   </div>
   <div class="card">
    <h2>Предпросмотр</h2>
-   <div class="preview" id="preview"></div>
+   <div class="preview" id="preview"><p class="preview-state" id="previewState" role="status" aria-live="polite" hidden>Предпросмотр недоступен без подключения к PrintFlow</p></div>
   </div>
  </div>
 </div>
@@ -102,7 +121,14 @@
   }
   function qs(p){ var s=new URLSearchParams(); Object.keys(p).forEach(function(k){s.set(k,p[k]);}); return s.toString(); }
   function updatePreview(){
-    $('#preview').innerHTML='<img src="/api/design/preview?'+qs(params())+'&t='+Date.now()+'" alt="" style="max-width:240px">';
+    var preview=$('#preview'), status=$('#previewState'), image=document.createElement('img');
+    image.alt='Предпросмотр изделия';
+    image.style.maxWidth='240px';
+    image.addEventListener('load',function(){ if(image===preview.querySelector('img')) status.hidden=true; });
+    image.addEventListener('error',function(){ if(image===preview.querySelector('img')) status.hidden=false; });
+    var old=preview.querySelector('img'); if(old) old.remove();
+    preview.insertBefore(image,status);
+    image.src='/api/design/preview?'+qs(params())+'&t='+Date.now();
   }
   function syncParams(){
     var s=$('#shape').value;

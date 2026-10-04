@@ -12,22 +12,30 @@
   .panel b { font-size: 13px; margin-right: 6px; }
   .panel label { font-size: 12px; color: #5d6b85; display: flex; align-items: center; gap: 6px; }
   .panel input { font: inherit; font-size: 12.5px; padding: 5px 8px; border: 1px solid #d6dcea; border-radius: 7px; }
-  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 5mm; }
-  .card { border: 2px solid #dbe3f2; border-radius: 14px; padding: 6mm 5mm; display: flex; flex-direction: column; height: 92mm; }
-  .num { width: 11mm; height: 11mm; border-radius: 50%; background: #1f3864; color: #fff;
-    display: flex; align-items: center; justify-content: center; font-size: 15pt; font-weight: 900; }
-  .t { font-size: 14pt; font-weight: 900; margin: 3mm 0 2mm; }
-  .d { font-size: 10pt; color: #42506e; line-height: 1.45; }
-  .ex { margin-top: auto; background: #f3f6fd; border-radius: 9px; padding: 3mm 4mm; font-size: 9pt; color: #5d6b85; }
-  .ex b { color: #4f46e5; }
-  @media print { .panel { display: none; } }
+  .preview-scroll { width:100%; min-width:0; max-width:100vw; overflow-x:auto; overscroll-behavior-inline:contain; }
+  .grid { width:192mm; margin:0 auto; display:grid; grid-template-columns:93.5mm 93.5mm; gap:5mm; }
+  .card { width:93.5mm; height:92mm; position:relative; overflow:hidden; background:#fff; font-family:Arial,sans-serif; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+  .block { position:absolute; box-sizing:border-box; overflow:hidden; white-space:pre-line; line-height:1.25; }
+  .block.logo img { display:block; width:100%; height:100%; object-fit:contain; object-position:left center; }
+  @media screen {
+    body.pf-print-tool { min-height:100vh; padding:20px; background:#1D161F; color:#F8EEE6; }
+    body.pf-print-tool .panel { max-width:1160px; margin:0 auto 24px; padding:16px 20px; border:1px solid #5B465C; border-radius:12px; background:linear-gradient(145deg,#392C3B,#251D27); }
+    body.pf-print-tool .panel b { color:#F8EEE6; }
+    body.pf-print-tool .panel label { color:#BFAFB7; }
+    body.pf-print-tool .panel input { min-height:38px; border:1px solid #5B465C; border-radius:8px; background:#241B25; color:#F8EEE6; }
+    body.pf-print-tool .preview-scroll { max-width:1160px; margin:0 auto; padding:0 0 24px; }
+    body.pf-print-tool .grid { margin-left:auto; margin-right:auto; }
+    body.pf-print-tool :focus-visible { outline:2px solid #D5AAFF; outline-offset:2px; }
+  }
+  @media screen and (max-width:640px) { .grid { margin:0 12px; } }
+  @media print { .panel { display: none; } .preview-scroll { width:auto; max-width:none; overflow:visible; } }
 </style></head>
-<body>
+<body class="pf-print-tool">
 <div class="panel">
   <b>Карточки «как заказать» — 4 штуки на листе</b>
   <label>Срок ответа <input id="srok" value="1 день"></label>
 </div>
-<div class="grid" id="grid"></div>
+<div class="preview-scroll"><div class="grid" id="grid"></div></div>
 <script>
 (function(){
   var STEPS = [
@@ -37,17 +45,24 @@
     { t: 'Получите расчёт', d: 'Цена, материал и дата — до печати. Потом согласуем макет.' },
   ];
   function el(id){ return document.getElementById(id); }
+  var layout=null;
+  function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
   function draw(){
-    var srok = el('srok').value || '1 день';
-    var ex = ['адресник, табличка', 'органайзер, крепление', 'PLA: чёрный, белый, оранжевый…', 'ответ в течение ' + srok];
-    el('grid').innerHTML = STEPS.map(function(s, i){
-      return '<div class="card"><div class="num">' + (i+1) + '</div>'
-        + '<div class="t">' + s.t + '</div><div class="d">' + s.d + '</div>'
-        + '<div class="ex"><b>Пример:</b> ' + ex[i] + '</div></div>';
+    if(!layout) return;
+    var srok=el('srok').value.trim()||'1 день';
+    var examples=['Пример: адресник, табличка','Пример: органайзер, крепление','Пример: PLA — чёрный, белый, оранжевый','Ответ в течение '+srok];
+    el('grid').innerHTML=STEPS.map(function(step,i){
+      var values={step:String(i+1).padStart(2,'0'),title:step.t,description:step.d+'\n'+examples[i]};
+      var blocks=layout.blocks.map(function(b){
+        var css='left:'+b.x_mm+'mm;top:'+b.y_mm+'mm;width:'+b.width_mm+'mm;height:'+b.height_mm+'mm;font: '+(b.font_pt||8)+'pt Arial,sans-serif;font-weight:'+(b.font==='ArialBold'?'700':'400')+';line-height:'+(b.line_height||1.25)+';color:'+(b.color||'#31242e')+';background:'+(b.background||'transparent')+';text-align:'+(b.align||'left')+';padding:'+(b.text_padding_mm||0)+'mm;border-radius:'+(b.radius_mm||0)+'mm';
+        if(b.kind==='logo') return '<div class="block logo" style="'+css+'"><img src="../assets/brand/nozza-print-crop-'+(b.source_crop_px||[]).join('-')+'.png" alt="NOZZA"></div>';
+        return '<div class="block" style="'+css+'">'+esc(values[b.id]||'')+'</div>';
+      }).join('');
+      return '<div class="card" style="width:'+layout.width_mm+'mm;height:'+layout.height_mm+'mm">'+blocks+'</div>';
     }).join('');
   }
   el('srok').addEventListener('input', draw);
-  draw();
+  fetch('../assets/print-layouts-v2.json',{cache:'no-store'}).then(function(r){if(!r.ok)throw Error('layout');return r.json();}).then(function(data){layout=(data.documents||[]).find(function(d){return d.id==='how-order';});if(!layout)throw Error('how-order');draw();}).catch(function(){el('grid').textContent='Не удалось загрузить геометрию из print-layouts-v2.json.';});
 })();
 </script>
 </body></html>

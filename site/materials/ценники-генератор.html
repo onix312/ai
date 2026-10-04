@@ -69,6 +69,7 @@
   .sheet.promo .tag .brandline { font-size: 8px; letter-spacing: .08em; gap: 1mm; }
   .sheet.promo .tag .brandline img { width: 4.5mm; height: 4.5mm; }
   .sheet-title { position: absolute; z-index: 1; top: 2mm; left: 6mm; font-size: 9px; font-weight: 700; color: var(--ink-soft); letter-spacing: .06em; text-transform: uppercase; }
+  @media screen { .sheet-title { display:none; } }
   .empty { padding: 30mm 10mm; text-align: center; color: var(--ink-soft); font-size: 13px; line-height: 1.6; }
   @page { size: A4 portrait; margin: 0; }
   @media print {
@@ -95,6 +96,33 @@
   .chip b { font-weight: 800; color: var(--brand); }
   .btn.danger { background: #fef2f2; border-color: #f4b4b4; color: #b42318; }
   .btn.danger:hover { border-color: #e38a8a; }
+
+  /* Coordinates and dimensions come from print-layouts-v2.json. */
+  .tag.recipe,.sheet.promo .tag.recipe { display:block; box-sizing:border-box; width:67mm; height:32mm; padding:0; border:0; border-radius:0;
+    background:#fff; color:#31242E; cursor:pointer; transform:none; box-shadow:none; font-family:Arial,Helvetica,sans-serif; }
+  .tag.recipe::before { content:none; }
+  .tag.recipe .recipe-brand,.tag.recipe .name,.tag.recipe .price,.tag.recipe .qr-slot,.tag.recipe .sku,.tag.recipe .recipe-content { position:absolute; box-sizing:border-box; margin:0; }
+  .tag.recipe .recipe-brand { display:block; overflow:hidden; }
+  .tag.recipe .recipe-brand { display:block; overflow:hidden; }
+  .tag.recipe .recipe-brand img { display:block; width:100%; height:100%; object-fit:contain; object-position:left center; }
+  .tag.recipe .name { display:block; overflow:hidden; color:#31242E; font:700 10pt/1.25 Arial,Helvetica,sans-serif; letter-spacing:0; white-space:normal; overflow-wrap:anywhere; }
+  .tag.recipe .price { display:block; overflow:hidden; color:#6E2BC8; font:700 13pt/1.25 Arial,Helvetica,sans-serif; letter-spacing:0; white-space:nowrap; }
+  .tag.recipe .qr-slot { display:grid; place-items:center; padding:1mm; overflow:hidden; border:.2mm solid #D9C8CE; color:#66555F; font:400 7pt/1.15 Arial,Helvetica,sans-serif; text-align:center; }
+  .tag.recipe .qr-slot svg { display:block; width:100%; height:100%; }
+  .tag.recipe .sku { overflow:hidden; color:#66555F; font:400 6pt/1.25 Arial,Helvetica,sans-serif; white-space:nowrap; }
+  .tag.recipe.promo,.sheet.promo .tag.recipe { width:67mm; height:57mm; }
+  .tag.recipe .recipe-content { display:grid; align-items:center; overflow:hidden; padding:1mm; border:.2mm solid #D9C8CE; background:#F6F0F8; color:#66555F; font:400 9pt/1.25 Arial,Helvetica,sans-serif; }
+  .tag.recipe .recipe-barcode { position:absolute; display:flex; align-items:center; justify-content:center; gap:1mm; box-sizing:border-box; overflow:hidden;
+    border:.2mm solid #D9C8CE; color:#31242E; font:400 7pt/1.25 Arial,Helvetica,sans-serif; white-space:nowrap; }
+  .tag.recipe .recipe-barcode svg { display:block; width:auto!important; max-width:100%; height:auto!important; max-height:7mm; flex:none; }
+  .tag.recipe .blank-content { color:#66555F; }
+  .tag.recipe.blank .name { border-bottom:1px solid #D9C8CE; min-height:3.5mm; }
+  .tag.recipe.blank .price { color:#B5A8B2; }
+  .tag.recipe.selected { outline:2.5px solid #6E2BC8; outline-offset:2px; }
+  @media screen {
+    .sheet-title { display:none; }
+    #sheets { width:100%; min-width:0; max-width:100vw; overflow-x:auto; overscroll-behavior-inline:contain; contain:inline-size; }
+  }
 </style>
 </head><body>
 
@@ -105,7 +133,7 @@
     <label>Формат <select id="size"><option value="standard">Ценник · 67 × 32 мм (27 на лист)</option><option value="promo">Промостенд · 67 × 57 мм (15 на лист)</option></select></label>
     <label>Наценка, % <input type="number" id="markup" value="0" step="5" style="width:60px"></label>
     <label>Округлять до <select id="round"><option value="0">не округлять</option><option value="10" selected>10 ₽</option><option value="50">50 ₽</option><option value="100">100 ₽</option></select></label>
-    <label>Город <input type="text" id="city" value="Симферополь" style="width:120px"></label>
+    <label>Город <input type="text" id="city" value="" placeholder="Город (необязательно)" style="width:120px"></label>
   </div>
   <div class="panel-row" style="margin-top:9px">
     <label>Ссылка в QR <input type="text" id="qrbase" value="https://nozza.ru/p/" placeholder="https://nozza.ru/p/"></label>
@@ -113,7 +141,7 @@
     <label><input type="checkbox" id="blanks" checked> пустые бланки</label>
     <label><input type="checkbox" id="showCity" checked> город на ценнике</label>
     <button class="btn" id="reload">Обновить</button>
-    <button class="btn primary" id="print">Печать</button>
+    <button class="btn primary" id="print" disabled>Печать</button>
     <span class="status" id="status">загрузка…</span>
   </div>
 
@@ -141,24 +169,25 @@
       <button class="btn" id="btnExport">Экспорт JSON</button>
       <button class="btn" id="btnClearAll">Очистить ручные</button>
     </div>
-    <div class="hint">Клик по ценнику → поля заполняются, можно править название, цену, описание, бейдж, QR. <b>Город Симферополь</b> по умолчанию сохраняется в браузере (nozza:contact). Ручные ценники хранятся локально (nozza:priceCustom) и попадают на печать первыми. Пустые бланки — для ручного вписывания.</div>
+    <div class="hint">Клик по ценнику → поля заполняются, можно править название, цену, описание, бейдж и QR. Город сохраняется только после ручного изменения (nozza:contact). Ручные ценники хранятся локально (nozza:priceCustom) и попадают на печать первыми. Пустые бланки — для ручного вписывания.</div>
   </div>
 </div>
 
 <div class="note noprint">
-  <b>Как печатать:</b> обычный ценник — 67 × 32 мм, промостенд — 67 × 57 мм. Выберите A4, масштаб 100 % и отключите «вписать в лист». Бумага 160–250 г/м² или самоклеящаяся плёнка A4. Клик по ценнику выделяет его (синяя рамка) и переносит в редактор. Можно указать цену, материал, бейдж и QR; если каталог PrintFlow не открыт, покажется демо-набор.
+  <b>Как печатать:</b> обычный ценник — 67 × 32 мм, промостенд — 67 × 57 мм. Выберите A4, масштаб 100 % и отключите «вписать в лист». Бумага 160–250 г/м² или самоклеящаяся плёнка A4. Клик по ценнику выделяет его (синяя рамка) и переносит в редактор. Можно указать цену, материал, бейдж и QR. Демо-набор появляется только после явного выбора источника «Демо-набор».
 </div>
 
 <div id="sheets"></div>
 
 <script src="../assets/qr.js?v=18.23.1"></script>
-<script>window.QR_FALLBACK=1;if(!window.QR)window.QR={svg:function(){return '<div style="font-size:10px;color:#94a3b8">QR…</div>';}};</script>
+<script>window.QR_FALLBACK=1;</script>
 <script>
 'use strict';
 const $=id=>document.getElementById(id);
 const LS_CONTACT='nozza:contact';
 const LS_CUSTOM='nozza:priceCustom';
 const PER_PAGE={standard:27,promo:15};
+let printRecipes=null;
 
 const DEMO=[
   {id:'d1',name:'Органайзер для стола',notes:'Три отсека, цвет на выбор',price:890,material:'PLA',grams:120,niche:'Для дома'},
@@ -184,7 +213,15 @@ const esc=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').rep
 function roundPrice(value,step){ if(!step) return Math.round(value); return Math.round(value/step)*step; }
 function priceText(n){ return Math.round(n).toLocaleString('ru-RU'); }
 
+function recipeFor(size){ return printRecipes && printRecipes[size==='promo'?'promo-offer':'tag-clean']; }
+function sizeFor(item,opts){ return (item.is_group||(opts.qr&&item.barcode_svg))?'promo':opts.size; }
+function blockStyle(recipe,id){
+  const block=recipe&&recipe.blocks&&recipe.blocks.find(item=>item.id===id);
+  return block?`left:${block.x_mm}mm;top:${block.y_mm}mm;width:${block.width_mm}mm;height:${block.height_mm}mm`:'';
+}
+
 let catalogItems=[]; // from api
+let currentDisplay=[];
 let selectedIndex=-1; // index in displayItems
 
 function getOpts(){
@@ -193,7 +230,7 @@ function getOpts(){
     round:Number($('round').value)||0,
     qr:$('qron').checked,
     qrbase:$('qrbase').value.trim(),
-    city:($('city').value.trim()||'Симферополь'),
+    city:$('city').value.trim(),
     showCity:$('showCity').checked,
     size:$('size').value,
   };
@@ -201,54 +238,50 @@ function getOpts(){
 
 function buildTagInner(item, opts, globalIdx){
   const markup=1+(opts.markup||0)/100;
-  const rawPrice=Number(item.price)||0;
-  const price=rawPrice?roundPrice(rawPrice*markup, opts.round):0;
+  const size=sizeFor(item,opts);
+  const recipe=recipeFor(size);
+  const hasPrice=item.price!=null&&item.price!==''&&Number.isFinite(Number(item.price));
+  const rawPrice=hasPrice?Number(item.price):null;
+  const price=hasPrice?roundPrice(rawPrice*markup, opts.round):null;
   const isCustom = item._custom;
-  const badgeText = item.niche || (isCustom ? 'NOZZA — ручной' : 'NOZZA');
-  const badge=`<div class="badge">${esc(badgeText)}</div>`;
   let qr='';
-  if(opts.qr){
-    const link=(opts.qrbase||'')+encodeURIComponent(item.id||'');
-    try{ qr=(window.QR&&QR.svg)? QR.svg(link,{ecl:'M',margin:1}) : '<div style="font-size:7px;color:#94a3b8">QR…</div>'; }catch(e){ qr=''; }
+  if(opts.qr&&(item.url||(item.id&&opts.qrbase&&!item.is_group))){
+    const link=item.url||(opts.qrbase||'')+encodeURIComponent(item.id||'');
+    try{ qr=(window.QR&&QR.svg)? QR.svg(link,{ecl:'M',margin:1}) : '<span>QR недоступен</span>'; }catch(e){ qr='<span>QR недоступен</span>'; }
   }
-  const metaParts=[];
-  if(item.material) metaParts.push(item.material);
-  if(item.grams) metaParts.push(Math.round(item.grams)+' г');
-  if(opts.showCity) metaParts.push(opts.city);
-  const meta=metaParts.join(' · ');
-  const markSrc=`../assets/brand/nozza-mark-${loadLogo()}.svg`;
-  const brandLine=`<img src="${markSrc}" alt=""><span>NOZZA</span>`;
+  const brandLine='<img src="../assets/brand/nozza-print-crop-614-394-633-142.png" alt="NOZZA">';
+  const content=size==='promo'
+    ? `<div class="recipe-content" style="${blockStyle(recipe,'content')}">${esc(item.notes||'ОФФЕР НЕ ЗАДАН')}</div>` : '';
+  const sku=item.sku?esc(item.sku):'';
+  const barcode=size==='promo'&&item.barcode_svg
+    ? `<div class="recipe-barcode" style="${blockStyle(recipe,'barcode')}"><span>CODE 128</span>${item.barcode_svg.replace(/<svg\b/,'<svg preserveAspectRatio="xMinYMid meet"')}</div>` : '';
   // selectable + selected classes handled via wrapper
-  return `<div class="tag${globalIdx===selectedIndex?' selected':''}" data-idx="${globalIdx}" title="${isCustom?'Ручной — клик для редактирования':'Клик — скопировать в ручной редактор'}">
-    <div class="tag-main">
-      <div>
-        <div class="name">${esc(item.name||'Без названия')}</div>
-        ${item.notes?`<div class="desc">${esc(item.notes)}</div>`:''}
-      </div>
-      <div>
-        <div class="price">${price?priceText(price):'____'} <span>₽</span></div>
-        ${meta?`<div class="meta">${esc(meta)}</div>`:''}
-      </div>
-    </div>
-    <div class="tag-side">
-      ${badge}
-      ${qr||'<div></div>'}
-      <div class="brandline">${brandLine}</div>
-    </div>
+  return `<div class="tag recipe ${size}${globalIdx===selectedIndex?' selected':''}" data-idx="${globalIdx}" title="${isCustom?'Ручной — клик для редактирования':'Клик — скопировать в ручной редактор'}">
+    <span class="recipe-brand" style="${blockStyle(recipe,'brand')}">${brandLine}</span>
+    <div class="name" style="${blockStyle(recipe,'name')}">${esc(item.name||'Без названия')}</div>
+    <div class="price" style="${blockStyle(recipe,'price')}">${price==null?'—':priceText(price)} <span>₽</span></div>
+    <div class="qr-slot" style="${blockStyle(recipe,'qr')}">${qr}</div>
+    <div class="sku" style="${blockStyle(recipe,'sku')}">${sku}</div>
+    ${content}
+    ${barcode}
   </div>`;
 }
 
 function blankHtml(){
   const opts=getOpts();
-  const markSrc=`../assets/brand/nozza-mark-${loadLogo()}.svg`;
-  const brandLine=`<img src="${markSrc}" alt=""><span>NOZZA</span>`;
-  return `<div class="tag blank"><div class="tag-main"><div><div class="name"></div><div class="desc"></div></div><div><div class="price">____ <span>₽</span></div></div></div><div class="tag-side"><div class="badge">NOZZA</div><div></div><div class="brandline">${brandLine}</div></div></div>`;
+  const recipe=recipeFor(opts.size);
+  const brandLine='<img src="../assets/brand/nozza-print-crop-614-394-633-142.png" alt="NOZZA">';
+  const qrText=opts.qr?'<span>QR<br>место кода</span>':'';
+  const content=opts.size==='promo'?`<div class="recipe-content blank-content" style="${blockStyle(recipe,'content')}">ОФФЕР</div>`:'';
+  return `<div class="tag recipe blank ${opts.size}"><span class="recipe-brand" style="${blockStyle(recipe,'brand')}">${brandLine}</span>
+    <div class="name" style="${blockStyle(recipe,'name')}"></div><div class="price" style="${blockStyle(recipe,'price')}">____ ₽</div>
+    <div class="qr-slot" style="${blockStyle(recipe,'qr')}">${qrText}</div><div class="sku" style="${blockStyle(recipe,'sku')}"></div>${content}</div>`;
 }
 
 function render(){
+  if(!printRecipes) return;
   const opts=getOpts();
   const city=opts.city;
-  saveContact({city, qrbase:opts.qrbase});
   if($('panelMark')) $('panelMark').src=`../assets/brand/nozza-mark-${loadLogo()}.svg`;
   const custom=loadCustom();
   $('customCount').textContent=custom.length;
@@ -259,31 +292,32 @@ function render(){
   }else if(src==='demo'){
     base=catalogItems.length?catalogItems:DEMO;
   }else{ // api
-    base=catalogItems.length?catalogItems:DEMO;
+    base=catalogItems;
   }
   const display = src==='custom' ? [...custom] : [...custom, ...base];
+  currentDisplay=display;
   // mark custom
   display.forEach((it,i)=>{ it._custom = i<custom.length; it._globalIdx=i; });
 
-  const per=PER_PAGE[opts.size];
   const host=$('sheets');
-  if(!display.length){
-    host.innerHTML=`<div class="sheet standard"><div class="empty">Каталог пуст и ручных нет.<br>Добавьте ручной ценник в редакторе выше или выберите другой источник.</div></div>`;
-    return;
+  let html='';
+  for(const size of ['standard','promo']){
+    const matching=display.filter(item=>sizeFor(item,opts)===size);
+    const per=PER_PAGE[size];
+    const pages=[];
+    for(let i=0;i<matching.length;i+=per) pages.push(matching.slice(i,i+per));
+    html+=pages.map((page,idx)=>`
+      <div class="sheet ${size}">
+        <div class="sheet-title noprint">Лист ${idx+1} из ${pages.length} · ${page.length} · ${size==='promo'?'промостенд 67 × 57 мм':'ценник 67 × 32 мм'} ${page.some(x=>x._custom)?'— ручные выделены, клик редактирует':''}</div>
+        <div class="grid">${page.map(it=>buildTagInner(it, opts, it._globalIdx)).join('')}</div>
+      </div>`).join('');
   }
-  const pages=[];
-  for(let i=0;i<display.length;i+=per) pages.push(display.slice(i,i+per));
-
-  let html=pages.map((page,idx)=>`
-    <div class="sheet ${opts.size}">
-      <div class="sheet-title noprint">Лист ${idx+1} из ${pages.length} · ${page.length} · ${opts.size==='promo' ? 'промостенд 67 × 57 мм' : 'ценник 67 × 32 мм'} ${page.some(x=>x._custom)?'— ручные выделены, клик редактирует':''}</div>
-      <div class="grid">${page.map(it=>buildTagInner(it, opts, it._globalIdx)).join('')}</div>
-    </div>`).join('');
 
   if($('blanks').checked){
     const count=PER_PAGE[opts.size];
     html+=`<div class="sheet ${opts.size}"><div class="sheet-title noprint">Пустые бланки — ${opts.size==='promo' ? 'промостенд 67 × 57 мм' : 'ценник 67 × 32 мм'} · ${esc(city)}</div><div class="grid">${Array.from({length:count}, blankHtml).join('')}</div></div>`;
   }
+  if(!html) html='<div class="sheet standard"><div class="empty">Каталог PrintFlow пуст и ручных ценников нет.<br>Выберите демо-набор явно или добавьте ручной ценник выше.</div></div>';
   host.innerHTML=html;
 
   // bind click
@@ -312,7 +346,7 @@ function render(){
 
 function normalize(rows,niches){
   const nameById={}; (niches||[]).forEach(n=>{ nameById[n.id]=n.name||n.title||''; });
-  return rows.map(r=>({id:r.id, name:r.name||'Без названия', notes:r.notes||'', price:r.price||0, material:r.material||'', grams:r.grams||0, niche:nameById[r.niche_id]||''}));
+  return rows.map(r=>({id:r.id, name:r.name||'Без названия', notes:r.notes||'', price:r.price??null, sku:r.sku||'', barcode:r.barcode||'', material:r.material||'', grams:r.grams||0, niche:nameById[r.niche_id]||''}));
 }
 
 async function loadCatalog(){
@@ -333,25 +367,39 @@ async function loadCatalog(){
   }
   status.textContent='загрузка каталога…'; status.className='status';
   try{
-    const [catRes,nicheRes]=await Promise.all([
+    const [catRes,nicheRes,labelRes]=await Promise.all([
       fetch('/api/catalog').then(r=>r.json()),
       fetch('/api/niches').then(r=>r.json()).catch(()=>({niches:[]})),
+      fetch('/api/labels?kind=shelf').then(r=>r.ok?r.json():null).catch(()=>null),
     ]);
     const rows=catRes.catalog||[];
-    if(!rows.length){
-      status.textContent='каталог PrintFlow пуст — показан демо-набор + ручные';
+    const readyGroupData=labelRes&&labelRes.shelf_groups||[];
+    if(!rows.length&&!readyGroupData.length){
+      status.textContent='каталог PrintFlow пуст — демо можно выбрать отдельно';
       status.className='status err';
-      catalogItems=DEMO;
+      catalogItems=[];
       render(); return;
     }
-    status.textContent='каталог PrintFlow · '+rows.length+' позиций + '+loadCustom().length+' ручных';
+    const labelRows=labelRes&&labelRes.shelf||[];
+    const labelById=new Map(labelRows.map(item=>[String(item.id),item]));
+    const labelBySku=new Map(labelRows.filter(item=>item.sku).map(item=>[String(item.sku),item]));
+    const labelByBarcode=new Map(labelRows.filter(item=>item.barcode).map(item=>[String(item.barcode),item]));
+    catalogItems=normalize(rows,nicheRes.niches).map(item=>{
+      const label=labelById.get(String(item.id))||(item.sku&&labelBySku.get(String(item.sku)))||(item.barcode&&labelByBarcode.get(String(item.barcode)));
+      return label?{...item,sku:label.sku||item.sku||'',barcode:label.barcode||'',barcode_svg:label.barcode_svg||'',url:label.url||''}:item;
+    });
+    const readyGroups=readyGroupData.map(item=>({
+      ...item,id:String(item.id),is_group:true,notes:item.tag_note||'',sku:'',barcode_svg:'',
+    }));
+    catalogItems.push(...readyGroups);
+    const codeCount=[...labelById.values()].filter(item=>item.barcode_svg).length;
+    status.textContent='каталог PrintFlow · '+rows.length+' позиций, Code128 '+codeCount+' · '+loadCustom().length+' ручных';
     status.className='status ok';
-    catalogItems=normalize(rows, nicheRes.niches);
     render();
   }catch(e){
-    status.textContent='PrintFlow не отвечает — показан демо-набор + ручные';
+    status.textContent='PrintFlow не отвечает — демо можно выбрать отдельно';
     status.className='status err';
-    catalogItems=DEMO;
+    catalogItems=[];
     render();
   }
 }
@@ -361,7 +409,7 @@ function readManualForm(){
     id:($('m_id').value.trim()||'custom-'+Date.now()),
     name:($('m_name').value.trim()||'Без названия'),
     notes:($('m_notes').value.trim()||''),
-    price:Number($('m_price').value)||0,
+    price:$('m_price').value===''?null:Number($('m_price').value),
     material:($('m_material').value.trim()||''),
     grams:Number($('m_grams').value)||0,
     niche:($('m_niche').value.trim()||''),
@@ -381,13 +429,15 @@ $('btnApply').addEventListener('click', ()=>{
   if(selectedIndex<0){ alert('Сначала кликните по ценнику'); return; }
   const custom=loadCustom();
   const isCustomSelected=selectedIndex<custom.length;
+  const source=currentDisplay[selectedIndex]||{};
   const form=readManualForm();
+  const printData={sku:source.sku||'',barcode:source.barcode||'',barcode_svg:source.barcode_svg||'',url:source.url||''};
   if(isCustomSelected){
-    custom[selectedIndex]=form;
+    custom[selectedIndex]={...custom[selectedIndex],...form,...printData};
     saveCustom(custom);
   }else{
     // editing catalog item -> create custom copy
-    custom.unshift(form);
+    custom.unshift({...form,...printData});
     saveCustom(custom);
     selectedIndex=0;
   }
@@ -434,15 +484,19 @@ $('btnExport').addEventListener('click', ()=>{
 });
 
 ['src','size','markup','round','qron','blanks','showCity','qrbase','city'].forEach(id=>{
-  const el=$(id); if(el) el.addEventListener('change', render);
+  const el=$(id); if(el) el.addEventListener('change', ()=>{
+    if(id==='city'||id==='qrbase') saveContact({[id==='city'?'city':'qrbase']:el.value.trim()});
+    render();
+  });
 });
 $('reload').addEventListener('click', loadCatalog);
-$('print').addEventListener('click', ()=>window.print());
+$('print').addEventListener('click', ()=>{
+  if(printRecipes&&$('sheets').querySelector('.tag.recipe')) window.print();
+});
 
 function init(){
   const c=loadContact();
   if(c.city) $('city').value=c.city;
-  if(!c.city || c.city==='Москва'){ $('city').value='Симферополь'; saveContact({city:'Симферополь'}); }
   if(c.qrbase) $('qrbase').value=c.qrbase;
   if($('panelMark')) $('panelMark').src=`../assets/brand/nozza-mark-${loadLogo()}.svg`;
   // restore last manual form if any
@@ -461,6 +515,25 @@ function saveManualFormDraft(){
 });
 
 init();
-loadCatalog();
+async function loadPrintRecipes(){
+  const response=await fetch('../assets/print-layouts-v2.json',{cache:'no-store'});
+  if(!response.ok) throw new Error(`Не удалось загрузить реестр печатных форм (код ${response.status})`);
+  const spec=await response.json();
+  if(!spec||spec.units!=='mm'||!Array.isArray(spec.documents)) throw new Error('Неизвестный формат реестра печатных форм');
+  const ids=['tag-clean','promo-offer'];
+  printRecipes=Object.fromEntries(ids.map(id=>{
+    const recipe=spec.documents.find(entry=>entry.id===id);
+    if(!recipe||recipe.width_mm!==67||!Array.isArray(recipe.blocks)) throw new Error(`В реестре отсутствует макет ${id}`);
+    return [id,recipe];
+  }));
+}
+loadPrintRecipes().then(()=>{
+  $('print').disabled=false;
+  loadCatalog();
+}).catch(error=>{
+  $('status').textContent=error&&error.message||'Не удалось загрузить печатные макеты';
+  $('status').className='status err';
+  $('sheets').innerHTML=`<div class="sheet standard"><div class="empty">${esc(error&&error.message||'Не удалось загрузить печатные макеты')}</div></div>`;
+});
 </script>
 </body></html>

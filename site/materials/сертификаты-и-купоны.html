@@ -4,65 +4,22 @@
 <title>NOZZA — подарочные сертификаты и купоны</title>
 <link rel="icon" href="../assets/brand/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="generator.css?v=18.23.1">
+<link rel="stylesheet" href="../assets/nozza-design-v2.css?v=18.23.1">
 <style>
   .grid { display: flex; flex-wrap: wrap; gap: 5mm; align-content: flex-start; }
   .sheet-title { font-size: 11px; font-weight: 700; color: var(--ink-soft); letter-spacing: .06em; text-transform: uppercase; margin: 0 0 3mm; }
-  h3.block { font-size: 11px; color: var(--ink-soft); margin: 0 0 3mm; letter-spacing: .05em; text-transform: uppercase; }
-
-  /* ------------------------------------------------------------ сертификат */
-  .cert {
-    width: 186mm; height: 92mm; box-sizing: border-box;
-    border: 0.8mm solid var(--brand); border-radius: 4mm;
-    background:
-      radial-gradient(circle at 100% 0%, #eeecff 0 52mm, transparent 52mm),
-      radial-gradient(circle at 0% 100%, #f3f0ff 0 46mm, transparent 46mm),
-      #fff;
-    padding: 4mm 5mm 3.5mm; position: relative; overflow: hidden;
-    display: flex; flex-direction: column;
-    outline: 1px dashed #c8cfdf; outline-offset: 1.8mm;
-    page-break-inside: avoid; break-inside: avoid;
-  }
-  .cert .top { display: flex; align-items: center; gap: 3mm; }
-  .cert .top img { width: 10mm; height: 10mm; }
-  .cert .top .t { font-size: 13px; font-weight: 900; letter-spacing: .22em; color: var(--ink); }
-  .cert .top .n { margin-left: auto; font-size: 9px; color: var(--ink-soft); letter-spacing: .06em; }
-  .cert .mid { flex: 1; display: flex; align-items: center; gap: 6mm; padding: 0 2mm; }
-  .cert .amount { font-size: 54px; font-weight: 900; line-height: .95; letter-spacing: -.02em; color: var(--brand); white-space: nowrap; }
-  .cert .amount span { font-size: 24px; }
-  .cert .mid .about { flex: 1; min-width: 0; }
-  .cert .h { font-size: 10.5px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-soft); }
-  .cert .v { font-size: 13.5px; font-weight: 700; line-height: 1.35; margin-top: .8mm; }
-  .cert .qr { flex: none; background: #fff; }
-  .cert .qr svg { width: 24mm; height: 24mm; display: block; }
-  .cert .fine { display: flex; gap: 4mm; align-items: baseline; font-size: 8.5px; color: var(--ink-soft); line-height: 1.4; }
-  .cert .fine b { color: var(--ink); }
-  .cert .fine .code { font-size: 10px; font-weight: 800; letter-spacing: .12em; color: var(--brand); }
-
-  /* ------------------------------------------------------------------ купон */
-  .coupon {
-    width: 92mm; height: 50mm; box-sizing: border-box;
-    border-radius: 3mm; overflow: hidden; position: relative;
-    background: #fff; border: 1px solid var(--line);
-    display: flex; flex-direction: column;
-    outline: 1px dashed #c8cfdf; outline-offset: 1.8mm;
-    page-break-inside: avoid; break-inside: avoid;
-  }
-  .coupon .head {
-    background: linear-gradient(135deg, var(--brand), var(--brand-2)); color: #fff;
-    font-size: 9.5px; font-weight: 900; letter-spacing: .16em; text-transform: uppercase;
-    padding: 2mm 3.5mm; display: flex; align-items: center; gap: 2mm;
-  }
-  .coupon .head img { width: 5mm; height: 5mm; }
-  .coupon .body { flex: 1; padding: 2.5mm 3.5mm 2mm; display: flex; flex-direction: column; min-height: 0; }
-  .coupon .offer { font-size: 13px; font-weight: 900; line-height: 1.1; }
-  .coupon .cond { font-size: 7.5px; color: var(--ink-soft); line-height: 1.35; margin-top: 1mm; }
-  .coupon .foot { display: flex; align-items: flex-end; justify-content: space-between; gap: 2mm; margin-top: auto; }
-  .coupon .code {
-    border: 1px dashed var(--brand); border-radius: 2mm; color: var(--brand);
-    font-size: 10px; font-weight: 900; letter-spacing: .18em; padding: 1mm 2.5mm; white-space: nowrap;
-  }
-  .coupon .till { font-size: 7px; color: var(--ink-soft); text-align: right; line-height: 1.3; }
-  .coupon .qr svg { width: 13mm; height: 13mm; display: block; }
+  .layout-card { position:relative; flex:none; box-sizing:border-box; overflow:hidden; background:#fff; color:#31242e; font-family:Arial,sans-serif; -webkit-print-color-adjust:exact; print-color-adjust:exact; page-break-inside:avoid; break-inside:avoid; }
+  .layout-block { position:absolute; display:block; box-sizing:border-box; margin:0; white-space:pre-line; line-height:1.25; overflow:hidden; overflow-wrap:anywhere; font-family:Arial,sans-serif; }
+  .layout-block.logo { display:flex; align-items:flex-start; }
+  .layout-block.logo { display:flex; align-items:flex-start; }
+  .layout-block.logo img { display:block; width:100%; height:100%; object-fit:fill; }
+  .layout-block.qr { display:grid; place-items:center; border:.2mm solid #D9C8CE; color:#66555F; background:#fff; text-align:center; }
+  .layout-block.qr svg { display:block; width:100%; height:100%; }
+  .layout-block.qr.unavailable { border-color:transparent; }
+  .layout-block[data-block="amount"], .layout-block[data-block="code"] { white-space:nowrap; }
+  #printStatus { min-height:1.4em; margin-top:8px; font-size:12px; color:#66555F; }
+  #printStatus.error { color:#b42318; font-weight:700; }
+  @media print { .layout-card { outline:none !important; } }
 
   .editor { background: #f4f6fc; border: 1px solid #dde2ef; border-radius: 10px; padding: 12px 14px; margin-top: 10px; }
   .editor h3 { margin: 0 0 8px; font-size: 12px; letter-spacing: .04em; text-transform: uppercase; color: var(--ink-soft); }
@@ -71,48 +28,76 @@
   .editor label { font-size: 11.5px; color: var(--ink-soft); display: flex; align-items: center; gap: 6px; }
   .editor input { font: inherit; font-size: 12px; padding: 5px 8px; border: 1px solid var(--line); border-radius: 7px; background: #fff; color: var(--ink); }
   .editor input.wide { min-width: 250px; }
+  @media screen {
+    body.pf-utility { min-height:100vh; background:radial-gradient(900px 550px at 80% 0,rgba(181,43,255,.09),transparent 62%),#1D161F; color:#F8EEE6; color-scheme:dark; }
+    body.pf-utility .panel { position:relative; top:auto; background:linear-gradient(145deg,#302832,#211B25); border-color:#5B465C; box-shadow:0 8px 24px -18px rgba(0,0,0,.85); }
+    body.pf-utility .panel h1 { color:#F8EEE6; }
+    body.pf-utility .editor { border-color:#5B465C; border-radius:12px; background:linear-gradient(145deg,#2C232E,#241B25); }
+    body.pf-utility .editor h3 { color:#E2D2D9; }
+    body.pf-utility .editor label { color:#BFAFB7; }
+    body.pf-utility .editor input:not([type="checkbox"]) { border-color:#59445B; border-radius:8px; background:#241B25; color:#F8EEE6; }
+    body.pf-utility .editor input:focus-visible { outline:2px solid #D5AAFF; outline-offset:2px; }
+    body.pf-utility .note { border-color:rgba(244,188,128,.35); border-radius:8px; background:rgba(244,188,128,.1); color:#F4BC80; }
+    body.pf-utility .note b { color:#F4BC80; }
+    body.pf-utility #printStatus { color:#BFAFB7; }
+    body.pf-utility #printStatus.error { color:#FF929F; }
+    #sheets { overflow-x:auto; }
+    .layout-card { background:#fff; color:#31242e; }
+  }
+  @media screen and (max-width:640px) {
+    body.pf-utility .panel { padding:12px; }
+    body.pf-utility .panel .panel-row { align-items:flex-start; }
+    body.pf-utility .editor { padding:12px; }
+    body.pf-utility .editor .row { align-items:stretch; gap:10px; }
+    body.pf-utility .editor label { flex-wrap:wrap; }
+    body.pf-utility .editor input, body.pf-utility .editor input.wide { box-sizing:border-box; min-width:0!important; max-width:100%; min-height:40px; }
+  }
+  @media (prefers-reduced-motion:reduce) { *,*::before,*::after { scroll-behavior:auto!important; transition-duration:.01ms!important; animation-duration:.01ms!important; } }
 </style>
-</head><body>
+</head><body class="pf-utility">
 
 <div class="panel noprint">
   <div class="panel-row">
     <h1><img data-nz-mark src="../assets/brand/nozza-mark-1.svg" alt="">Сертификаты и купоны</h1>
     <div class="panel-row" data-nz-common="qr"></div>
+    <button class="btn primary" type="button" data-nz-print disabled>Печать</button>
   </div>
 
   <div class="editor">
     <h3>🎟 Сертификат — 2 на листе</h3>
     <div class="row">
-      <label>Номинал <input id="c_amount" data-page="c_amount" style="width:90px" value="3000"></label>
+      <label>Номинал <input id="c_amount" data-page="c_amount" style="width:90px" inputmode="decimal" placeholder="Номинал"></label>
       <label>Кому <input id="c_to" data-page="c_to" style="width:170px" placeholder="владельцу сертификата"></label>
-      <label>От кого <input id="c_from" data-page="c_from" style="width:150px" value="NOZZA"></label>
-      <label>Серия/№ <input id="c_code" data-page="c_code" style="width:110px" value="NZ 001"></label>
-      <label>Действует <input id="c_till" data-page="c_till" style="width:130px" value="до 24.02.2027"></label>
+      <label>От кого <input id="c_from" data-page="c_from" style="width:150px" placeholder="Имя отправителя"></label>
+      <label>Серия/№ <input id="c_code" data-page="c_code" style="width:110px" placeholder="Номер сертификата"></label>
+      <label>Действует <input id="c_till" data-page="c_till" style="width:130px" placeholder="Срок действия"></label>
     </div>
     <div class="row">
-      <label>На что <input id="c_for" data-page="c_for" class="wide" value="на любые изделия и печать по вашим размерам"></label>
+      <label>На что <input id="c_for" data-page="c_for" class="wide" placeholder="Назначение сертификата"></label>
+      <label>Условия <input id="c_cond" data-page="c_cond" class="wide" placeholder="Условия использования"></label>
       <label><input type="checkbox" id="c_qr" data-page="c_qr" checked> QR на сайт</label>
     </div>
 
     <h3 style="margin-top:12px">🏷 Купон — 8 на листе</h3>
     <div class="row">
-      <label>Оффер <input id="k_offer" data-page="k_offer" class="wide" value="−10% на первый заказ"></label>
-      <label>Код <input id="k_code" data-page="k_code" style="width:100px" value="NOZZA10"></label>
-      <label>Срок <input id="k_till" data-page="k_till" style="width:140px" value=""></label>
+      <label>Оффер <input id="k_offer" data-page="k_offer" class="wide" placeholder="Скидка / оффер"></label>
+      <label>Код <input id="k_code" data-page="k_code" style="width:100px" placeholder="Промокод"></label>
+      <label>Срок <input id="k_till" data-page="k_till" style="width:140px" placeholder="Срок действия"></label>
       <label><input type="checkbox" id="k_qr" data-page="k_qr" checked> QR</label>
     </div>
     <div class="row">
-      <label>Условия <input id="k_cond" data-page="k_cond" class="wide" style="min-width:420px" value="по одному купону на заказ · назвать код при заявке · суммируется с бесплатным расчётом"></label>
+      <label>Условия <input id="k_cond" data-page="k_cond" class="wide" style="min-width:420px" placeholder="Условия купона"></label>
       <label>Купонов <input id="k_count" data-page="k_count" type="number" min="1" max="8" style="width:64px" value="8"></label>
     </div>
   </div>
 </div>
 
 <div class="note noprint">
-  <b>Печать:</b> плотная бумага 200–300 г/м², масштаб 100 %. Сертификат — 2 на листе, купон — 8 на листе, рез по пунктиру. Номер сертификата меняйте для каждого экземпляра перед печатью — так проще учитывать проданные.
+  <b>Печать:</b> плотная бумага 200–300 г/м², масштаб 100 %. Сертификат — 2 на листе, купон — до 8 на листе. Номер сертификата укажите перед печатью, чтобы различать экземпляры.
 </div>
 
 <div id="sheets"></div>
+<div id="printStatus" class="noprint" role="status" aria-live="polite"></div>
 
 <script src="../assets/qr.js?v=18.23.1"></script>
 <script>window.QR_FALLBACK=1;if(!window.QR)window.QR={svg:function(){return '<div style="font-size:10px;color:#94a3b8">QR…</div>';}};</script>
@@ -121,69 +106,85 @@
 'use strict';
 const $ = (id) => document.getElementById(id);
 
-function dateAfter(days) {
-  const d = new Date(); d.setDate(d.getDate() + days);
-  return 'до ' + d.toLocaleDateString('ru-RU');
-}
-// Новая партия всегда получает понятную дату с годом. Сохранённые вручную
-// сроки NZ.mount вернёт из браузера и не перезапишет.
-const initialState = NZ.pageState({});
-if (initialState.c_till === undefined) $('c_till').value = dateAfter(365);
-if (initialState.k_till === undefined) $('k_till').value = dateAfter(45);
+let printLayouts = null;
+const mm = (value) => `${Number(value) || 0}mm`;
+const fieldValue = (id, placeholder) => $(id).value.trim() || placeholder;
 
-function certHtml() {
-  const qr = $('c_qr').checked ? NZ.qr(NZ.contact().site, { ecl: 'M', margin: 0 }) : '';
-  return `<div class="cert">
-    <div class="top">
-      <img src="${NZ.markSrc(false)}" alt="">
-      <div class="t">ПОДАРОЧНЫЙ СЕРТИФИКАТ</div>
-      <div class="n">№ ${NZ.esc($('c_code').value)} · ${NZ.esc(NZ.contact().city)}</div>
-    </div>
-    <div class="mid">
-      <div class="amount">${NZ.esc($('c_amount').value)} <span>₽</span></div>
-      <div class="about">
-        <div class="h">Кому</div><div class="v">${NZ.esc($('c_to').value || '—')}</div>
-        <div class="h" style="margin-top:1.6mm">От кого</div><div class="v">${NZ.esc($('c_from').value)}</div>
-        <div class="h" style="margin-top:1.6mm">На что</div><div class="v">${NZ.esc($('c_for').value)}</div>
-      </div>
-      ${qr ? `<div class="qr">${qr}</div>` : ''}
-    </div>
-    <div class="fine">
-      <span>Действует <b>${NZ.esc($('c_till').value)}</b>.</span>
-      <span>Не обменивается на деньги, остаток не возвращается, заказ и оплата — как обычно.</span>
-      <span class="code">NOZZA</span>
-    </div>
-  </div>`;
-}
-
-function couponHtml() {
-  const qr = $('k_qr').checked ? NZ.qr(NZ.contact().site, { ecl: 'M', margin: 0 }) : '';
-  return `<div class="coupon">
-    <div class="head"><img src="${NZ.markSrc(true)}" alt="">КУПОН NOZZA</div>
-    <div class="body">
-      <div class="offer">${NZ.esc($('k_offer').value)}</div>
-      <div class="cond">${NZ.esc($('k_cond').value)}</div>
-      <div class="foot">
-        <span class="code">${NZ.esc($('k_code').value)}</span>
-        ${qr ? `<div class="qr">${qr}</div>` : ''}
-        <span class="till">${NZ.esc($('k_till').value)}<br>NOZZA · ${NZ.esc(NZ.contact().city)}</span>
-      </div>
-    </div>
-  </div>`;
+function renderLayout(id, values, qrState) {
+  const spec = printLayouts?.documents?.find((item) => item.id === id);
+  if (!spec) return '';
+  const blocks = spec.blocks.map((block) => {
+    if (block.kind === 'qr' && qrState === 'off') return '';
+    const style = [
+      `left:${mm(block.x_mm)}`, `top:${mm(block.y_mm)}`,
+      `width:${mm(block.width_mm)}`, `height:${mm(block.height_mm)}`,
+      `font-size:${Number(block.font_pt) || 9}pt`,
+      `font-weight:${/bold/i.test(block.font || '') ? 700 : 400}`,
+      `line-height:${Number(block.line_height) || 1.25}`,
+      `color:${block.color || '#31242E'}`,
+      `background:${block.background || 'transparent'}`,
+      `text-align:${block.align || 'left'}`,
+      `padding:${mm(block.text_padding_mm)}`,
+      `border-radius:${mm(block.radius_mm)}`,
+    ].join(';');
+    let content = NZ.esc(values[block.id] ?? block.text ?? '');
+    let extraClass = '';
+    if (block.kind === 'logo') {
+      const crop = block.source_crop_px || [335, 253, 910, 326];
+      const cropName = crop.map((value) => Math.round(Number(value) || 0)).join('-');
+      content = `<img src="../assets/brand/nozza-print-crop-${cropName}.png" alt="NOZZA">`;
+    } else if (block.kind === 'qr') {
+      extraClass = qrState === 'unavailable' ? ' unavailable' : '';
+      content = qrState === 'ready'
+        ? NZ.qr(NZ.contact().qrbase.trim(), { ecl: 'M', margin: 1 })
+        : qrState === 'unavailable' ? '' : NZ.esc(block.text || 'QR\nместо кода').replace(/\n/g, '<br>');
+    }
+    return `<div class="layout-block ${block.kind}${extraClass}" data-block="${NZ.esc(block.id)}" style="${style}">${content}</div>`;
+  }).join('');
+  return `<div class="layout-card" data-layout="${id}" style="width:${mm(spec.width_mm)};height:${mm(spec.height_mm)}">${blocks}</div>`;
 }
 
 function draw() {
-  const n = Math.min(8, Math.max(1, Number($('k_count').value) || 8));
+  if (!printLayouts) return;
+  const site = NZ.contact().qrbase.trim();
+  const qrEnabled = $('c_qr').checked || $('k_qr').checked;
+  let validTarget = false;
+  try { validTarget = /^https?:$/.test(new URL(site).protocol); } catch (_) { /* empty or invalid URL */ }
+  const qrReady = !qrEnabled || (validTarget && typeof window.QR?.svg === 'function');
+  const qrState = !qrEnabled ? 'off' : qrReady ? 'ready' : 'unavailable';
+  const certValues = {
+    amount: fieldValue('c_amount', '[НОМИНАЛ]') + ' ₽',
+    fields: `Кому ${fieldValue('c_to', '[ИМЯ]')}\nОт кого ${fieldValue('c_from', '[ИМЯ]')}\nНа что ${fieldValue('c_for', '[НАЗНАЧЕНИЕ]')}`,
+    conditions: `№ ${fieldValue('c_code', '[НОМЕР]')} · ${fieldValue('c_till', '[СРОК]')} · ${fieldValue('c_cond', '[УСЛОВИЯ]')}`,
+  };
+  const couponValues = {
+    offer: fieldValue('k_offer', '[СКИДКА / ОФФЕР]'),
+    code: fieldValue('k_code', '[ПРОМОКОД]'),
+    conditions: [fieldValue('k_till', ''), fieldValue('k_cond', '')].filter(Boolean).join(' · ') || '[СРОК / УСЛОВИЯ]',
+  };
+  const copies = Math.min(8, Math.max(1, Number($('k_count').value) || 8));
+  const cert = renderLayout('certificate', certValues, $('c_qr').checked ? qrState : 'off');
+  const coupon = renderLayout('coupon', couponValues, $('k_qr').checked ? qrState : 'off');
   $('sheets').innerHTML =
-    `<div class="sheet">
-      <div class="sheet-title noprint">Сертификаты — 186 × 92 мм, рез по пунктиру</div>
-      <div class="grid">${certHtml()}${certHtml()}</div>
-    </div>
-    <div class="sheet">
-      <div class="sheet-title noprint">Купоны — 92 × 50 мм, рез по пунктиру</div>
-      <div class="grid">${Array.from({ length: n }, couponHtml).join('')}</div>
-    </div>`;
+    `<div class="sheet"><div class="sheet-title noprint">Сертификаты — 186 × 92 мм</div><div class="grid">${cert}${cert}</div></div>` +
+    `<div class="sheet"><div class="sheet-title noprint">Купоны — 92 × 50 мм</div><div class="grid">${Array.from({ length: copies }, () => coupon).join('')}</div></div>`;
+
+  const overflow = [...$('sheets').querySelectorAll('.layout-block:not(.logo):not(.qr)')]
+    .filter((block) => block.scrollWidth > block.clientWidth + 1 || block.scrollHeight > block.clientHeight + 1);
+  const printButton = document.querySelector('[data-nz-print]');
+  printButton.disabled = overflow.length > 0 || !qrReady;
+  const status = $('printStatus');
+  const message = !qrReady
+    ? 'QR включён, но ссылка или генератор недоступны. Настройте ссылку либо отключите QR.'
+    : overflow.length ? 'Текст выходит за границы макета. Сократите отмеченные поля перед печатью.' : '';
+  status.textContent = message;
+  status.classList.toggle('error', !!message);
 }
+
+fetch('../assets/print-layouts-v2.json', { cache: 'no-store' })
+  .then((response) => { if (!response.ok) throw new Error('layout'); return response.json(); })
+  .then((data) => { printLayouts = data; draw(); })
+  .catch(() => { $('printStatus').textContent = 'Не удалось загрузить print-layouts-v2.json. Печать недоступна.'; $('printStatus').classList.add('error'); });
 
 NZ.mount(draw);
 </script>

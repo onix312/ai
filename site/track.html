@@ -47,15 +47,16 @@
  .err { margin-top:14px; padding:11px; border-radius:10px; background:rgba(214,58,58,.12); color:#d63a3a; font-size:13px; font-weight:600; }
 </style>
 <link rel="stylesheet" href="assets/refine.css?v=18.23.1">
+<link rel="stylesheet" href="/assets/nozza-design-v2.css?v=20.1.38">
 </head>
-<body class="pf-public">
+<body class="pf-public pf-track-page">
 <div class="wrap">
  <div class="logo">NOZZA<small>Там, где рождается форма</small></div>
  <p class="sub">Проверьте статус вашего заказа</p>
- <div class="card">
+ <div class="card track-card">
   <label>Номер заказа<input id="number" inputmode="numeric" placeholder="Например: 1001"></label>
   <label>Ключ ссылки из Telegram<input id="token" type="password" autocomplete="off" placeholder="Заполняется автоматически"></label>
-  <p style="margin-top:9px;color:var(--muted);font-size:11.5px;line-height:1.4">Для защиты заказов номер и телефон не являются кодом доступа. Откройте эту страницу кнопкой «Статус онлайн» в клиентском боте.</p>
+  <p class="track-help">Для защиты заказов номер и телефон не являются кодом доступа. Откройте эту страницу кнопкой «Статус онлайн» в клиентском боте.</p>
   <button class="btn" id="check" type="button">Проверить статус</button>
   <div class="result" id="result"></div>
  </div>

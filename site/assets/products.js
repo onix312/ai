@@ -8,8 +8,11 @@ const U = PF.ui, { $, $$, esc, num, money, nfmt, hoursText, dateText, dateTimeTe
 const { get, post } = PF.api;
 
 let data = { items: [], summary: {}, groups: [], warehouses: [], priceTypes: [], printGroups: [] };
+let productsDataReady = false;
 let docsData = [];
+let docsDataReady = false;
 let batchData = [];
+let batchesDataReady = false;
 let editingNom = null;
 let editingNomUpdatedAt = '';
 let editingDoc = null;
@@ -118,6 +121,13 @@ async function refresh() {
       warehouses: res.warehouses || [], priceTypes: res.price_types || [],
       printGroups: res.print_groups || [],
     };
+    productsDataReady = true;
+    const grid = $('prod_grid');
+    if (grid) {
+      grid.classList.remove('products-stale');
+      const note = grid.querySelector('.products-stale-note');
+      if (note) note.remove();
+    }
     fillSelectors();
     const pgList = $('print_groups_datalist');
     if (pgList) {
@@ -126,7 +136,18 @@ async function refresh() {
     if (document.querySelector('#view-products.on')) render();
     updateTags();
     PF.emit('nomenclature', data);
-  } catch (e) { /* офлайн */ }
+  } catch (e) {
+    if (document.querySelector('#view-products.on') && !productsDataReady) render();
+    else if (productsDataReady) {
+      const grid = $('prod_grid');
+      if (grid) {
+        grid.classList.add('products-stale');
+        if (!grid.querySelector('.products-stale-note')) {
+          grid.insertAdjacentHTML('afterbegin', '<div class="products-stale-note">Нет связи с PrintFlow · показаны последние загруженные данные</div>');
+        }
+      }
+    }
+  }
 }
 PF.refreshProducts = refresh;
 
@@ -138,9 +159,12 @@ async function refreshDocs() {
       search: ($('doc_search') || {}).value || '',
     });
     docsData = res.documents || [];
+    docsDataReady = true;
     if (document.querySelector('#view-documents.on')) renderDocs();
     updateTags();
-  } catch (e) { /* офлайн */ }
+  } catch (e) {
+    if (document.querySelector('#view-documents.on') && !docsDataReady) renderDocs();
+  }
 }
 
 async function refreshBatches() {
@@ -148,9 +172,12 @@ async function refreshBatches() {
     const state = (document.querySelector('#batch_filter button.on') || {}).dataset;
     const res = await get('/api/batches', { state: (state && state.state) || '' });
     batchData = res.batches || [];
+    batchesDataReady = true;
     if (document.querySelector('#view-batches.on')) renderBatches();
     updateTags();
-  } catch (e) { /* офлайн */ }
+  } catch (e) {
+    if (document.querySelector('#view-batches.on') && !batchesDataReady) renderBatches();
+  }
 }
 
 function updateTags() {
@@ -305,6 +332,26 @@ function filtered() {
 
 function render() {
   const s = data.summary || {};
+  if (!productsDataReady) {
+    $('prod_kpis').innerHTML = [
+      kpi('Позиций', '—', 'нет связи с данными'),
+      kpi('На складах', '—', 'остаток неизвестен'),
+      kpi('Запас в рублях', '—', 'стоимость неизвестна'),
+      kpi('Продано за 7 дней', '—', 'период недоступен'),
+      kpi('Нужно напечатать', '—', 'потребность неизвестна'),
+      kpi('Мёртвый сток', '—', 'данные недоступны'),
+    ].join('');
+    $('prod_grid').hidden = false;
+    $('prod_table').hidden = true;
+    $('prod_grid').innerHTML = '<div class="empty compact products-offline-state"><span class="big">⚠</span><b>Данные каталога недоступны</b><span>Остатки, цены и состав товаров пока неизвестны. Восстановите связь с PrintFlow и повторите загрузку.</span><button class="btn sm" type="button" data-products-retry>↻ Повторить</button></div>';
+    $('prod_tbody').innerHTML = '';
+    const retry = document.querySelector('[data-products-retry]');
+    if (retry && !retry.dataset.bound) {
+      retry.dataset.bound = '1';
+      retry.addEventListener('click', () => refresh());
+    }
+    return;
+  }
   $('prod_kpis').innerHTML = [
     kpi('Позиций', nfmt(s.goods), `${nfmt(s.items)} всего в справочнике`),
     kpi('На складах', `${nfmt(s.qty)} шт`, `${nfmt(s.reserved)} шт в резерве`),
@@ -1385,6 +1432,22 @@ async function saveNom() {
 
 /* ============================================================== партии */
 function renderBatches() {
+  if (!batchesDataReady) {
+    $('batch_kpis').innerHTML = [
+      kpi('Активных партий', '—', 'данные недоступны'),
+      kpi('Готово', '—', 'выпуск неизвестен'),
+      kpi('Брак', '—', 'данные недоступны'),
+      kpi('Себестоимость выпуска', '—', 'данные недоступны'),
+    ].join('');
+    $('batch_sub').textContent = 'Партии недоступны';
+    $('batch_list').innerHTML = '<div class="empty compact batches-offline-state"><span class="big">⚠</span><b>Не удалось загрузить партии</b><span>Планы, прогресс выпуска и приёмка будут показаны после подключения PrintFlow.</span><button class="btn sm" type="button" data-batches-retry>↻ Повторить</button></div>';
+    const retry = document.querySelector('[data-batches-retry]');
+    if (retry && !retry.dataset.bound) {
+      retry.dataset.bound = '1';
+      retry.addEventListener('click', () => refreshBatches());
+    }
+    return;
+  }
   const active = batchData.filter((b) => b.state === 'printing' || b.state === 'planned');
   const done = batchData.filter((b) => b.state === 'done');
   const planned = active.reduce((sum, b) => sum + num(b.qty_planned) - num(b.qty_done), 0);
@@ -1730,6 +1793,15 @@ async function wizardFinish() {
 }
 
 function renderDocs() {
+  if (!docsDataReady) {
+    $('doc_tbody').innerHTML = '<tr><td colspan="9"><div class="empty compact documents-offline-state" role="status"><span class="big">⚠</span><b>Не удалось загрузить документы</b><span>Список и статусы документов появятся после подключения PrintFlow.</span><button class="btn sm" type="button" data-documents-retry>↻ Повторить</button></div></td></tr>';
+    const retry = document.querySelector('[data-documents-retry]');
+    if (retry && !retry.dataset.bound) {
+      retry.dataset.bound = '1';
+      retry.addEventListener('click', () => refreshDocs());
+    }
+    return;
+  }
   $('doc_tbody').innerHTML = docsData.length ? docsData.map((d) => {
     const posted = d.state === 'posted';
     const ic = DOC_ICONS[d.kind] || '📋';
@@ -1742,7 +1814,7 @@ function renderDocs() {
       + `<td class="right tnum">${nfmt(d.qty_total)}</td>`
       + `<td class="right tnum">${num(d.amount) ? money(d.amount) : '—'}</td>`
       + `<td><span class="chip ${posted ? 'ok' : 'warn'}">${posted ? '✓ Проведён' : '✎ Черновик'}</span></td>`
-      + `<td class="right"><button class="icon-btn sm" type="button" data-doc-open="${esc(d.id)}">→</button></td></tr>`;
+      + `<td class="right"><button class="icon-btn sm" type="button" data-doc-open="${esc(d.id)}" title="Открыть документ №${esc(d.number || '')}" aria-label="Открыть документ №${esc(d.number || '')}">→</button></td></tr>`;
   }).join('') : `<tr><td colspan="9">${emptyBox('▤', 'Документов нет',
     'Скажите, что произошло — приход, продажа или пересчёт.',
     { label: '+ Что произошло', click: 'doc_add' })}</td></tr>`;
@@ -1995,8 +2067,25 @@ const WH_KIND = { shelf: 'Полка магазина', home: 'Домашний 
 const WH_ICONS = { shelf: '🏬', home: '🏠', window: '🪟', defect: '⚠', transit: '🚚', material: '🧶', other: '📦' };
 
 async function renderWarehouses() {
-  let res = { warehouses: [], reserves: [], reserved: 0 };
-  try { res = await get('/api/warehouses', {}); } catch (e) { /* офлайн */ }
+  let res;
+  try { res = await get('/api/warehouses', {}); } catch (e) {
+    $('wh_kpis').innerHTML = [
+      kpi('Складов', '—', 'данные недоступны'),
+      kpi('Всего штук', '—', 'остаток неизвестен'),
+      kpi('Запас в рублях', '—', 'оценка недоступна'),
+      kpi('В резерве', '—', 'данные недоступны'),
+    ].join('');
+    $('wh_grid').innerHTML = '<div class="empty compact warehouses-offline-state"><span class="big">⚠</span><b>Не удалось загрузить склады</b><span>Остатки, обороты и резервы появятся после подключения PrintFlow.</span><button class="btn sm" type="button" data-warehouses-retry>↻ Повторить</button></div>';
+    $('turn_sub').textContent = 'Обороты недоступны';
+    $('turn_tbody').innerHTML = '<tr><td colspan="8"><div class="empty compact">Оборотно-сальдовая ведомость недоступна без данных склада.</div></td></tr>';
+    $('wo_sub').textContent = 'Списания недоступны';
+    $('wh_writeoffs').innerHTML = '<div class="empty compact">История списаний недоступна без подключения.</div>';
+    $('wh_reserves').innerHTML = '<div class="empty compact">Резервы недоступны без подключения.</div>';
+    const retry = document.querySelector('[data-warehouses-retry]');
+    if (retry) retry.addEventListener('click', () => renderWarehouses());
+    return;
+  }
+  res = res || { warehouses: [], reserves: [], reserved: 0 };
   const list = res.warehouses || [];
   const totalQty = list.reduce((s, w) => s + num(w.qty), 0);
   const totalValue = list.reduce((s, w) => s + num(w.value), 0);

@@ -182,6 +182,8 @@ function renderRules(rules, runs) {
 
 /* ============================================================= загрузка */
 async function load() {
+  const simulate = $('ops10_simulate_queue');
+  if (simulate) simulate.disabled = true;
   try {
     const [head, body] = await Promise.all([
       get('/api/ops10/overview'),
@@ -194,11 +196,19 @@ async function load() {
     renderInbox(overview.inbox || []);
     renderRules(overview.rules || [], overview.rule_runs || []);
     renderProduction();
+    if (simulate) simulate.disabled = false;
   } catch (e) {
-    const host = $('ops10_inbox');
-    if (host) {
-      render(host, html`<div class="notice bad"><span>✕</span><span>${e && e.message ? e.message : 'Не удалось загрузить данные'}</span></div>`);
-    }
+    const detail = e && e.message ? e.message : 'Не удалось загрузить данные';
+    const message = (title) => html`<div class="empty compact"><b>${title}</b><span>${detail}</span></div>`;
+    render($('ops10_pipeline'), STAGE_ORDER.map((key) => html`
+      <div class="kpi"><small>${STAGES[key]}</small><b>—</b><span>Нет связи с данными</span></div>`).join(''));
+    render($('ops10_printers'), message('Состояние оборудования недоступно'));
+    render($('ops10_planfact'), ['Завершено', 'Факт', 'Пластик', 'Брак/сбой']
+      .map((label) => html`<span class="tag">${label}: —</span>`).join(''));
+    render($('ops10_production_list'), message('План и очередь недоступны'));
+    render($('ops10_inbox'), message('Не удалось загрузить обращения'));
+    render($('ops10_rules'), message('Правила недоступны'));
+    render($('ops10_runs'), message('История проверок недоступна'));
   }
 }
 

@@ -12,6 +12,7 @@
 <meta name="color-scheme" content="light dark">
 <title>NOZZA · станок</title>
 <link rel="stylesheet" href="assets/tokens.css?v=18.23.1">
+<link rel="stylesheet" href="assets/nozza-design-v2.css?v=20.1.35">
 <style>
  /* 13.1 (Б6): палитра больше не своя — общие токены tokens.css
     (data-theme="dark" на <html>). Ниже только правила самой страницы. */
@@ -44,9 +45,23 @@
    padding:10px 16px; border-radius:10px; font-size:13px; font-weight:650; box-shadow:0 8px 30px -10px rgba(0,0,0,.6);
    opacity:0; pointer-events:none; transition:opacity .2s; }
  .msg.on { opacity:1; }
+ /* terminal-m.jpg: phone-first workshop controls use the cold terminal palette. */
+ html[data-theme] body.pf-utility.pf-machine-page {
+   --bg:#0B121B;--bg-2:#101A25;--panel:#16212E;--panel-2:#1C2A39;--panel-3:#243548;
+   --line:#2D4052;--line-soft:#243548;--line-strong:#425B72;--text:#F2F6FB;--text-2:#D5E0EB;--muted:#A0B2C5;
+   --accent:#818CF8;--accent-2:#6D78E8;--accent-soft:rgba(129,140,248,.16);--accent-line:rgba(155,164,255,.5);
+   --ok:#50CBA5;--warn:#F3C66B;--bad:#FB8EA4;color-scheme:dark;color:#F2F6FB;background:#0B121B;
+ }
+ body.pf-utility.pf-machine-page .card { background:#16212E;border-color:#2D4052;border-radius:14px;box-shadow:none; }
+ body.pf-utility.pf-machine-page .btn { min-height:88px;background:#16212E;border-color:#2D4052;border-radius:14px; }
+ body.pf-utility.pf-machine-page .btn.primary { background:#818CF8;border-color:#929BFF;color:#fff;box-shadow:none; }
+ body.pf-utility.pf-machine-page .btn.danger { background:#FB7185;border-color:#FB7185;color:#fff; }
+ body.pf-utility.pf-machine-page .btn:disabled { opacity:.45;cursor:not-allowed; }
+ body.pf-utility.pf-machine-page .cam { border:1px solid #2D4052; }
+ body.pf-utility.pf-machine-page :focus-visible { outline:2px solid #A5AEFF;outline-offset:2px; }
 </style>
 </head>
-<body>
+<body class="pf-utility pf-machine-page">
 <div class="wrap">
  <div class="top"><img src="assets/brand/nozza-mark-white.svg" alt=""><div><b>NOZZA · станок</b><small>управление с телефона</small></div></div>
 
@@ -62,7 +77,7 @@
  </div>
 
  <div class="card" id="lowBox" hidden>
-  <div class="order" style="padding-top:0"><div class="t"><b>Пластик</b><small>ниже порога</small></div></div>
+  <div class="order" style="padding-top:0"><div class="t"><b>Пластик</b><small id="lowHint">ниже порога</small></div></div>
   <div id="lows"></div>
  </div>
 
@@ -98,6 +113,11 @@
   function renderOps(d){
     ops = d || {};
     var p = ops.printer || {};
+    var online = !!p.id;
+    document.body.dataset.connection = online ? 'online' : 'unknown';
+    document.querySelectorAll('.grid .btn').forEach(function(button){
+      if (button.id !== 'b_cam') button.disabled = !online;
+    });
     var running = ['RUNNING','PREPARE'].indexOf(p.state) >= 0;
     $('#state').textContent = (p.name || 'Принтер') + ' — ' + (p.state_label || p.state || 'нет связи')
       + (running ? ' · ' + Math.round(num(p.progress)) + '%' : '')
@@ -120,7 +140,7 @@
         + '<small>' + (o.due ? 'срок ' + o.due : 'без срока')
         + (o.customer_name ? ' · ' + o.customer_name : '') + '</small></div>'
         + '<button data-fulfill="' + o.id + '">Выдать</button></div>';
-    }).join('') : '<div class="order"><div class="t"><small>Готовых к выдаче нет.</small></div></div>';
+    }).join('') : '<div class="order"><div class="t"><small>' + (ops._offline ? 'Нет связи — список заказов недоступен.' : 'Готовых к выдаче нет.') + '</small></div></div>';
     var lows = [];
     (ops.ams_low || []).forEach(function(t){
       lows.push((t.label || 'слот') + ' · ' + Math.round(num(t.remain)) + '%');
@@ -129,19 +149,32 @@
       lows.push((s.material || '') + ' ' + (s.color_name || '') + ' · ' + Math.round(num(s.remaining_grams)) + ' г');
     });
     $('#lowBox').hidden = !lows.length;
+    $('#lowHint').textContent = lows.length ? 'ниже порога' : 'сейчас всё в норме';
     $('#lows').innerHTML = lows.map(function(x){ return '<div class="low">' + x + '</div>'; }).join('');
   }
 
   function refresh(){
-    fetch('/api/ops/today').then(function(r){ return r.json(); }).then(renderOps).catch(function(){
-      fetch('/api/state').then(function(r){ return r.json(); }).then(function(d){
+    fetch('/api/ops/today').then(function(r){ if(!r.ok) throw new Error('offline'); return r.json(); }).then(renderOps).catch(function(){
+      fetch('/api/state').then(function(r){ if(!r.ok) throw new Error('offline'); return r.json(); }).then(function(d){
         var p = (d.printers || [])[0] || d.active || {};
         var info = p.printer || {};
+        ops = {printer: p.id ? p : (info.id ? info : {}), _offline: !p.id && !info.id};
+        document.body.dataset.connection = ops._offline ? 'offline' : 'online';
+        document.querySelectorAll('.grid .btn').forEach(function(button){ if(button.id !== 'b_cam') button.disabled = ops._offline; });
         $('#state').textContent = (p.name || 'Принтер') + ' — ' + (info.state_label || info.state || '—');
         if (p.camera && p.camera.available) {
           $('#cam').src = '/api/printer/camera.jpg?printer_id=' + encodeURIComponent(p.id) + '&t=' + Date.now();
         }
-      }).catch(function(){});
+      }).catch(function(){
+        ops = {_offline:true};
+        document.body.dataset.connection = 'offline';
+        document.querySelectorAll('.grid .btn').forEach(function(button){ if(button.id !== 'b_cam') button.disabled = true; });
+        $('#state').textContent = 'Нет связи с принтером — данные и управление недоступны';
+        $('#orders').innerHTML = '<div class="order"><div class="t"><small>Нет связи — список заказов недоступен.</small></div></div>';
+        $('#lowBox').hidden = false;
+        $('#lowHint').textContent = 'данные недоступны';
+        $('#lows').innerHTML = '<div class="low">Остатки пластика недоступны без связи.</div>';
+      });
     });
   }
 

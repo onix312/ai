@@ -49,8 +49,33 @@
  .msg.on { opacity:1; }
 </style>
 <link rel="stylesheet" href="assets/refine.css?v=18.23.1">
+<link rel="stylesheet" href="/assets/nozza-design-v2.css?v=20.1.35">
+<style>
+@media screen {
+ body.pf-utility.pf-bank-page { --bg:#0B121B;--panel:#16212E;--line:#2D4052;--text:#F2F6FB;--muted:#A0B2C5;--ok:#50CBA5;--warn:#F3C66B;--bad:#FB8EA4;--accent:#818CF8;min-height:100vh;background:#0B121B;color:#F2F6FB; }
+ body.pf-utility.pf-bank-page .wrap { max-width:748px;padding:18px 14px 44px; }
+ body.pf-utility.pf-bank-page .card { padding:14px;border:1px solid #2D4052;border-radius:16px;background:#16212E;color:#F2F6FB;box-shadow:none; }
+ body.pf-utility.pf-bank-page .card h3 { color:#F2F6FB; }
+ body.pf-utility.pf-bank-page .top small,body.pf-utility.pf-bank-page .muted,body.pf-utility.pf-bank-page .hint { color:#A0B2C5; }
+ body.pf-utility.pf-bank-page .row { border-color:#2D4052; }
+ body.pf-utility.pf-bank-page textarea,body.pf-utility.pf-bank-page input { min-height:46px;border-color:#2D4052;border-radius:11px;background:#1E2B3A;color:#F2F6FB; }
+ body.pf-utility.pf-bank-page .btn { min-height:42px;padding:10px 13px;border-radius:10px; }
+ body.pf-utility.pf-bank-page .btn.ok { background:#50CBA5;color:#10251F; }
+ body.pf-utility.pf-bank-page .btn.warn { background:#F3C66B;color:#38290A; }
+ body.pf-utility.pf-bank-page .btn.bad { background:#FB8EA4;color:#39131C; }
+ body.pf-utility.pf-bank-page .btn.ghost { border:1px solid #2D4052;background:#1E2B3A;color:#F2F6FB; }
+ body.pf-utility.pf-bank-page .badge.confirmed { background:rgba(80,203,165,.16);color:#50CBA5; }
+ body.pf-utility.pf-bank-page .badge.matched { background:rgba(129,140,248,.18);color:#A5B4FC; }
+ body.pf-utility.pf-bank-page .badge.review { background:rgba(243,198,107,.17);color:#F3C66B; }
+ body.pf-utility.pf-bank-page .badge.unmatched { background:rgba(251,142,164,.15);color:#FB8EA4; }
+ body.pf-utility.pf-bank-page .badge.new { background:#243547;color:#A0B2C5; }
+ body.pf-utility.pf-bank-page .empty.unavailable { padding:22px 12px;border:2px solid #2D4052;border-radius:0;background:transparent;color:#A0B2C5; }
+ body.pf-utility.pf-bank-page .msg { background:#16212E;color:#F2F6FB;border:1px solid #2D4052; }
+}
+@media (max-width:420px) { body.pf-utility.pf-bank-page .wrap { padding:16px 12px 34px; } }
+</style>
 </head>
-<body class="pf-utility">
+<body class="pf-utility pf-bank-page">
 <div class="wrap">
  <div class="top">
   <img src="assets/brand/nozza-mark-white.svg" alt="">
@@ -80,13 +105,13 @@
 <script>
 "use strict";
 var $ = function (id) { return document.getElementById(id); };
-var state = { review: [], recent: [], auto: true, pins: false };
+var state = { review: null, recent: null, auto: true, pins: false };
 
 function toast(t) { var m = $("msg"); m.textContent = t; m.classList.add("on");
   clearTimeout(toast._t); toast._t = setTimeout(function(){ m.classList.remove("on"); }, 3000); }
 function esc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
   return { "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]; }); }
-function money(v) { var n = Number(v) || 0; return (Math.round(n*100)/100).toLocaleString("ru-RU") + " ₽"; }
+function money(v) { if (v == null || v === "") return "—"; var n = Number(v); return isFinite(n) ? (Math.round(n*100)/100).toLocaleString("ru-RU") + " ₽" : "—"; }
 function api(path, body) {
   return fetch(path, { method: body ? "POST" : "GET",
     headers: body ? { "Content-Type":"application/json" } : {},
@@ -111,18 +136,31 @@ function rowHtml(r) {
     '<div style="display:flex;gap:6px">' + linkBtn + confirmBtn + "</div></div>";
 }
 function render() {
+  if (!Array.isArray(state.review)) {
+    $("reviewCount").textContent = "· —";
+    $("review").innerHTML = '<div class="empty unavailable">Сверка недоступна. Проверьте подключение к PrintFlow.</div>';
+  } else {
   $("reviewCount").textContent = state.review.length ? ("· " + state.review.length) : "";
   $("review").innerHTML = state.review.length ? state.review.map(rowHtml).join("")
     : '<div class="empty">Нет поступлений на сверке</div>';
-  $("recent").innerHTML = state.recent.length ? state.recent.slice(0, 15).map(rowHtml).join("")
-    : '<div class="empty">Поступлений пока нет</div>';
+  }
+  if (!Array.isArray(state.recent)) {
+    $("recent").innerHTML = '<div class="empty unavailable">История выписки недоступна. Проверьте подключение к PrintFlow.</div>';
+  } else {
+    $("recent").innerHTML = state.recent.length ? state.recent.slice(0, 15).map(rowHtml).join("")
+      : '<div class="empty">Поступлений пока нет</div>';
+  }
 }
 function load() {
   api("/api/bank/state").then(function (s) {
     state.review = s.pending_review || []; state.recent = s.recent || []; state.auto = !!s.auto_confirm;
     state.pins = !!s.pins_required;
     render();
-  }).catch(function (e) { toast("Ошибка: " + e.message); });
+  }).catch(function (e) {
+    state.review = null; state.recent = null;
+    render();
+    toast("Нет связи с PrintFlow: " + e.message);
+  });
 }
 // Право на деньги: когда в «Команде» заведены PIN, панель обязана спросить его.
 function askPin(what) {

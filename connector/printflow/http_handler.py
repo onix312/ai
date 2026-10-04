@@ -387,51 +387,11 @@ class Handler(UploadMixin, BaseHTTPRequestHandler):
 
     def serve_pack_sheet(self, order_id: str):
         """Печатная карточка упаковки (A4, 1:1)."""
-        import html as _html
+        from .printing import pack_sheet_html
+
         data = self.api._pack_data(order_id)
-        o = data["order"]
-        h = lambda v: _html.escape("" if v is None else str(v))
-        rows = ""
-        for it in data["items"]:
-            rows += (f"<tr><td>{h(it.get('name') or o['product'])}</td>"
-                     f"<td>{h(it.get('qty') or '')}</td></tr>")
-        if not rows:
-            rows = f"<tr><td>{h(o['product'])}</td><td>{h(o['qty'])}</td></tr>"
-        brand = ("<li>Бренд-карточка NOZZA (идея 42)</li>"
-                 if data["brand_card"] else "")
-        html = f"""<!DOCTYPE html><html lang="ru"><head><meta charset="utf-8">
-<title>Карточка упаковки — заказ №{o['number']}</title>
-<style>
-  @page {{ size: A4; margin: 8mm; }}
-  body {{ font-family: Arial, sans-serif; color: #131a2b; }}
-  .sheet {{ width: 194mm; margin: 0 auto; }}
-  h1 {{ font-size: 18pt; margin: 0 0 2mm; }}
-  .meta {{ color: #6b7280; font-size: 10pt; margin-bottom: 4mm; }}
-  table {{ border-collapse: collapse; width: 100%; margin-bottom: 5mm; }}
-  td, th {{ border: 1px solid #d1d5db; padding: 2.5mm 3mm; font-size: 11pt; }}
-  th {{ background: #f3f4f6; text-align: left; }}
-  .check {{ list-style: none; padding: 0; margin: 0; }}
-  .check li {{ font-size: 12pt; margin-bottom: 2.5mm; }}
-  .check li:before {{ content: "☐ "; color: #4f46e5; font-weight: bold; }}
-  .foot {{ margin-top: 6mm; font-size: 9pt; color: #6b7280; }}
-  @media print {{ .noprint {{ display: none; }} }}
-</style></head><body><div class="sheet">
-  <button class="noprint" onclick="window.print()"
-    style="font-size:11pt;padding:4px 14px;margin-bottom:4mm;cursor:pointer">⎙ Печать</button>
-  <h1>Карточка упаковки · заказ №{o['number']}</h1>
-  <div class="meta">Клиент: {o['customer_name'] or '—'} · NOZZA · PrintFlow</div>
-  <table><tr><th>Изделие</th><th>Кол-во</th></tr>{rows}</table>
-  <h3 style="font-size:12pt">Что положить</h3>
-  <ul class="check">
-    <li>Изделие (проверено по чек-листу качества)</li>
-    {brand}
-    <li>Бирка с названием и QR (если есть)</li>
-    <li>Упаковка: плёнка/коробка, вложение — бумага, не воздух</li>
-    <li>Если заказ подарок — без ценника</li>
-  </ul>
-  <div class="foot">Сформировано автоматически · {time.strftime('%d.%m.%Y %H:%M')}</div>
-</div></body></html>"""
-        self._send_bytes(html.encode("utf-8"), "text/html; charset=utf-8")
+        self._send_bytes(pack_sheet_html(data).encode("utf-8"),
+                         "text/html; charset=utf-8")
 
     def serve_order_photo(self, photo_id: str):
         """Фото заказа по id записи order_photos."""

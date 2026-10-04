@@ -4,6 +4,7 @@
 <title>NOZZA — таблички зон на полке</title>
 <link rel="icon" href="../assets/brand/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="generator.css?v=18.23.1">
+<link rel="stylesheet" href="../assets/nozza-design-v2.css?v=18.23.1">
 <style>
   .grid { display: flex; flex-direction: column; gap: 6mm; }
   .sheet-title { font-size: 11px; font-weight: 700; color: var(--ink-soft); letter-spacing: .06em; text-transform: uppercase; margin: 0 0 3mm; }
@@ -47,6 +48,44 @@
   .chip { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; background: #fff; border: 1px solid var(--line); border-radius: 20px; padding: 3px 10px; }
   .chip b { font-weight: 800; color: var(--brand); }
   .btn.danger { background: #fef2f2; border-color: #f4b4b4; color: #b42318; }
+
+  /* Screen-only editor follows the shared NOZZA v2 tool surface; the paper stays white. */
+  body { background: #1b171d; color: #f5f0f5; }
+  .panel { position: static; background: #211c23; border-color: #3a303e; box-shadow: none; }
+  .panel h1, .editor h3 { color: #f5f0f5; }
+  .editor { background: #29232c; border-color: #403747; }
+  .editor label, .editor h3 { color: #d8cddd; }
+  .editor input, .editor select { background: #1b171d; color: #f5f0f5; border-color: #51465a; }
+  .chip { background: #332b37; color: #f5f0f5; border-color: #51465a; }
+  .zone { width: var(--zone-w, 186mm); min-height: var(--zone-h, 78mm); height: var(--zone-h, 78mm); border: 0; border-radius: 0; background: #fff; color: #31242e; }
+  .zone:hover { box-shadow: none; }
+  .zone.selected { outline: 2px solid #8d4be8; outline-offset: 2px; }
+  body:not([data-recipe="zone"]) .zone { visibility: hidden; }
+  .zone .side { position: relative; width: var(--zone-side-w, 42mm); padding: 0; display: block; background: #f6f0f8; color: #31242e; }
+  .zone .side .ico { display: none; }
+  .zone .side .n { display: none; }
+  .zone .side .mark { position: absolute; left: var(--zone-logo-x, 4mm); top: var(--zone-logo-y, 30mm); width: var(--zone-logo-w, 34mm); height: var(--zone-logo-h, 15mm); margin: 0; object-fit: contain; }
+  .zone .body { padding: 0; position: relative; }
+  .zone .body .t, .zone .body .tag, .zone .body .d, .zone .body .ex { position: absolute; margin: 0; overflow: hidden; }
+  .zone .body .t { left: var(--zone-title-x, 6mm); top: var(--zone-title-y, 8mm); width: var(--zone-title-w, 130mm); height: var(--zone-title-h, 17mm); padding: 1mm; font: 700 var(--zone-title-pt, 23pt)/1.25 Arial,sans-serif; letter-spacing: 0; text-transform: none; white-space: nowrap; color: #31242e; }
+  .zone .body .tag { left: var(--zone-tag-x, 6mm); top: var(--zone-tag-y, 28mm); width: var(--zone-tag-w, 130mm); height: var(--zone-tag-h, 10mm); padding: 1mm; font: 700 var(--zone-tag-pt, 12pt)/1.25 Arial,sans-serif; white-space: nowrap; color: #6e2bc8; }
+  .zone .body .d { left: var(--zone-desc-x, 6mm); top: var(--zone-desc-y, 42mm); width: var(--zone-desc-w, 130mm); height: var(--zone-desc-h, 28mm); padding: 1mm; font: var(--zone-desc-pt, 10pt)/1.25 Arial,sans-serif; color: #31242e; }
+  .zone .body .ex { display: none; }
+  .zone .body .d::after { content: attr(data-examples); display: block; }
+  #sheets { padding: 1px 0 24px; overflow-x: auto; }
+  #sheets .sheet { margin: 24px auto; }
+  @media (max-width: 800px) { #sheets .sheet { margin-left: 12px; margin-right: 12px; } }
+  @media print {
+    body { background: #fff; color: #31242e; }
+    .zone { width: 186mm; min-height: 78mm; height: 78mm; }
+    .zone.selected { outline: 0; }
+  }
+  @media (max-width: 640px) {
+    .editor .row { align-items: stretch; }
+    .editor input, .editor input.wide { min-width: 0 !important; width: min(100%, 270px); }
+    .editor label { flex-wrap: wrap; }
+  }
+  @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; } }
 </style>
 </head><body>
 
@@ -120,16 +159,16 @@ function load() {
 function save() { NZ.pageStateSave({ [LS_KEY]: items }); }
 
 function renderZone(s, idx) {
-  return `<div class="zone${idx === selected ? ' selected' : ''}" data-idx="${idx}" title="Клик — править">
-    <div class="side z-${s.theme || 'brand'}">
-      <div class="ico">${NZ.esc(s.ico || '')}</div>
+  return `<div class="zone${idx === selected ? ' selected' : ''}" data-idx="${idx}" title="Клик — править" aria-label="Редактировать зону ${NZ.esc(s.name || '')}" tabindex="0">
+    <div class="side">
+      <div class="ico" aria-hidden="true">${NZ.esc(s.ico || '')}</div>
       <div class="n">${NZ.esc(s.name || '')}</div>
-      <img class="mark" src="${NZ.markSrc(true)}" alt="">
+      <img class="mark" src="../assets/brand/nozza-print-crop-335-253-910-326.png" alt="NOZZA">
     </div>
     <div class="body">
       <div class="t">${NZ.esc(s.name || '')}</div>
       <div class="tag">${NZ.esc(s.tag || '')}</div>
-      <div class="d">${NZ.esc(s.desc || '')}</div>
+      <div class="d" data-examples="${NZ.esc(s.ex || '')}">${NZ.esc(s.desc || '')}</div>
       <div class="ex"><b>Примеры:</b> ${NZ.esc(s.ex || '')}</div>
     </div>
   </div>`;
@@ -151,6 +190,9 @@ function draw() {
     </div>`).join('');
   host.querySelectorAll('.zone[data-idx]').forEach((el) => {
     el.addEventListener('click', () => select(Number(el.dataset.idx)));
+    el.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); select(Number(el.dataset.idx)); }
+    });
   });
 }
 
@@ -202,5 +244,30 @@ $('btnReset').addEventListener('click', () => {
 
 load();
 NZ.mount(draw);
+fetch('../assets/print-layouts-v2.json', { cache: 'no-store' }).then((r) => {
+  if (!r.ok) throw new Error('layout');
+  return r.json();
+}).then((data) => {
+  const recipe = (data.documents || []).find((d) => d.id === 'zone');
+  if (!recipe || recipe.width_mm !== 186 || recipe.height_mm !== 78 || recipe.blocks.length !== 5 || recipe.blocks.some((b) => b.x_mm < 0 || b.y_mm < 0 || b.x_mm + b.width_mm > recipe.width_mm || b.y_mm + b.height_mm > recipe.height_mm)) throw new Error('recipe');
+  const css = document.documentElement.style;
+  const set = (name, value) => css.setProperty(`--zone-${name}`, `${value}mm`);
+  const byId = Object.fromEntries(recipe.blocks.map((block) => [block.id, block]));
+  set('w', recipe.width_mm); set('h', recipe.height_mm); set('side-w', byId.side.width_mm);
+  set('logo-x', byId['side-word'].x_mm); set('logo-y', byId['side-word'].y_mm); set('logo-w', byId['side-word'].width_mm); set('logo-h', byId['side-word'].height_mm);
+  for (const id of ['title', 'tag', 'desc']) {
+    const block = byId[id];
+    set(`${id}-x`, block.x_mm - byId.side.width_mm); set(`${id}-y`, block.y_mm); set(`${id}-w`, block.width_mm); set(`${id}-h`, block.height_mm);
+    css.setProperty(`--zone-${id}-pt`, `${block.font_pt}pt`);
+  }
+  document.body.dataset.recipe = 'zone';
+}).catch(() => {
+  document.body.dataset.recipe = 'unavailable';
+  document.querySelectorAll('.zone').forEach((el) => { el.hidden = true; });
+  const status = document.createElement('p');
+  status.className = 'note noprint';
+  status.textContent = 'Геометрия zone не загрузилась; таблички скрыты, чтобы не печатать неверный размер.';
+  document.body.append(status);
+});
 </script>
 </body></html>

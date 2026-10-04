@@ -34,6 +34,7 @@ let conveyorSpools = [];
 let conveyorModels = [];
 let prepFile = null;
 let prepSliced = null;
+let testCleanAvailable = false;
 
 let timelineBlocks = [
   {type:'cool', bed:0, nozzle:0},
@@ -115,17 +116,32 @@ let testCleanPrinter='';
 function testCleanSelectable(p){ const connected=!!(p.connection&&p.connection.connected); const state=String((p.printer&&p.printer.state)||'').toUpperCase(); return connected&&(state==='IDLE'||state==='FINISH'); }
 async function loadTestCleanPrinters(){
   const sel=$('cv_test_clean_printer'); if(!sel) return;
-  let printers=[]; try{ const state=await get('/api/state'); printers=Array.isArray(state.printers)?state.printers:[]; }catch{ sel.innerHTML='<option value="">Станок: первый свободный</option>'; sel.disabled=true; return; }
-  sel.disabled=false; const opts=['<option value="">Станок: первый свободный</option>'];
-  printers.forEach(p=>{ const id=String(p.id||''); if(!id) return; const free=testCleanSelectable(p); const stateLabel=String((p.printer&&(p.printer.state_label||p.printer.state))||'нет связи'); opts.push(`<option value="${esc(id)}">${esc(p.name||id)} — ${esc(stateLabel)} ${free?'✓':'·'}</option>`); });
-  sel.innerHTML=opts.join(''); sel.value=printers.some(p=>String(p.id||'')===testCleanPrinter)?testCleanPrinter:''; testCleanPrinter=sel.value;
+  const btn=$('cv_test_clean_btn');
+  let printers=[];
+  try{ const state=await get('/api/state'); printers=Array.isArray(state.printers)?state.printers:[]; }
+  catch{ testCleanAvailable=false; sel.innerHTML='<option value="">Станки недоступны</option>'; sel.disabled=true; if(btn) btn.disabled=true; return; }
+  const available=printers.filter(testCleanSelectable);
+  testCleanAvailable=available.length>0;
+  sel.disabled=!testCleanAvailable;
+  const opts=['<option value="">Первый свободный станок</option>'];
+  printers.forEach(p=>{
+    const id=String(p.id||''); if(!id) return;
+    const free=testCleanSelectable(p);
+    const stateLabel=String((p.printer&&(p.printer.state_label||p.printer.state))||'нет связи');
+    opts.push(`<option value="${esc(id)}"${free?'':' disabled'}>${esc(p.name||id)} — ${esc(stateLabel)} ${free?'✓':'·'}</option>`);
+  });
+  sel.innerHTML=opts.join('');
+  sel.value=available.some(p=>String(p.id||'')===testCleanPrinter)?testCleanPrinter:'';
+  testCleanPrinter=sel.value;
+  if(btn) btn.disabled=!testCleanAvailable;
 }
 async function handleTestClean(){
+  if(!testCleanAvailable) return;
   const sel=$('cv_test_clean_printer'); const printerId=(sel&&sel.value)||''; const where=printerId?`на выбранном станке (${(sel.options[sel.selectedIndex]||{}).text||printerId})`:'на первом свободном станке';
   const msg='Проверьте, что стол свободен, сопло остыло, корзина установлена.\n\nЗапустить тестовый проход толкателя по шаблону FarmLoop '+where+'?';
   if(!confirmDanger(msg)) return;
   const btn=$('cv_test_clean_btn'); if(btn) btn.disabled=true;
-  try{ const payload={confirmed:true}; if(printerId) payload.printer_id=printerId; const res=await post('/api/farmloop/test-clean', payload); toast('Тестовая очистка стола',`Команд: ${res.executed_commands} на «${res.printer}»`); await Promise.all([loadConveyorHistory(), loadTestCleanPrinters()]); }catch(e){ fail(e); loadTestCleanPrinters(); } finally{ if(btn) btn.disabled=false; }
+  try{ const payload={confirmed:true}; if(printerId) payload.printer_id=printerId; const res=await post('/api/farmloop/test-clean', payload); toast('Тестовая очистка стола',`Команд: ${res.executed_commands} на «${res.printer}»`); await Promise.all([loadConveyorHistory(), loadTestCleanPrinters()]); }catch(e){ fail(e); loadTestCleanPrinters(); } finally{ if(btn) btn.disabled=!testCleanAvailable; }
 }
 
 /* конструктор */

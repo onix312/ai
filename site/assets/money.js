@@ -19,12 +19,18 @@ function kpi(label, value, sub, kind, extra) {
 
 function renderFinance() {
   const data = PF.state.finance;
-  if (!data) return;
+  if (!data) {
+    if (PF.offline) $('fin_kpis').innerHTML = [
+      'Доход', 'Расход', 'Прибыль', 'Прибыль за час печати',
+      'Часы печати', 'Брак', 'Ждём оплату', 'Склад пластика',
+    ].map((label) => kpi(label, '—', 'Нет связи с данными')).join('');
+    return;
+  }
   const s = data.summary || {};
   const target = num(PF.state.settings.target_profit_per_hour, 250);
   const perHour = num(s.profit_per_print_hour);
   $('fin_kpis').innerHTML = [
-    kpi('Доход', money(s.income), `за ${s.period_days} дн.`, 'ok'),
+    kpi('Доход', money(s.income), `за ${s.period_days} дн.`),
     kpi('Расход', money(s.expense), 'пластик, энергия, закупки'),
     kpi('Прибыль', money(s.profit), `маржа ${pct(s.margin)}`, num(s.profit) >= 0 ? 'ok' : 'bad'),
     kpi('Прибыль за час печати', money(perHour), `норма от ${money(target)}`,
@@ -80,13 +86,20 @@ function renderFinance() {
 
 /* ============================================================== склад */
 function renderStock() {
+  if (!PF.dataReady && PF.offline) {
+    renderStockUnavailable();
+    $('spool_grid').innerHTML = '<div class="empty"><span class="big">⚠</span>'
+      + '<b>Не удалось загрузить склад</b>'
+      + '<span>Катушки, остатки и резервы будут показаны после подключения PrintFlow.</span></div>';
+    return;
+  }
   const spools = PF.state.spools || [];
   const totalG = spools.reduce((a, s) => a + num(s.remaining_grams), 0);
   const value = spools.reduce((a, s) => a + num(s.value), 0);
   const low = spools.filter((s) => num(s.percent) < num(PF.state.settings.filament_low_threshold, 15));
   const materials = new Set(spools.map((s) => s.material)).size;
   $('stock_kpis').innerHTML = [
-    kpi('Остаток пластика', nfmt(totalG) + ' г', `${spools.length} катушек`),
+    kpi('Остаток пластика', nfmt(totalG) + ' г', `${nfmt(spools.length)} катушек`),
     kpi('Стоимость запаса', money(value), 'по цене закупки'),
     kpi('Заканчиваются', String(low.length), `порог ${nfmt(PF.state.settings.filament_low_threshold, 0)}%`, low.length ? 'warn' : 'ok'),
     kpi('Материалов', String(materials), 'разных типов'),
@@ -564,6 +577,11 @@ async function runCalc() {
 
   // предварительный текст — до ответа сервера (без поддержек/продувки)
   $('calc_batch_sub').textContent = `${nfmt(v.qty)} шт · ${Math.ceil(v.qty / v.fit)} плит(а/ы) · ожидание расчёта…`;
+  $('calc_price').textContent = '…';
+  $('calc_profit_rows').innerHTML = '';
+  $('calc_verdict').className = 'verdict';
+  $('calc_verdict').textContent = 'Считаем себестоимость, цену и прибыль…';
+  $('calc_rows').innerHTML = '<div class="notice compact">Ожидание ответа PrintFlow…</div>';
 
   let br;
   try {
@@ -581,7 +599,15 @@ async function runCalc() {
       model_prep_minutes: v.model_prep_minutes,
     });
   } catch (e) {
+    $('calc_batch_sub').textContent = 'Ожидание подключения к PrintFlow';
     $('calc_rows').innerHTML = `<div class="notice bad"><span>✕</span><span>${esc(e.message)}</span></div>`;
+    $('calc_price').textContent = '—';
+    $('calc_profit_rows').innerHTML = '';
+    $('calc_verdict').className = 'verdict';
+    $('calc_verdict').textContent = 'Расчёт недоступен: подключите PrintFlow, чтобы получить цену и прибыль.';
+    $('calc_min_batch').innerHTML = '';
+    $('calc_scenarios').innerHTML = '';
+    $('calc_payback').innerHTML = '';
     return;
   }
 
@@ -1928,13 +1954,29 @@ function bind() {
 }
 
 /* =============================================================== старт */
-PF.on('ready', () => { loadFilamentStats(); loadShopping(); loadCalcMaterials(); bind(); restoreCalc(); _spoolCatalogMaterials(); });
+PF.on('ready', () => {
+  loadFilamentStats(); loadShopping(); loadCalcMaterials(); bind(); restoreCalc(); _spoolCatalogMaterials();
+  if (PF.viewOn('inventory') && !PF.dataReady && PF.offline) renderStock();
+});
 PF.on('data', PF.whenView(['inventory', 'calc'], () => { renderStock(); renderCatalog(); }));
 PF.on('finance', PF.whenView(['inventory', 'calc', 'finance'], renderFinance));
 PF.on('view', (d) => {
   if (d.view === 'calc') runCalc();
-  if (d.view === 'inventory' && PF.dataReady) { renderStock(); renderCatalog(); }
+  if (d.view === 'inventory') {
+    if (PF.dataReady) { renderStock(); renderCatalog(); }
+    else renderStockUnavailable();
+  }
 });
+PF.on('connection', () => { if (PF.viewOn('inventory') && !PF.dataReady) renderStockUnavailable(); });
+
+function renderStockUnavailable() {
+  $('stock_kpis').innerHTML = [
+    'Остаток пластика', 'Стоимость запаса', 'Заканчиваются', 'Материалов',
+  ].map((label) => kpi(label, '—', 'Нет связи с данными')).join('');
+  $('spool_grid').innerHTML = '<div class="empty"><span class="big">⚠</span>'
+    + '<b>Не удалось загрузить склад</b>'
+    + '<span>Катушки, остатки и резервы будут показаны после подключения PrintFlow.</span></div>';
+}
 
 // ------------------------------------------------------- экспорт расчёта
 function exportCalc() {

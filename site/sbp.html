@@ -52,8 +52,32 @@
    .qrbox { position:absolute; inset:0; align-items:center; } }
 </style>
 <link rel="stylesheet" href="assets/refine.css?v=18.23.1">
+<link rel="stylesheet" href="/assets/nozza-design-v2.css?v=20.1.35">
+<style>
+@media screen {
+ body.pf-utility.pf-sbp-page { --bg:#0B121B;--panel:#16212E;--line:#2D4052;--text:#F2F6FB;--muted:#A0B2C5;--ok:#50CBA5;--warn:#F3C66B;--bad:#FB8EA4;--accent:#818CF8;min-height:100vh;background:#0B121B;color:#F2F6FB; }
+ body.pf-utility.pf-sbp-page .wrap { max-width:740px;padding:18px 14px 44px; }
+ body.pf-utility.pf-sbp-page .card { padding:14px;border:1px solid #2D4052;border-radius:16px;background:#16212E;color:#F2F6FB;box-shadow:none; }
+ body.pf-utility.pf-sbp-page .card h3 { color:#F2F6FB; }
+ body.pf-utility.pf-sbp-page .top small,body.pf-utility.pf-sbp-page .muted,body.pf-utility.pf-sbp-page .hint { color:#A0B2C5; }
+ body.pf-utility.pf-sbp-page .row { border-color:#2D4052; }
+ body.pf-utility.pf-sbp-page input { min-height:46px;border-color:#2D4052;border-radius:11px;background:#1E2B3A;color:#F2F6FB; }
+ body.pf-utility.pf-sbp-page .btn { min-height:42px;padding:10px 13px;border-radius:10px; }
+ body.pf-utility.pf-sbp-page .btn.ok { background:#50CBA5;color:#10251F; }
+ body.pf-utility.pf-sbp-page .btn.warn { background:#F3C66B;color:#38290A; }
+ body.pf-utility.pf-sbp-page .btn.bad { background:#FB8EA4;color:#39131C; }
+ body.pf-utility.pf-sbp-page .btn.ghost { border:1px solid #2D4052;background:#1E2B3A;color:#F2F6FB; }
+ body.pf-utility.pf-sbp-page .badge.pending { background:rgba(243,198,107,.17);color:#F3C66B; }
+ body.pf-utility.pf-sbp-page .badge.confirmed { background:rgba(80,203,165,.16);color:#50CBA5; }
+ body.pf-utility.pf-sbp-page .badge.rejected { background:rgba(251,142,164,.15);color:#FB8EA4; }
+ body.pf-utility.pf-sbp-page .badge.new,body.pf-utility.pf-sbp-page .badge.refunded { background:#243547;color:#A0B2C5; }
+ body.pf-utility.pf-sbp-page .empty.unavailable { padding:22px 12px;border:2px solid #2D4052;border-radius:0;background:transparent;color:#A0B2C5; }
+ body.pf-utility.pf-sbp-page .msg { background:#16212E;color:#F2F6FB;border:1px solid #2D4052; }
+}
+@media (max-width:420px) { body.pf-utility.pf-sbp-page .wrap { padding:16px 12px 34px; } }
+</style>
 </head>
-<body class="pf-utility">
+<body class="pf-utility pf-sbp-page">
 <div class="wrap">
  <div class="top">
   <img src="assets/brand/nozza-mark-white.svg" alt="">
@@ -95,7 +119,7 @@
 <script>
 "use strict";
 var $ = function (id) { return document.getElementById(id); };
-var state = { orderId: "", debt: 0, pending: [], recent: [], pins: false };
+var state = { orderId: "", debt: 0, pending: null, recent: null, pins: false };
 
 // Право на деньги: когда в «Команде» заведены PIN, панель спрашивает его —
 // иначе любой запрос из LAN записал бы выручку или возврат (Касса 16.0,
@@ -123,7 +147,7 @@ function toast(text) {
 }
 function esc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
   return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); }
-function money(v) { var n = Number(v) || 0; return (Math.round(n * 100) / 100) + " ₽"; }
+function money(v) { if (v == null || v === "") return "—"; var n = Number(v); return isFinite(n) ? (Math.round(n * 100) / 100) + " ₽" : "—"; }
 
 function api(path, body) {
   return fetch(path, {
@@ -144,6 +168,11 @@ function badge(status) {
 
 function renderPending() {
   var box = $("pending");
+  if (!Array.isArray(state.pending)) {
+    $("pendingCount").textContent = "· —";
+    box.innerHTML = '<div class="empty unavailable">Входящие платежи недоступны. Проверьте подключение к PrintFlow.</div>';
+    return;
+  }
   $("pendingCount").textContent = state.pending.length ? ("· " + state.pending.length) : "";
   if (!state.pending.length) { box.innerHTML = '<div class="empty">Нет платежей, ожидающих сверки</div>'; return; }
   box.innerHTML = state.pending.map(function (p) {
@@ -160,6 +189,10 @@ function renderPending() {
 
 function renderRecent() {
   var box = $("recent");
+  if (!Array.isArray(state.recent)) {
+    box.innerHTML = '<div class="empty unavailable">История платежей недоступна. Проверьте подключение к PrintFlow.</div>';
+    return;
+  }
   if (!state.recent.length) { box.innerHTML = '<div class="empty">Платежей пока нет</div>'; return; }
   box.innerHTML = state.recent.map(function (p) {
     var refund = p.status === "confirmed"
@@ -225,10 +258,15 @@ function load() {
     renderPending();
     renderRecent();
     renderSettings(s.settings || {});
-  }).catch(function (e) { toast("Ошибка: " + e.message); });
+  }).catch(function (e) {
+    state.pending = null; state.recent = null;
+    renderPending(); renderRecent();
+    $("settings").textContent = "Настройки СБП недоступны без подключения к PrintFlow.";
+    toast("Нет связи с PrintFlow: " + e.message);
+  });
   // Платёжный QR на примере 1000 ₽: видно, что именно покажет касса.
   api("/api/payment/qr?amount=1000&purpose=" + encodeURIComponent("Оплата в магазине"))
-    .then(renderPaymentQr).catch(function () {});
+    .then(renderPaymentQr).catch(function () { $("qrInfo").textContent = "Платёжные настройки и QR недоступны без подключения к PrintFlow."; });
 }
 
 $("orderNum").addEventListener("change", function () {

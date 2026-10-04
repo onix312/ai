@@ -183,7 +183,7 @@ class B2BDocumentTests(PrintGroupBase):
         ])
         html = B2B(self.db).document(order["id"], "waybill", group=False)
         self.assertEqual(html.count("Адресник"), 1)
-        self.assertIn(">2</td>", html)  # количество сложилось
+        self.assertRegex(html, r'data-block="cell-0-1"[^>]*>2</div>')  # количество сложилось
 
     def test_fractional_qty_not_truncated(self):
         bulk = self._nom("Крепёж набор", 100)
@@ -198,7 +198,7 @@ class B2BDocumentTests(PrintGroupBase):
         html = B2B(self.db).document(order["id"], "waybill")
         self.assertIn("1 200", html)       # итог — цена заказа
         self.assertNotIn("3 600", html)    # а не price × qty
-        self.assertIn(">400</td>", html)   # цена штуки — итог/количество
+        self.assertRegex(html, r'data-block="cell-0-2"[^>]*>400</div>')
 
 
 class ForOrderFoldTests(PrintGroupBase):

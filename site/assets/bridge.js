@@ -380,17 +380,23 @@ PF.on('live', ()=>{
   renderHealthBadge();
 });
 PF.on('view', (d)=>{
-  if (d.view==='printers'){
+  if (d.view==='printers' || d.view==='settings'){
     // обновить watch статус
     get('/api/watch/status').then(data=>{
       const el=$('watch_status');
       if (el) el.innerHTML=`<span>ℹ</span><span>Watch Folder ${data.enabled?'вкл':'выкл'} · путь <code>${esc(data.path||'')}</code> · ожидают ${data.pending||0}</span>`;
-    }).catch(()=>{});
+    }).catch(()=>{
+      const el=$('watch_status');
+      if (el) el.innerHTML='<span>⚠</span><span>Статус Watch Folder недоступен без подключения к PrintFlow.</span>';
+    });
     get('/api/studio/status').then(data=>{
       const el=$('studio_status');
       if (!el) return;
       el.innerHTML=`<span>ℹ</span><span>Шлюз ${data.enabled?'вкл':'выкл'} · режим <b>${esc(data.mode||'confirm')}</b> · ${data.running?'слушает LAN':'без сокетов'} · ${esc(data.name||'')} · ${esc(data.serial||'нет SN')} · MQTT :${data.mqtt_port||8883}</span>`;
-    }).catch(()=>{});
+    }).catch(()=>{
+      const el=$('studio_status');
+      if (el) el.innerHTML='<span>⚠</span><span>Статус шлюза Bambu Studio недоступен без подключения к PrintFlow.</span>';
+    });
   }
 });
 

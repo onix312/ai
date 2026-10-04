@@ -77,6 +77,13 @@ class ValidateTests(unittest.TestCase):
         self.assertEqual(clean["backup_keep"], 200)
         self.assertTrue(any("выше максимума" in w for w in warnings))
 
+    def test_warranty_months_can_be_saved_and_is_bounded(self):
+        clean, warnings, unknown = validate({"warranty_months": "12"})
+        self.assertEqual((clean["warranty_months"], warnings, unknown), (12, [], []))
+        clean, warnings, unknown = validate({"warranty_months": 121})
+        self.assertEqual((clean["warranty_months"], unknown), (120, []))
+        self.assertTrue(any("выше максимума" in item for item in warnings))
+
     def test_non_numeric_falls_back_to_default_with_warning(self):
         clean, warnings, _ = validate({"backup_keep": "много"})
         self.assertEqual(clean["backup_keep"], DEFAULT_SETTINGS["backup_keep"])

@@ -10,6 +10,7 @@ const { get, post } = PF.api;
 let editingShelf = null;
 let editingGroup = null;
 let shelfData = { items: [], summary: {}, moves: [], tags: {}, forecast: [], head: null, cash: null, groups: [] };
+let shelfDataReady = false;
 let stockGoods = [];
 let shelfFilter = { q: '', status: '', linkedOnly: false };
 const GROUP_STATUS_LABEL = {
@@ -68,10 +69,13 @@ async function refreshShelf() {
       tags: tags || {}, forecast: forecast.items || [], head: head || null,
       cash: cash || null, groups: data.groups || [],
     };
+    shelfDataReady = true;
     if (document.querySelector('#view-shelf.on')) renderShelf();
     updateNavTag();
     PF.emit('shelf', shelfData);
-  } catch (e) { /* офлайн */ }
+  } catch (e) {
+    if (document.querySelector('#view-shelf.on') && !shelfDataReady) renderShelf();
+  }
 }
 PF.refreshShelf = refreshShelf;
 
@@ -118,6 +122,31 @@ function variantChip(i) {
   return `<span class="chip outline variant-chip" title="Вариация товара">${dot}${esc(label)}</span>`;
 }
 function renderShelf() {
+  if (!shelfDataReady) {
+    $('shelf_kpis').classList.add('shelf-unavailable');
+    $('shelf_pulse_all').textContent = '—';
+    $('shelf_pulse_low').textContent = '—';
+    $('shelf_pulse_empty').textContent = '—';
+    $('shelf_pulse_needs').textContent = '—';
+    $('shelf_pulse_dead').textContent = '—';
+    $('shelf_kpis').innerHTML = [
+      shelfKpi('Штук на стеллаже', '—', 'остаток неизвестен'),
+      shelfKpi('Остаток в рублях', '—', 'оценка недоступна'),
+      shelfKpi('Продано сегодня', '—', 'данные недоступны'),
+      shelfKpi('Продано за 7 дней', '—', 'период недоступен'),
+      shelfKpi('Мёртвый сток', '—', 'данные недоступны'),
+      shelfKpi('План пополнения', '—', 'потребность неизвестна'),
+    ].join('');
+    $('shelf_grid').innerHTML = '<div class="empty compact shelf-offline-state"><span class="big">⚠</span><b>Не удалось загрузить стеллаж</b><span>Остатки, продажи и прогноз появятся после подключения PrintFlow.</span><button class="btn sm" type="button" data-shelf-retry>↻ Повторить</button></div>';
+    $('shelf_moves').innerHTML = '<div class="empty compact">История движений недоступна без подключения.</div>';
+    $('shelf_cash_mini').innerHTML = '<div class="empty compact">Данные кассы стеллажа недоступны без подключения.</div>';
+    $('shelf_cash_mini_list').innerHTML = '';
+    $('shelf_groups_list').innerHTML = '<div class="empty compact">Группы витрины недоступны без подключения.</div>';
+    const retry = document.querySelector('[data-shelf-retry]');
+    if (retry) retry.addEventListener('click', () => refreshShelf());
+    return;
+  }
+  $('shelf_kpis').classList.remove('shelf-unavailable');
   const s = shelfData.summary || {};
   renderShelfPulse();
   const head = shelfData.head;
@@ -168,7 +197,7 @@ function renderShelf() {
       + (i.photo ? `<img class="sphoto" src="/api/shelf/photo.jpg?id=${esc(i.id)}&t=${esc(i.updated_at || '')}" alt="">`
         : `<span class="sphoto ph">◻</span>`)
       + `<div class="sinfo"><h3>${esc(i.name)}${variantChip(i)}${liveBadgeFor(i.id)}${i.group_name ? `<span class="chip outline" title="Группа витрины">▦ ${esc(i.group_name)}</span>` : ''}</h3>`
-      + `<small class="muted">${i.barcode ? `1С ✓ · ${esc(i.barcode)}` : '1С: код не задан'} · ${tagFormatLabel(i.tag_template)} · ${tagVariantLabel(i.tag_variant)}${i.tag_badge ? ' · ' + esc(i.tag_badge) : ''}${i.group_name ? ' · средний ценник группы' : ''}</small>`
+      + `<small class="muted">${i.barcode ? `1С ✓ · ${esc(i.barcode)}` : '<span class="shelf-code-missing">1С: код не задан</span>'} · ${tagFormatLabel(i.tag_template)} · ${tagVariantLabel(i.tag_variant)}${i.tag_badge ? ' · ' + esc(i.tag_badge) : ''}${i.group_name ? ' · средний ценник группы' : ''}</small>`
       + (i.note ? `<small class="muted">${esc(i.note)}</small>` : '') + `</div>`
       + `<button class="icon-btn sm" type="button" data-shelf-edit="${esc(i.id)}" title="Изменить">✎</button></div>`
       + `<div class="sbody">`
@@ -191,8 +220,8 @@ function renderShelf() {
       + (num(i.qty) > 0 && i.nom_id
         ? `<button class="btn sm ghost" type="button" data-shelf-return="${esc(i.id)}">↩ На склад</button>`
         : '')
-      + `<button class="btn sm" type="button" data-shelf-sell="${esc(i.id)}">−1</button>`
-      + `<button class="btn sm" type="button" data-shelf-prod="${esc(i.id)}">+</button>`
+      + `<button class="btn sm" type="button" data-shelf-sell="${esc(i.id)}" title="Продать 1 штуку и уменьшить остаток">Продать −1</button>`
+      + `<button class="btn sm" type="button" data-shelf-prod="${esc(i.id)}" title="Оформить приход одной штуки">Приход +1</button>`
       + `</div></article>`;
   }).join('') : `<div class="empty" style="grid-column:1/-1"><span class="big">▤</span><b>${(shelfData.items || []).length ? 'Ничего не найдено' : 'На стеллаже пока пусто'}</b><span>${emptyText}</span>${emptyCta}</div>`;
 

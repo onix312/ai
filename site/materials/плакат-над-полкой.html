@@ -1,71 +1,142 @@
-<!DOCTYPE html>
-<html lang="ru"><head><meta charset="utf-8">
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark">
 <title>NOZZA — плакат над полкой</title>
+<link rel="icon" href="../assets/brand/favicon.svg" type="image/svg+xml">
 <style>
-  @page { size: A4 portrait; margin: 0; }
-  * { box-sizing:border-box; margin:0; padding:0; }
-  body { font-family:"Segoe UI", Arial, sans-serif; }
-  .sheet { width:210mm; height:297mm; padding:14mm 13mm; display:flex; flex-direction:column;
-           color:#12203c; background:
-           radial-gradient(circle at 88% 6%, #e8eefc 0 42%, transparent 42%),
-           radial-gradient(circle at 6% 96%, #eaf6ee 0 30%, transparent 30%), #fff; }
-  .brandrow { display:flex; align-items:center; gap:4mm; margin-bottom:2mm; }
-  .brandrow img { width:15mm; height:15mm; flex:none; }
-  .brandrow .bname { font-size:20pt; font-weight:900; letter-spacing:3px; color:#1f3864; line-height:1; }
-  .brandrow .btag { font-size:8.5pt; letter-spacing:2px; text-transform:uppercase; color:#5a6a8a; margin-top:1.5mm; }
-  .kicker { font-size:13pt; letter-spacing:5px; text-transform:uppercase; color:#5a6a8a; font-weight:700; }
-  h1 { font-size:45pt; line-height:.97; font-weight:900; letter-spacing:-2px; margin:4mm 0 3mm; }
-  h1 .accent { color:#1f3864; display:block; }
-  .lead { font-size:14.5pt; color:#42506e; line-height:1.4; max-width:150mm; }
-  .rule { height:5px; width:52mm; background:#1f3864; border-radius:3px; margin:5mm 0; }
-  .cards { display:flex; gap:4mm; margin-top:2mm; }
-  .card { flex:1; border:2px solid #dbe3f2; border-radius:11px; padding:5mm 4mm; text-align:center; }
-  .card .ico { font-size:26pt; line-height:1; }
-  .card .t { font-size:11.5pt; font-weight:800; margin-top:2.5mm; }
-  .card .d { font-size:9pt; color:#5d6b85; margin-top:1.5mm; line-height:1.3; }
-  .band { margin-top:6mm; background:#1f3864; color:#fff; border-radius:12px; padding:6mm 7mm; }
-  .band h2 { font-size:17pt; font-weight:800; margin-bottom:3mm; }
-  .band ul { list-style:none; font-size:12pt; line-height:1.75; }
-  .band li::before { content:"→ "; opacity:.65; }
-  .prices { margin-top:6mm; display:flex; gap:3mm; }
-  .p { flex:1; background:#f3f6fd; border-radius:10px; padding:4mm 3mm; text-align:center; }
-  .p .n { font-size:19pt; font-weight:900; color:#1f3864; }
-  .p .l { font-size:8.5pt; color:#5d6b85; margin-top:1mm; line-height:1.25; }
-  .foot { margin-top:auto; display:flex; align-items:center; gap:6mm;
-          border-top:2px dashed #c9d3e8; padding-top:5mm; }
-  .qr { width:33mm; height:33mm; border:2px solid #1f3864; border-radius:8px;
-        display:flex; align-items:center; justify-content:center; text-align:center;
-        font-size:7.5pt; color:#7d89a2; padding:3mm; line-height:1.3; overflow:hidden; }
-  .qr svg { width:100%; height:100%; display:block; }
-  .foot .txt { flex:1; }
-  .foot .big { font-size:15pt; font-weight:900; }
-  .foot .sm { font-size:10.5pt; color:#4a5876; margin-top:1.5mm; line-height:1.45; }
-</style></head>
-<body><div class="sheet">
-<div class="brandrow"><img src="../assets/brand/nozza-mark-1.svg" alt="NOZZA"><div><div class="bname">NOZZA</div><div class="btag">Там, где рождается форма · Симферополь</div></div></div>
-<div class="kicker">Локальное производство</div><h1>Полезные вещи<span class="accent">точно под вашу задачу</span></h1><div class="lead">Покажите фото и размеры — подготовим расчёт, макет и срок.</div><div class="rule"></div>
-<div class="cards"><div class="card"><div class="ico">🐾</div><div class="t">Питомцы</div><div class="d">Адресники, именные таблички, организация зоны ухода</div></div><div class="card"><div class="ico">🏠</div><div class="t">Для дома</div><div class="d">Органайзеры, держатели и крепления по размерам</div></div><div class="card"><div class="ico">🏪</div><div class="t">Для бизнеса</div><div class="d">QR-стойки, ценники, номерки и оснастка</div></div></div>
-<div class="band"><h2>Как заказать</h2><ul><li>Сфотографируйте место или принесите образец</li><li>Укажите точные размеры и назначение</li><li>Выберите количество, цвет и нужную дату</li><li>Получите расчёт и согласуйте макет до печати</li></ul></div>
-<div class="prices"><div class="p"><div class="n">1 день</div><div class="l">ответ на<br>понятный бриф</div></div><div class="p"><div class="n">1 штука</div><div class="l">можно начать<br>с образца</div></div><div class="p"><div class="n">свой размер</div><div class="l">не только<br>типовой товар</div></div><div class="p"><div class="n">точная цена</div><div class="l">после фото<br>и размеров</div></div></div>
-<div class="foot"><div class="qr" id="qr">ВСТАВЬТЕ<br>СЮДА<br>QR-КОД</div><div class="txt"><div class="big">Спросите на кассе</div><div class="sm">Покажем образцы и примем данные для расчёта.<br>Новинки и готовые заказы — в Telegram.</div></div></div>
-</div>
-<script src="../assets/qr.js?v=18.23.1"></script>
-<script>window.QR_FALLBACK=1;if(!window.QR)window.QR={svg:function(){return '<div style="font-size:10px;color:#94a3b8">QR…</div>';}};</script>
-<script>
-// QR и знак берём из общих настроек генераторов (localStorage), плейсхолдер заменяем живым кодом.
-(function(){
-  var c={}; try{ c=JSON.parse(localStorage.getItem('nozza:contact')||'{}'); }catch(e){}
-  var mark=document.querySelector('.brandrow img');
-  if(mark) mark.src='../assets/brand/nozza-mark-1.svg'; // знак выбран (вариант 1), выбор удалён в 18.4.1
-  var city=c.city||'Симферополь';
-  var tagEl=document.querySelector('.brandrow .btag');
-  if(tagEl) tagEl.textContent='Там, где рождается форма · '+city;
-  var link=c.site||'https://nozza.ru';
-  var box=document.getElementById('qr');
-  if(box && window.QR){
-    var svg=QR.svg(link,{ecl:'M',margin:1});
-    if(svg){ box.innerHTML=svg; box.style.padding='2mm'; }
+  :root { color-scheme:light;--line:#d6dce8; }
+  * { box-sizing:border-box; }
+  body { margin:0;background:#e9eaf0;color:#25212a;font:14px Arial,Helvetica,sans-serif; }
+  .toolbar { position:sticky;top:0;z-index:2;display:flex;align-items:end;gap:10px 16px;flex-wrap:wrap;padding:12px 16px;background:#fff;border-bottom:1px solid var(--line);box-shadow:0 2px 10px #1b17300d; }
+  .toolbar-title { display:flex;flex-direction:column;gap:3px;margin-right:auto;font-weight:700; }
+  .toolbar-title small,.field small { color:#697386;font-size:11px;font-weight:400; }
+  .field { display:flex;flex-direction:column;gap:4px;min-width:150px;color:#485368;font-size:11px; }
+  .field input,.field select { min-height:34px;max-width:260px;padding:6px 9px;border:1px solid #cbd2df;border-radius:6px;background:#fff;color:#20212a;font:13px Arial,Helvetica,sans-serif; }
+  .field.long { min-width:240px; }
+  .actions { display:flex;align-items:center;gap:8px; }
+  button { min-height:36px;padding:8px 15px;border:1px solid #6740a5;border-radius:6px;background:#6e2bc8;color:#fff;font:700 13px Arial,Helvetica,sans-serif;cursor:pointer; }
+  button.secondary { border-color:#cbd2df;background:#fff;color:#282330; }
+  button:disabled { opacity:.48;cursor:not-allowed; }
+  :focus-visible { outline:3px solid #aa77ef;outline-offset:2px; }
+  .notice { width:min(210mm,calc(100% - 24px));margin:12px auto;padding:9px 12px;border:1px solid #ebc797;border-radius:6px;background:#fff8ee;color:#704b21;font-size:12px; }
+  .stage { overflow:auto;padding:16px 12px 32px; }
+  .sheet { position:relative;flex:none;width:210mm;height:297mm;margin:0 auto;background:#fff;color:#31242e;box-shadow:0 4px 24px #14121c33;font-family:Arial,Helvetica,sans-serif; }
+  .sheet[data-variant="color"] { background:#f6f0f8; }
+  .sheet[data-variant="dark"] { background:#1d161f; }
+  .poster-block { position:absolute;display:flex;align-items:flex-start;justify-content:flex-start;overflow:hidden;white-space:pre-wrap;overflow-wrap:anywhere;font-family:Arial,Helvetica,sans-serif; }
+  .poster-block[data-id="brand"] img { display:block;width:100%;height:100%;object-fit:contain;object-position:left center; }
+  .poster-block[data-id^="item-"] { border-radius:2mm; }
+  .poster-block[data-id="qr"] { display:grid;place-items:center;border:.2mm solid #d9c8ce; }
+  .poster-block[data-id="qr"] svg { display:block;width:100%;height:100%; }
+  .poster-block[data-id="qr"].missing { padding:3mm;border:1px dashed #a54b4b;color:#8a3030;font-size:3mm!important;text-align:center; }
+  .sheet[data-variant="dark"] .poster-block[data-id="hero"],.sheet[data-variant="dark"] .poster-block[data-id="contact"],.sheet[data-variant="dark"] .poster-block[data-id^="item-"] { color:#f8eee6!important; }
+  .sheet[data-variant="dark"] .poster-block[data-id="lead"] { color:#cbbbc7!important; }
+  .sheet[data-variant="dark"] .poster-block[data-id^="item-"] { background:#382c3b!important; }
+  .sheet[data-variant="color"] .poster-block[data-id="hero"] { color:#6e2bc8!important; }
+  .sheet[data-variant="color"] .poster-block[data-id="lead"],.sheet[data-variant="color"] .poster-block[data-id="contact"] { color:#625966!important; }
+  .status { min-height:18px;color:#596579;font-size:11px; }
+  @page { size:210mm 297mm;margin:0; }
+  @media print {
+    html,body { width:var(--page-width,210mm);height:var(--page-height,297mm);margin:0!important;padding:0!important;background:#fff!important; }
+    .toolbar,.notice,.status { display:none!important; }
+    .stage { display:block;overflow:visible;padding:0; }
+    .sheet { width:var(--page-width,210mm)!important;height:var(--page-height,297mm)!important;margin:0;box-shadow:none;print-color-adjust:exact;-webkit-print-color-adjust:exact; }
   }
+  @media (max-width:600px) {
+    .toolbar-title { width:100%; }
+    .field { flex:1;min-width:132px; }
+    .field.long { flex-basis:100%; }
+    .actions { width:100%;justify-content:flex-end; }
+    .sheet[data-page-format="a3"] { margin-left:0; }
+  }
+</style>
+</head>
+<body>
+<div class="toolbar" aria-label="Настройки плаката">
+  <div class="toolbar-title">Плакат над полкой<small>Геометрия загружается из print-layouts-v2.json</small></div>
+  <label class="field">Формат<select id="format"><option value="a4">A4 · 210 × 297 мм</option><option value="a3">A3 · 297 × 420 мм</option></select></label>
+  <label class="field">Вариант<select id="variant"><option value="white">Белый</option><option value="color">Цветной</option><option value="dark">Тёмный</option></select></label>
+  <label class="field long">Заголовок<input id="title" maxlength="100" value="Полезные вещи под вашу задачу" required></label>
+  <label class="field long">Описание<input id="lead" maxlength="180" placeholder="Введите согласованное описание" required></label>
+  <label class="field">Пункт 1<input id="item0" maxlength="100" placeholder="[ЗАГОЛОВОК] · [ОПИСАНИЕ / УСЛОВИЕ]"></label>
+  <label class="field">Пункт 2<input id="item1" maxlength="100" placeholder="[ЗАГОЛОВОК] · [ОПИСАНИЕ / УСЛОВИЕ]"></label>
+  <label class="field">Пункт 3<input id="item2" maxlength="100" placeholder="[ЗАГОЛОВОК] · [ОПИСАНИЕ / УСЛОВИЕ]"></label>
+  <label class="field">Пункт 4<input id="item3" maxlength="100" placeholder="[ЗАГОЛОВОК] · [ОПИСАНИЕ / УСЛОВИЕ]"></label>
+  <label class="field">Телефон / Telegram<input id="contact" maxlength="100" placeholder="Контакт для клиента"></label>
+  <label class="field">Город / адрес<input id="city" maxlength="100" placeholder="Город / краткий адрес"></label>
+  <label class="field long">Ссылка QR<input id="link" type="url" inputmode="url" placeholder="https://…"></label>
+  <label class="field" style="flex-direction:row;align-items:center;align-self:center;max-width:210px"><input id="qr-checked" type="checkbox" style="min-height:0;width:16px;height:16px"> QR проверен телефоном</label>
+  <div class="actions"><button class="secondary" id="reset" type="button">Сбросить поля</button><button id="print" type="button" disabled>Печать A4</button></div>
+</div>
+<div id="notice" class="notice" role="status">Заполните согласованный текст и проверьте QR телефоном перед печатью.</div>
+<main class="stage"><section id="sheet" class="sheet" aria-label="Предпросмотр плаката"></section></main>
+<div id="status" class="status" role="status" aria-live="polite"></div>
+<style id="page-rule">@page { size:210mm 297mm;margin:0; }</style>
+<script src="../assets/qr.js?v=18.23.1"></script>
+<script>
+(() => {
+  'use strict';
+  const $ = (id) => document.getElementById(id);
+  const params = new URLSearchParams(location.search);
+  const stateKey = 'nozza:page:' + location.pathname;
+  const contactKey = 'nozza:contact';
+  let layout = null;
+  let contactData = {};
+  const defaults = { format:'a4',variant:'white',title:'Полезные вещи под вашу задачу',lead:'',item0:'',item1:'',item2:'',item3:'',city:'',contact:'',link:'' };
+  let saved = {};
+  try { saved = JSON.parse(localStorage.getItem(stateKey) || '{}') || {}; } catch (_) {}
+  try { contactData = JSON.parse(localStorage.getItem(contactKey) || '{}') || {}; } catch (_) {}
+  const state = Object.assign({},defaults,saved);
+  if (!('city' in saved)) state.city = contactData.city || '';
+  if (!('contact' in saved)) state.contact = [contactData.phone,contactData.tg].filter(Boolean).join(' · ');
+  if (!('link' in saved)) state.link = contactData.qrbase || contactData.site || '';
+  if (params.get('link')) state.link = params.get('link');
+  function validTarget(value) {
+    try { const url=new URL(value);return ['https:','http:'].includes(url.protocol)&&!!url.hostname&&!/^(localhost|127\.|0\.0\.0\.0|\[::1\])/i.test(url.hostname); }
+    catch (_) { return false; }
+  }
+  function fieldText(id) { return $(id).value.trim(); }
+  function render() {
+    if (!layout) return;
+    const a3=$('format').value==='a3',scale=a3?Math.SQRT2:1,sheet=$('sheet');
+    const width=a3?297:layout.width_mm,height=a3?420:layout.height_mm;
+    sheet.style.width=width+'mm';sheet.style.height=height+'mm';sheet.dataset.variant=$('variant').value;sheet.dataset.pageFormat=a3?'a3':'a4';
+    document.documentElement.style.setProperty('--page-width',width+'mm');document.documentElement.style.setProperty('--page-height',height+'mm');
+    $('page-rule').textContent=`@page { size:${width}mm ${height}mm;margin:0; }`;$('print').textContent='Печать '+(a3?'A3':'A4');
+    const text={hero:fieldText('title')||'Полезные вещи под вашу задачу',lead:fieldText('lead')||'[СОГЛАСОВАННОЕ ОПИСАНИЕ]',contact:[fieldText('contact')||'[ТЕЛЕФОН / TELEGRAM]',fieldText('city')||'[ГОРОД / КРАТКИЙ АДРЕС]'].join('\n')};
+    for(let i=0;i<4;i++) text['item-'+i]=`${String(i+1).padStart(2,'0')} · ${fieldText('item'+i)||'[ЗАГОЛОВОК]\n[ОПИСАНИЕ / УСЛОВИЕ]'}`;
+    const target=fieldText('link'),hasCopy=!!fieldText('title')&&!!fieldText('lead')&&[0,1,2,3].every(i=>!!fieldText('item'+i));
+    const qrReady=validTarget(target)&&!!window.QR&&typeof window.QR.svg==='function';
+    $('print').disabled=!(hasCopy&&qrReady&&$('qr-checked').checked);
+    $('notice').textContent=!qrReady?'Укажите действительный HTTP(S)-адрес QR; локальные адреса недопустимы. Проверьте его телефоном перед печатью.':(!hasCopy?'Заполните согласованное описание и четыре пункта плаката.':(!$('qr-checked').checked?'QR сформирован. Отсканируйте его телефоном и отметьте проверку перед печатью.':'Проверьте согласование текста и QR перед печатью.'));
+    sheet.innerHTML=layout.blocks.map((block)=>{
+      const mm=(value)=>(Number(value)||0)*scale;
+      const color=$('variant').value==='dark'&&block.id!=='brand'&&block.id!=='qr'?(block.id==='lead'?'#CBBBC7':'#F8EEE6'):(block.color||'#31242E');
+      const box=document.createElement('div');box.className='poster-block';box.dataset.id=block.id;
+      Object.assign(box.style,{left:mm(block.x_mm)+'mm',top:mm(block.y_mm)+'mm',width:mm(block.width_mm)+'mm',height:mm(block.height_mm)+'mm',color,background:block.background||'transparent',fontSize:Math.max(1.5,(Number(block.font_pt)||9)*0.352778*scale)+'mm',fontWeight:/bold/i.test(block.font||'')?700:400,lineHeight:String(Number(block.line_height)||1.25),textAlign:block.align||'left',padding:mm(block.text_padding_mm)+'mm',border:block.stroke_width_mm?`${mm(block.stroke_width_mm)}mm solid ${block.stroke_color||'#D9C8CE'}`:'0',borderRadius:mm(block.radius_mm)+'mm'});
+      if(block.kind==='logo') { const crop=Array.isArray(block.source_crop_px)?block.source_crop_px:null;const src=crop?`/assets/brand/nozza-print-crop-${crop.map(v=>Math.max(0,Math.round(Number(v)||0))).join('-')}.png`:'/assets/brand/nozza-selected-v2.png';const img=document.createElement('img');img.src=src;img.alt='NOZZA';box.append(img); }
+      else if(block.kind==='qr') { if(qrReady)box.innerHTML=window.QR.svg(target,{ecl:'M',margin:1});else{box.classList.add('missing');box.textContent='Укажите адрес QR в настройках';} }
+      else box.textContent=Object.prototype.hasOwnProperty.call(text,block.id)?text[block.id]:(block.text||'');
+      return box.outerHTML;
+    }).join('');
+    $('status').textContent=`${layout.title} · ${width.toFixed(1)} × ${height.toFixed(1)} мм · ${layout.blocks.length} блоков · координаты из реестра`;
+    try { localStorage.setItem(stateKey,JSON.stringify(Object.fromEntries(Object.keys(defaults).map(id=>[id,$(id).value])))); } catch (_) {}
+  }
+  function attach() {
+    ['format','variant','title','lead','item0','item1','item2','item3','contact','city','link'].forEach(id=>$(id).addEventListener('input',()=>{if(id==='link')$('qr-checked').checked=false;render();}));
+    ['format','variant'].forEach(id=>$(id).addEventListener('change',render));$('qr-checked').addEventListener('change',render);
+    $('reset').addEventListener('click',()=>{try{localStorage.removeItem(stateKey);}catch(_){}$('qr-checked').checked=false;Object.entries(defaults).forEach(([id,value])=>$(id).value=value);$('city').value=contactData.city||'';$('contact').value=[contactData.phone,contactData.tg].filter(Boolean).join(' · ');$('link').value=contactData.qrbase||contactData.site||'';render();});
+    $('print').addEventListener('click',()=>{if(!$('print').disabled)window.print();});
+  }
+  async function init() {
+    Object.keys(defaults).forEach(id=>$(id).value=state[id]||'');
+    try { const response=await fetch('/assets/print-layouts-v2.json');if(!response.ok)throw new Error('HTTP '+response.status);const spec=await response.json();layout=spec.documents.find(item=>item.id==='poster-shelf-poster');if(!layout||spec.units!=='mm')throw new Error('Макет не найден в реестре размеров');attach();render(); }
+    catch(error) { $('notice').textContent='Не удалось загрузить геометрию печатного макета: '+(error.message||'ошибка чтения');$('print').disabled=true; }
+  }
+  init();
 })();
 </script>
 </body>
