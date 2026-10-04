@@ -1009,6 +1009,7 @@ const VIEWS = {
   finance: { title: 'Финансы', sub: 'Автоматический учёт доходов и расходов' },
   inventory: { title: 'Склад пластика', sub: 'Остатки катушек и база изделий' },
   niches: { title: 'Ниши', sub: 'Проверка гипотез по фактическим заказам' },
+  'product-ideas': { title: 'Идеи товаров', sub: 'Спрос, модели и пробные партии' },
   calc: { title: 'Калькулятор', sub: 'Себестоимость, цена и прибыль за час' },
   print: { title: 'Печать', sub: 'Формы цеха: ценники, стикеры, наклейки, визитки, талоны' },
   clientbot: { title: 'Клиент-бот', sub: 'Telegram-бот для покупателей: витрина, заказы, статусы' },
@@ -1120,7 +1121,8 @@ function routeFromHash() {
     showView(last);
     return;
   }
-  const [name, sub] = raw.split('/');
+  const [rawName, sub] = raw.split('/');
+  const name = rawName === 'productideas' ? 'product-ideas' : rawName;
   showView(name, sub);
 }
 /* ================================================== глубокие ссылки (57)

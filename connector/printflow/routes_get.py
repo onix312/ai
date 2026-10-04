@@ -303,6 +303,13 @@ def get_insights(api: Any, ctx: Ctx):
     return 200, api.insights.all()
 
 
+@router.get("/api/ideas/products", doc="GET /api/ideas/products")
+def get_product_ideas(api: Any, ctx: Ctx):
+    from .analytics import Analytics
+    return 200, Analytics(api.db).product_opportunities(
+        int(num(ctx.one("days", "90"), 90)))
+
+
 @router.get("/api/payback", doc="GET /api/payback")
 def get_payback(api: Any, ctx: Ctx):
     return 200, api.insights.payback()

@@ -20,6 +20,131 @@ class Analytics:
         self.db = db
         self.acc = Accounting(db)
 
+    def product_opportunities(self, days: int = 90) -> dict[str, Any]:
+        """Продажи товаров за выбранный период и изменение к предыдущему периоду."""
+        window = max(30, min(365, int(days or 90)))
+        now = datetime.now()
+        start = (now - timedelta(days=window)).isoformat()
+        previous_start = (now - timedelta(days=window * 2)).isoformat()
+        as_of = now.isoformat(timespec="seconds")
+        names = {row["id"]: row for row in self.db.query(
+            "SELECT id, name, kind, grams, hours, material, photo, model_url"
+            " FROM nomenclature WHERE archived=0")}
+        current_sales = self._sales_quantity_by_product(start, as_of)
+        previous_sales = self._sales_quantity_by_product(previous_start, start)
+        ranked = []
+        for nom_id, product in names.items():
+            if product.get("kind") not in ("product", "showcase", "kit"):
+                continue
+            current = current_sales.get(nom_id, 0.0)
+            previous = previous_sales.get(nom_id, 0.0)
+            change = round((current / previous - 1) * 100, 1) if previous else None
+            trend = "rising" if change is not None and change >= 20 else (
+                "falling" if change is not None and change <= -20 else "steady" if change is not None
+                else "new" if current > 0 else "no_data" if previous == 0 else "falling")
+            ranked.append({"nom_id": nom_id, "name": product.get("name") or "Товар",
+                           "sold_period": current, "sold_previous": previous,
+                           "change_pct": change, "trend": trend,
+                           "grams": num(product.get("grams")), "hours": num(product.get("hours")),
+                           "material": product.get("material") or "",
+                           "model_url": product.get("model_url") or "",
+                           "has_production_estimate": bool(num(product.get("grams")) or num(product.get("hours")))})
+        ranked.sort(key=lambda row: (bool(row["model_url"]), row["sold_period"],
+                                     row["sold_previous"]), reverse=True)
+        niches = self.db.query(
+            "SELECT n.id,n.name,n.hypothesis,n.target,n.views,n.leads,"
+            "COUNT(o.id) orders,COALESCE(SUM(o.price),0) revenue "
+            "FROM niches n LEFT JOIN orders o ON o.niche_id=n.id AND o.created_at>=? "
+            "WHERE n.active=1 GROUP BY n.id ORDER BY orders DESC,n.position,n.name", (start,))
+        return {"ok": True, "source": {"sales": "PrintFlow · реестр продаж",
+                "window_days": window, "as_of": as_of,
+                "external_marketplaces": "импорт страниц по ссылкам товаров"},
+                "products": ranked[:300], "niches": niches[:20],
+                "data_quality": {"products_with_sales": sum(row["sold_period"] > 0 for row in ranked),
+                    "products_without_cost_estimate": sum(not row["has_production_estimate"] for row in ranked),
+                    "warning": "Сравнение двух равных периодов показывает динамику, но не учитывает сезонность."}}
+
+    def _sales_quantity_by_product(self, start: str, end: str) -> dict[str, float]:
+        """Aggregate sale documents, completed orders, shelf sales and orphan register moves."""
+        totals: dict[str, float] = {}
+        source_signatures: dict[tuple[str, str, float], int] = {}
+        names = self.db.query("SELECT id,name FROM nomenclature")
+        by_name: dict[str, str | None] = {}
+        for row in names:
+            key = str(row.get("name") or "").strip().casefold()
+            if key:
+                by_name[key] = row["id"] if key not in by_name else None
+
+        def add(nom_id: str, name: str, quantity: Any, at: str = "") -> None:
+            ident = str(nom_id or "").strip()
+            if not ident:
+                ident = by_name.get(str(name or "").strip().casefold()) or ""
+            if ident:
+                amount = abs(num(quantity))
+                totals[ident] = totals.get(ident, 0.0) + amount
+                signature = (ident, str(at or "")[:10], round(amount, 3))
+                source_signatures[signature] = source_signatures.get(signature, 0) + 1
+
+        documents = self.db.query(
+                "SELECT d.id doc_id,d.at,i.nom_id,n.name,i.qty FROM documents d"
+                " JOIN doc_items i ON i.doc_id=d.id"
+                " LEFT JOIN nomenclature n ON n.id=i.nom_id"
+                " WHERE d.kind='sale' AND d.state='posted' AND d.at>=? AND d.at<?", (start, end))
+        for row in documents:
+            add(row.get("nom_id"), row.get("name"), row.get("qty"), row.get("at"))
+
+        order_ids = {row["id"] for row in self.db.query("SELECT id FROM orders")}
+        posted_doc_ids = {row["id"] for row in self.db.query(
+            "SELECT id FROM documents WHERE kind='sale' AND state='posted'")}
+        final_statuses = [row["id"] for row in self.db.query(
+            "SELECT id FROM statuses WHERE is_final=1")]
+        if final_statuses:
+            marks = ",".join("?" for _ in final_statuses)
+            order_filter = (
+                f"o.status IN ({marks}) AND ((o.created_at>=? AND o.created_at<?) OR "
+                "(COALESCE(o.closed_at,o.updated_at,o.created_at)>=? "
+                "AND COALESCE(o.closed_at,o.updated_at,o.created_at)<?)) "
+                "AND NOT EXISTS (SELECT 1 FROM documents d WHERE d.order_id=o.id "
+                "AND d.kind='sale' AND d.state='posted')")
+            params = (*final_statuses, start, end, start, end)
+            for row in self.db.query(
+                    "SELECT o.created_at,o.closed_at,o.updated_at,oi.nom_id,oi.name,oi.qty FROM orders o"
+                    " JOIN order_items oi ON oi.order_id=o.id WHERE " + order_filter, params):
+                at = row.get("closed_at") or row.get("updated_at") or row.get("created_at") or ""
+                if not start <= at < end:
+                    at = row.get("created_at") or at
+                add(row.get("nom_id"), row.get("name"), row.get("qty"), at)
+            for row in self.db.query(
+                    "SELECT o.id,o.created_at,o.closed_at,o.updated_at,o.nom_id,o.product,o.qty FROM orders o WHERE " + order_filter +
+                    " AND NOT EXISTS (SELECT 1 FROM order_items oi WHERE oi.order_id=o.id)", params):
+                at = row.get("closed_at") or row.get("updated_at") or row.get("created_at") or ""
+                if not start <= at < end:
+                    at = row.get("created_at") or at
+                add(row.get("nom_id"), row.get("product"), row.get("qty"), at)
+
+        for row in self.db.query(
+                "SELECT COALESCE(NULLIF(s.nom_id,''),NULLIF(c.nom_id,''),lc.id,ls.id) nom_id,"
+                "s.name,-m.qty qty,m.at FROM shelf_moves m JOIN shelf_items s ON s.id=m.item_id"
+                " LEFT JOIN catalog c ON c.id=s.catalog_id"
+                " LEFT JOIN nomenclature lc ON lc.legacy_catalog_id=s.catalog_id"
+                " LEFT JOIN nomenclature ls ON ls.legacy_shelf_id=s.id"
+                " WHERE m.kind IN ('sale','online') AND m.qty<0 AND COALESCE(m.undone,0)=0"
+                " AND m.at>=? AND m.at<?", (start, end)):
+            add(row.get("nom_id"), row.get("name"), row.get("qty"), row.get("at"))
+
+        for row in self.db.query(
+                "SELECT nom_id,doc_id,at,-qty qty FROM stock_moves"
+                " WHERE doc_kind='sale' AND qty<0 AND at>=? AND at<?", (start, end)):
+            if row.get("doc_id") in posted_doc_ids or row.get("doc_id") in order_ids:
+                continue
+            ident = str(row.get("nom_id") or "").strip()
+            signature = (ident, str(row.get("at") or "")[:10], round(num(row.get("qty")), 3))
+            if source_signatures.get(signature, 0):
+                source_signatures[signature] -= 1
+                continue
+            add(ident, "", row.get("qty"))
+        return totals
+
     # =========================================================== OEE (R)
     def oee(self, days: int = 30, printer_id: str = "") -> dict[str, Any]:
         """Overall Equipment Effectiveness — эффективность принтера.
