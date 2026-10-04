@@ -132,10 +132,137 @@ def _requisites(db: Database) -> dict:
     }
 
 
+def _v2_document(title: str, document_id: str, req: dict,
+                 customer: str, product: str, number: str, date: str,
+                 due: str, total: float, lines: list[dict],
+                 fold: dict, kind: str) -> str:
+    """Рендер A4 документа по абсолютной геометрии его рецепта v2."""
+    from .printing import _print_v2_document
+
+    layout = _print_v2_document(document_id)
+    if (layout.get("width_mm"), layout.get("height_mm")) != (210, 297):
+        raise RuntimeError(f"Макет {document_id} должен иметь формат A4 210×297 мм")
+
+    inn = req["inn"]
+    legal = req["legal_name"]
+    buyer = customer or "частное лицо"
+    metadata = f"№ {number}    от {date}\n{buyer}"
+    if kind == "cp":
+        requisites = f"{legal}" + (f" · ИНН {inn}" if inn else "")
+        requisites += (f"\nДля: {buyer}. Изделие: {product}."
+                       f"\nСрок: {due or 'по согласованию'}."
+                       " Цена действует после утверждения образца.")
+    elif kind == "waybill":
+        sender = legal + (f" · ИНН {inn}" if inn else "")
+        requisites = (f"Грузоотправитель: {sender}"
+                      f"\nГрузополучатель: {buyer}"
+                      f"\nОснование: заказ № {number}")
+    else:
+        sender = legal + (f" · ИНН {inn}" if inn else "")
+        requisites = (f"{sender}\nПокупатель / грузополучатель: {buyer}")
+        if kind == "receipt":
+            requisites += "\nИзделие изготовлено по индивидуальному заказу."
+
+    headings = ("Наименование", "Кол-во", "Цена", "Сумма")
+    block_values = {
+        "document-title": title,
+        "metadata": metadata,
+        "requisites": requisites,
+        "total": f"Итого: {_fmt(total)} {req['currency']}",
+        "fold-note": "",
+        "signature-left": ("Отпустил" if kind == "waybill" else "Исполнитель")
+                           + "\n________________",
+        "signature-right": ("Получил" if kind == "waybill" else "Заказчик")
+                            + "\n________________",
+    }
+    if fold.get("folded"):
+        note = (f"Показано позиций {_fmt(fold['after'])} из {_fmt(fold['before'])}")
+        if fold.get("groups"):
+            note += " · мелкие товары группами: " + ", ".join(fold["groups"])
+        block_values["fold-note"] = note + f" · полный состав — в заказе № {number}."
+    foot = ("подтверждает передачу товара. Не является счётом-фактурой."
+            if kind == "waybill" else "не является публичной офертой без подписи.")
+    block_values["footer"] = f"{legal} · изготовлено локально · {foot}"
+
+    # Recipe provides five rows. Additional rows repeat the same A4 form with
+    # its header; totals and signing fields appear only on the final sheet.
+    page_rows = 5
+    pages = [lines[i:i + page_rows] for i in range(0, len(lines), page_rows)] or [[]]
+    blocks_by_id = {block["id"]: block for block in layout["blocks"]}
+    sheet_html = []
+    for page_index, page_lines in enumerate(pages):
+        values = dict(block_values)
+        values["metadata"] += (f"\nСтраница {page_index + 1} из {len(pages)}"
+                               if len(pages) > 1 else "")
+        if page_index < len(pages) - 1:
+            for hidden in ("total", "fold-note", "signature-left",
+                           "signature-right", "footer"):
+                values[hidden] = ""
+        for col, label in enumerate(headings):
+            values[f"th-{col}"] = label
+        for row_index in range(page_rows):
+            line = page_lines[row_index] if row_index < len(page_lines) else {}
+            values[f"cell-{row_index}-0"] = str(line.get("name") or "")
+            values[f"cell-{row_index}-1"] = _qty_text(line.get("qty")) if line else ""
+            price_text = _fmt(line.get("price")) if line else ""
+            values[f"cell-{row_index}-2"] = (
+                ("ср. " if line.get("averaged") else "") + price_text)
+            values[f"cell-{row_index}-3"] = _fmt(line.get("amount")) if line else ""
+
+        rendered = []
+        for block in layout["blocks"]:
+            weight = 700 if "bold" in str(block.get("font", "")).lower() else 400
+            style = (
+                f'left:{block["x_mm"]}mm;top:{block["y_mm"]}mm;'
+                f'width:{block["width_mm"]}mm;height:{block["height_mm"]}mm;'
+                f'font-family:Arial,sans-serif;font-size:{block["font_pt"]}pt;'
+                f'font-weight:{weight};line-height:{block.get("line_height", 1.25)};'
+                f'color:{block["color"]};background:{block.get("background") or "transparent"};'
+                f'text-align:{block["align"]};padding:{block.get("text_padding_mm", 0)}mm;'
+                f'border-radius:{block.get("radius_mm", 0)}mm'
+            )
+            if block["kind"] == "logo":
+                crop = "-".join(str(int(value)) for value in block["source_crop_px"])
+                content = (f'<img src="/assets/brand/nozza-print-crop-{crop}.png" alt="NOZZA" '
+                           'style="display:block;width:100%;height:100%;object-fit:contain;'
+                           'object-position:left center">')
+            else:
+                content = _esc(values.get(block["id"], "")).replace("\n", "<br>")
+            if block["kind"] == "cell":
+                style += (f';border:{block.get("stroke_width_mm", 0.2)}mm solid '
+                          f'{block.get("stroke_color") or "#E8E2E7"}')
+            rendered.append(
+                f'<div class="doc-block doc-{block["kind"]}" data-block="{_esc(block["id"])}" '
+                f'style="{style}">{content}</div>')
+        sheet_html.append(f'<main class="document-sheet">{"".join(rendered)}</main>')
+
+    return (
+        "<!DOCTYPE html><html lang=\"ru\"><head><meta charset=\"utf-8\">"
+        f"<title>{_esc(title)} №{_esc(number)}</title>"
+        "<style>@page{size:A4;margin:0}*{box-sizing:border-box}"
+        "html,body{margin:0;min-height:100%;font-family:Arial,sans-serif;color:#31242E}"
+        "body{background:#EEEAF0;padding:20px 0}.document-sheet{position:relative;"
+        "width:210mm;height:297mm;margin:0 auto 16px;overflow:hidden;background:#fff;"
+        "page-break-after:always;break-after:page}.document-sheet:last-of-type{"
+        "page-break-after:auto;break-after:auto}.doc-block{position:absolute;overflow:hidden;"
+        "overflow-wrap:anywhere;white-space:normal}.doc-logo img{object-fit:contain}"
+        ".doc-cell{border-collapse:collapse}@media print{body{background:#fff;padding:0;"
+        "-webkit-print-color-adjust:exact;print-color-adjust:exact}"
+        ".document-sheet{margin:0;box-shadow:none}}"
+        "@media screen{.document-sheet{box-shadow:0 6px 30px #31242E20}}"
+        ".no-print{position:fixed;z-index:2;right:18px;top:18px;border:0;border-radius:9px;"
+        "padding:11px 18px;background:#6E2BC8;color:#fff;font:600 14px Arial,sans-serif;"
+        "cursor:pointer}@media print{.no-print{display:none}}</style></head><body>"
+        "<button class=\"no-print\" onclick=\"window.print()\">Печать / PDF</button>"
+        + "".join(sheet_html) + "</body></html>"
+    )
+
+
 def _pickup_receipt(order: dict, req: dict, number: str, customer: str,
                     cur: str, lines: list[dict], track_url: str) -> str:
-    """Чек выдачи заказа (В36): термолента 80 мм, перфорация, QR трекинга."""
+    """Чек выдачи на термоленте 80 мм по печатному рецепту v2."""
     from .qrgen import svg as qr_svg
+    from .printing import _print_v2_document
 
     paid = num(order.get("paid")) + num(order.get("prepaid"))
     price = num(order.get("price"))
@@ -143,68 +270,103 @@ def _pickup_receipt(order: dict, req: dict, number: str, customer: str,
     closed = str(order.get("closed_at") or "")
     issued = (closed or now_iso()).replace("T", " ")[:16]
     status = "Выдан полностью" if closed else "Выдача"
-
-    def line(name: str, amount: float) -> str:
-        return (f"<div class=\"ln\"><span>{_esc(name)}</span>"
-                f"<b>{_fmt(amount)}</b></div>")
-
-    items_html = "".join(line(str(ln.get("name") or "Позиция"), num(ln.get("amount"), 0))
-                         for ln in (lines or []))
+    layout = _print_v2_document("pickup")
+    extra_rows = max(0, len(lines or []) - 3)
+    shift_after_rows = extra_rows * 10
     qr = ""
     if track_url:
         try:
-            qr = ("<div class=\"qr\">" + qr_svg(track_url, level="M", scale=3, border=2)
-                  + "</div><div class=\"qr-cap\">Отсканируйте — статус заказа онлайн</div>")
+            qr = qr_svg(track_url, level="M", scale=3, border=2)
         except Exception:
             qr = ""
+
+    values = {
+        "title": "ЧЕК ВЫДАЧИ ЗАКАЗА",
+        "meta": (f"Заказ № {number}\nКлиент: {customer or 'частное лицо'}\n"
+                 f"Статус: {status} · {issued}\n{req['legal_name']}"
+                 + (f" / ИНН {req['inn']}" if req["inn"] else "")),
+        "th-0": "Изделие", "th-1": "Сумма",
+        "totals": (f"Итого: {_fmt(price)} {cur}\nОплачено: {_fmt(paid)} {cur}\n"
+                   f"{'Долг' if left > 0.005 else 'Остаток'}: {_fmt(left)} {cur}"),
+        "qr": qr or "QR\nссылка недоступна",
+        "sign": "Заказ получил, претензий нет\n__________________",
+    }
+    rendered = []
+    for block in layout["blocks"]:
+        block_id = block["id"]
+        value = values.get(block_id, "")
+        if block_id.startswith("cell-"):
+            _, row_text, col_text = block_id.split("-")
+            row_index, col_index = int(row_text), int(col_text)
+            item = (lines or [])[row_index] if row_index < len(lines or []) else {}
+            if col_index == 0:
+                value = str(item.get("name") or "")
+            else:
+                value = f"{_fmt(item.get('amount'))} {cur}" if item else ""
+        top = block["y_mm"]
+        if block_id in ("totals", "qr", "sign"):
+            top += shift_after_rows
+        if block["kind"] == "logo":
+            crop = "-".join(str(int(part)) for part in block["source_crop_px"])
+            content = (f'<img src="/assets/brand/nozza-print-crop-{crop}.png" alt="NOZZA" '
+                       'style="display:block;width:100%;height:100%;object-fit:contain;'
+                       'object-position:left center">')
+        elif block_id == "qr" and qr:
+            content = qr
+        else:
+            content = _esc(value).replace("\n", "<br>")
+        height = block["height_mm"]
+        if block_id == "qr" and qr:
+            top = block["y_mm"] + shift_after_rows
+            content = f'<div class="pickup-qr">{qr}</div>'
+        style = (
+            f'left:{block["x_mm"]}mm;top:{top}mm;width:{block["width_mm"]}mm;'
+            f'height:{height}mm;font:{block["font_pt"]}pt Arial,sans-serif;'
+            f'font-weight:{700 if "bold" in block["font"].lower() else 400};'
+            f'line-height:{block["line_height"]};color:{block["color"]};'
+            f'text-align:{block["align"]};padding:{block.get("text_padding_mm", 0)}mm;'
+            f'border-radius:{block.get("radius_mm", 0)}mm'
+        )
+        if block["kind"] == "cell":
+            style += (f';border:{block.get("stroke_width_mm", 0.2)}mm solid '
+                      f'{block.get("stroke_color") or "#999999"}')
+        if block_id == "qr":
+            style += (f';border:{block.get("stroke_width_mm", 0.2)}mm solid '
+                      f'{block.get("stroke_color") or "#999999"}')
+        rendered.append(
+            f'<div class="pickup-block" data-block="{_esc(block_id)}" '
+            f'style="{style}">{content}</div>')
+
+    for row_index, item in enumerate((lines or [])[3:], start=3):
+        for col_index, (left_mm, width_mm, align) in enumerate(
+                ((4, 46, "left"), (50, 26, "right"))):
+            value = (str(item.get("name") or "") if col_index == 0
+                     else f"{_fmt(item.get('amount'))} {cur}")
+            style = (f'left:{left_mm}mm;top:{79 + row_index * 10}mm;'
+                     f'width:{width_mm}mm;height:10mm;font:9pt Arial,sans-serif;'
+                     f'font-weight:400;line-height:1.25;color:#000;text-align:{align};'
+                     'padding:1mm;border:0.2mm solid #999')
+            rendered.append(
+                f'<div class="pickup-block" data-block="cell-{row_index}-{col_index}" '
+                f'style="{style}">{_esc(value)}</div>')
+
+    dynamic_height = max(layout["height_mm"], 190 + shift_after_rows)
     return (
         "<!DOCTYPE html><html lang=\"ru\"><head><meta charset=\"utf-8\">"
         f"<title>Чек выдачи №{_esc(number)}</title>"
-        "<style>"
-        "@page{size:80mm auto;margin:4mm}"
-        "*{box-sizing:border-box;margin:0;padding:0}"
-        "body{font-family:'JetBrains Mono','Courier New',monospace;color:#111;"
-        "font-size:11px;width:72mm;margin:0 auto}"
-        ".rc{padding:4mm 3mm;border:1px dashed #999;border-radius:2px}"
-        ".rc-head{text-align:center;border-bottom:1px dashed #bbb;padding-bottom:3mm;margin-bottom:3mm}"
-        ".rc-brand{font-size:16px;font-weight:800;letter-spacing:2px}"
-        ".rc-sub{font-size:9px;color:#555;margin-top:1mm}"
-        ".rc-title{font-size:13px;font-weight:800;margin:3mm 0;text-align:center;"
-        "border-top:1px dashed #bbb;border-bottom:1px dashed #bbb;padding:2mm 0}"
-        ".kv{display:flex;justify-content:space-between;gap:4mm;font-size:10px;margin:1mm 0}"
-        ".kv span{color:#555}.kv b{text-align:right}"
-        ".ln{display:flex;justify-content:space-between;gap:4mm;font-size:10px;margin:1mm 0;"
-        "border-bottom:1px dotted #ddd;padding-bottom:1mm}"
-        ".total{display:flex;justify-content:space-between;font-size:13px;font-weight:800;"
-        "border-top:1px solid #111;border-bottom:1px double #111;padding:2mm 0;margin-top:2mm}"
-        ".qr{display:block;margin:4mm auto 1mm;width:26mm;height:26mm}"
-        ".qr-cap{text-align:center;font-size:8.5px;color:#555}"
-        ".sign-line{margin-top:7mm;font-size:9.5px;color:#333}"
-        ".sign-line i{display:inline-block;width:34mm;border-bottom:1px dashed #111}"
-        ".rc-foot{margin-top:4mm;text-align:center;font-size:8.5px;color:#777;"
-        "border-top:1px dashed #bbb;padding-top:2mm}"
-        "@media print{.no-print{display:none}}"
-        ".no-print{display:block;margin:6mm auto;padding:8px 16px;background:#4f46e5;"
-        "color:#fff;border:0;border-radius:8px;font-size:12px;cursor:pointer}"
-        "</style></head><body>"
+        "<style>@page{size:80mm auto;margin:0}*{box-sizing:border-box}"
+        "html,body{margin:0;padding:0;font-family:Arial,sans-serif;color:#000}"
+        "body{width:80mm}.pickup-sheet{position:relative;width:80mm;"
+        f"height:{dynamic_height}mm;min-height:190mm;background:#fff;overflow:hidden}}"
+        ".pickup-block{position:absolute;overflow:hidden;overflow-wrap:anywhere;"
+        "white-space:normal}.pickup-qr{width:26mm;height:26mm;margin:auto}"
+        ".pickup-qr svg{display:block;width:100%;height:100%}"
+        ".no-print{position:fixed;z-index:2;right:10px;top:10px;padding:8px 14px;"
+        "background:#6E2BC8;color:#fff;border:0;border-radius:8px;cursor:pointer}"
+        "@media print{.no-print{display:none}body{-webkit-print-color-adjust:exact;"
+        "print-color-adjust:exact}}</style></head><body>"
         "<button class=\"no-print\" onclick=\"window.print()\">Печать чека</button>"
-        "<div class=\"rc\">"
-        f"<div class=\"rc-head\"><div class=\"rc-brand\">{_esc(req['legal_name'])}</div>"
-        f"<div class=\"rc-sub\">{_esc('ИНН ' + str(req['inn'])) if req['inn'] else '3D-печать · локальное производство'}</div></div>"
-        "<div class=\"rc-title\">ЧЕК ВЫДАЧИ ЗАКАЗА</div>"
-        f"<div class=\"kv\"><span>Заказ</span><b>№ {_esc(number)}</b></div>"
-        f"<div class=\"kv\"><span>Клиент</span><b>{_esc(customer or 'частное лицо')}</b></div>"
-        f"<div class=\"kv\"><span>Статус</span><b>{_esc(status)}</b></div>"
-        f"<div class=\"kv\"><span>Выдан</span><b>{_esc(issued)}</b></div>"
-        f"{items_html}"
-        f"<div class=\"total\"><span>ИТОГО</span><span>{_fmt(price)} {_esc(cur)}</span></div>"
-        f"<div class=\"kv\"><span>Оплачено</span><b>{_fmt(paid)} {_esc(cur)}</b></div>"
-        f"<div class=\"kv\"><span>{'Долг' if left > 0.005 else 'Остаток'}</span>"
-        f"<b>{_fmt(left)} {_esc(cur)}</b></div>"
-        f"{qr}"
-        "<div class=\"sign-line\">Заказ получил, претензий нет <i>&nbsp;</i></div>"
-        f"<div class=\"rc-foot\">{_esc(req['legal_name'])} · спасибо, что печатаете у нас!</div>"
-        "</div></body></html>"
+        f'<main class="pickup-sheet">{"".join(rendered)}</main></body></html>'
     )
 
 
@@ -241,12 +403,6 @@ class B2B:
         fold: dict = {"folded": False, "before": 0, "after": 0, "groups": []}
         if items:
             lines, fold = fold_lines(items, collapse_groups=group)
-            rows = "".join(
-                f"<tr><td>{_esc(ln['name'])}</td>"
-                f"<td class=\"r\">{_qty_text(ln['qty'])}</td>"
-                f"<td class=\"r\">{'ср. ' if ln['averaged'] else ''}{_fmt(ln['price'])}</td>"
-                f"<td class=\"r\">{_fmt(ln['amount'])}</td></tr>"
-                for ln in lines)
             total = round(sum(num(ln["amount"]) for ln in lines), 2)
         else:
             # Цена заказа — итоговая сумма заказа, а не цена штуки (как в
@@ -254,10 +410,8 @@ class B2B:
             # количество, умножать нельзя — иначе итог документа завышался.
             total = round(price, 2)
             unit = round(price / qty, 2) if qty else price
-            rows = (f"<tr><td>{_esc(product)}</td>"
-                    f"<td class=\"r\">{_qty_text(qty)}</td>"
-                    f"<td class=\"r\">{_fmt(unit)}</td>"
-                    f"<td class=\"r\">{_fmt(total)}</td></tr>")
+            lines = [{"name": product, "qty": qty, "price": unit,
+                      "amount": total, "averaged": False}]
 
         kind = str(kind or "invoice").strip().lower()
         if kind in ("накладная", "tn", "torg12", "rn"):
@@ -277,67 +431,9 @@ class B2B:
             return _pickup_receipt(order, req, number, customer, cur,
                                    receipt_lines, track_link)
 
-        if kind == "receipt":
-            title = "Товарный чек"
-            head = (f"<div class=\"head\"><div><div class=\"brand\">{_esc(req['legal_name'])}</div>"
-                    f"<div class=\"doc\">{title}</div></div>"
-                    f"<div class=\"meta\">Дата: {date}<br>№ {number}</div></div>")
-            body = (f"<div class=\"meta\">Покупатель: {_esc(customer or 'частное лицо')}<br>"
-                    f"Изделие изготовлено по индивидуальному заказу.</div>")
-            left, right = "Исполнитель", "Заказчик"
-            foot = "не является публичной офертой без подписи."
-        elif kind == "cp":
-            title = "Коммерческое предложение"
-            head = (f"<div class=\"head\"><div><div class=\"brand\">{_esc(req['legal_name'])}</div>"
-                    f"<div class=\"doc\">{title}</div></div>"
-                    f"<div class=\"meta\">от {date}</div></div>")
-            body = (f"<div class=\"meta\">Для: {_esc(customer or 'заказчик')}<br>"
-                    f"Предлагаем изготовить «{_esc(product)}» — {int(qty)} шт. "
-                    f"Срок готовности — по согласованию (ориентир: {due or 'уточняется'}). "
-                    f"Цена действует после утверждения образца.</div>")
-            left, right = "Исполнитель", "Заказчик"
-            foot = "не является публичной офертой без подписи."
-        elif kind == "waybill":
-            title = "Товарная накладная"
-            inn = req["inn"]
-            head = (f"<div class=\"head\"><div><div class=\"brand\">{_esc(req['legal_name'])}</div>"
-                    f"<div class=\"doc\">{title} № {_esc(number)}</div></div>"
-                    f"<div class=\"meta\">ИНН: {_esc(inn)}<br>Дата: {date}</div></div>")
-            body = (f"<div class=\"meta\">Грузоотправитель: {_esc(req['legal_name'])}"
-                    f"{(' · ИНН ' + _esc(inn)) if inn else ''}<br>"
-                    f"Грузополучатель: {_esc(customer or '—')}<br>"
-                    f"Основание: заказ № {_esc(number)}</div>")
-            left, right = "Отпустил", "Получил"
-            foot = "подтверждает передачу товара. Не является счётом-фактурой."
-        else:
-            title = "Счёт на оплату"
-            inn = req["inn"]
-            head = (f"<div class=\"head\"><div><div class=\"brand\">{_esc(req['legal_name'])}</div>"
-                    f"<div class=\"doc\">{title} № {_esc(number)}</div></div>"
-                    f"<div class=\"meta\">ИНН: {_esc(inn)}<br>Дата: {date}</div></div>")
-            body = f"<div class=\"meta\">Покупатель: {_esc(customer or '—')}</div>"
-            left, right = "Исполнитель", "Заказчик"
-            foot = "не является публичной офертой без подписи."
-
-        # Сноска о свёртке: клиент видит, что часть строк показана группой,
-        # а полный состав остаётся в заказе и складской накладной.
-        fold_note = ""
-        if fold.get("folded"):
-            parts = [f"Показано позиций {_fmt(fold['after'])} из {_fmt(fold['before'])}"]
-            if fold.get("groups"):
-                parts.append("мелкие товары — группами: "
-                             + ", ".join(_esc(g) for g in fold["groups"]))
-            parts.append(f"полный состав — в заказе № {_esc(number)}")
-            fold_note = f"<div class=\"foldnote\">{'; '.join(parts)}.</div>"
-
-        return _doc_shell(f"{title} №{number}", (
-            f"{head}{body}"
-            "<table><thead><tr><th>Наименование</th><th class=\"r\">Кол-во</th>"
-            "<th class=\"r\">Цена</th><th class=\"r\">Сумма</th></tr></thead><tbody>"
-            f"{rows}</tbody></table>"
-            f"<div class=\"total\">Итого: <b>{_fmt(total)} {cur}</b></div>"
-            f"{fold_note}"
-            f"<div class=\"sign\"><div>{left}</div><div>{right}</div></div>"
-            f"<div class=\"foot\">{_esc(req['legal_name'])} · изготовлено локально · "
-            f"{foot}</div>"
-        ))
+        titles = {"invoice": "Счёт на оплату", "cp": "Коммерческое предложение",
+                  "receipt": "Товарный чек", "waybill": "Товарная накладная"}
+        if kind not in titles:
+            kind = "invoice"
+        return _v2_document(titles[kind], kind, req, customer, str(product),
+                            number, date, due, total, lines, fold, kind)

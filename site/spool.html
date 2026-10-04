@@ -23,7 +23,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="light dark">
-<title>Катушка · PrintFlow</title>
+<title>NOZZA · Катушка</title>
 <style>
  :root { --bg:#f4f6fb; --panel:#fff; --line:#dde4f1; --text:#17203a; --muted:#64748b;
    --ok:#0f9d58; --bad:#d63a3a; --accent:#4f46e5; --r:12px; }
@@ -53,11 +53,12 @@
  .hint { font-size:12px; color:var(--muted); margin-top:8px; line-height:1.5; }
 </style>
 <link rel="stylesheet" href="assets/refine.css?v=18.23.1">
+<link rel="stylesheet" href="/assets/nozza-design-v2.css?v=20.1.35">
 </head>
-<body class="pf-public">
+<body class="pf-public pf-spool-page">
 <div class="wrap">
  <div class="logo">NOZZA · PrintFlow<small>Склад пластика</small></div>
- <div class="card">
+ <div class="card spool-card">
   <p class="name" id="name">Загрузка…</p>
   <p class="muted" id="mat"></p>
   <div class="rest" id="rest">—</div>
@@ -143,7 +144,9 @@
       + (kindTxt ? ' <small class="muted">· ' + esc(kindTxt) + '</small>' : '');
     var bound = s.ams_slot !== '' && s.ams_slot != null;
     $('#mat').textContent = (s.brand || '') + (bound ? ' · ' + slotLabel(s.ams_slot) : ' · не привязана');
-    $('#rest').textContent = Math.round(num(s.remaining_grams)) + ' г из ' + Math.round(num(s.total_grams)) + ' г';
+    var remaining = s.remaining_grams == null || s.remaining_grams === '' ? '—' : Math.round(num(s.remaining_grams));
+    var total = s.total_grams == null || s.total_grams === '' ? '—' : Math.round(num(s.total_grams));
+    $('#rest').textContent = remaining + ' г из ' + total + ' г';
     var rec = String(s.rec_settings || '').trim();
     if (rec.startsWith('{')) {
       try {

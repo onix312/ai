@@ -21,6 +21,10 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
   padding: 24px; display: flex; flex-direction: column; min-width: 0; }
 .panel h1 { font-size: 15px; text-transform: uppercase; letter-spacing: 2px; color: var(--muted); margin: 0 0 14px; }
 #cam img { width: 100%; flex: 1; min-height: 0; object-fit: cover; border-radius: 12px; background: #000; }
+#cam img[hidden] { display: none; }
+#cam_fallback { flex: 1; min-height: 0; display: grid; place-content: center; justify-items: center; gap: 12px; border: 1px solid var(--line); border-radius: 12px; background: radial-gradient(ellipse at center, rgba(124,58,237,.12), transparent 66%), #17131b; color: var(--muted); text-align: center; }
+#cam_fallback[hidden] { display: none; }
+#cam_fallback .cam-mark { width: 52px; height: 52px; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 16px; color: var(--accent); font-size: 24px; }
 #cam .tag { position: absolute; }
 .live { display: inline-flex; align-items: center; gap: 8px; font-size: 18px; font-weight: 700; }
 .live i { width: 12px; height: 12px; border-radius: 50%; background: #22c55e; animation: pulse 2s infinite; }
@@ -49,12 +53,14 @@ body.monitor .ring-wrap { display: none; }
 body.monitor #task { font-size: 26px; margin: 10px 0 4px; }
 body.monitor #facts { grid-template-columns: repeat(4, 1fr); }
 </style>
+<link rel="stylesheet" href="/assets/nozza-design-v2.css?v=20.1.35">
 </head>
-<body>
+<body class="pf-utility">
 <div id="wrap">
   <div class="panel" id="cam">
     <h1>Камера цеха</h1>
-    <img id="cam_img" alt="Камера">
+    <img id="cam_img" alt="Камера цеха" hidden>
+    <div id="cam_fallback" role="status"><span class="cam-mark" aria-hidden="true">◉</span><b id="cam_fallback_text">Подключаем камеру…</b></div>
     <div style="margin-top:12px" id="cam_state" class="muted">Подключаемся…</div>
   </div>
   <div class="panel">
@@ -86,6 +92,13 @@ document.body.classList.add(mode);
 
 function $(id) { return document.getElementById(id); }
 const RING = 2 * Math.PI * 52;
+function showCameraFallback(message) {
+  $('cam_img').hidden = true;
+  $('cam_fallback_text').textContent = message;
+  $('cam_fallback').hidden = false;
+}
+$('cam_img').addEventListener('load', () => { $('cam_img').hidden = false; $('cam_fallback').hidden = true; });
+$('cam_img').addEventListener('error', () => showCameraFallback('Видеопоток камеры недоступен'));
 function minutesText(m) {
   m = Math.round(m || 0);
   if (!m) return '—';
@@ -97,7 +110,7 @@ async function tick() {
     const res = await fetch('/api/state');
     const st = await res.json();
     const snap = (st.active) || ((st.printers || [])[0]) || null;
-    if (!snap) { $('cam_state').textContent = 'Принтеры не добавлены'; return; }
+    if (!snap) { showCameraFallback('Принтеры не добавлены'); $('cam_state').textContent = 'Нет доступного принтера'; return; }
     const p = snap.printer || {};
     const running = ['RUNNING', 'PAUSE', 'PREPARE'].includes(p.state);
     $('live').classList.toggle('idle', !running);
@@ -119,11 +132,13 @@ async function tick() {
       : '—';
     // камера: кадр обновляем раз в 4 секунды
     const t = Date.now();
+    showCameraFallback('Загружаем кадр камеры…');
     $('cam_img').src = `/api/printer/camera.jpg?printer_id=${encodeURIComponent(snap.id || '')}&t=${t}`;
     $('cam_state').textContent = snap.connection && snap.connection.mode === 'virtual'
       ? 'Виртуальный принтер · демо-камера'
       : `обновлено ${new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`;
   } catch (e) {
+    showCameraFallback('Камера недоступна без подключения к PrintFlow');
     $('cam_state').textContent = 'Коннектор недоступен — переподключим';
   }
 }

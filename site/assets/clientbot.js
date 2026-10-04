@@ -62,6 +62,9 @@ function setBotLoading(loading, error = '') {
   if (errorText) errorText.textContent = error || 'Не удалось загрузить данные.';
   const refresh = $('cb_refresh');
   if (refresh) refresh.disabled = loading;
+  const canEdit = !loading && !error;
+  document.querySelectorAll('#view-clientbot .clientbot-form input, #view-clientbot .clientbot-form select, #view-clientbot .clientbot-form textarea, #cb_save, #cb_test, #cb_broadcast, #cb_outbox_retry')
+    .forEach((control) => { control.disabled = !canEdit; });
 }
 
 function kpi(label, value, sub, kind = '') {
@@ -473,8 +476,19 @@ async function renderBot() {
     renderLog(data.log || []);
     setBotLoading(false);
   } catch (error) {
+    $('cb_kpis').innerHTML = [
+      kpi('Покупателей', '—', 'Нет связи с данными'),
+      kpi('Заказов из бота', '—', 'Нет связи с данными'),
+      kpi('Сообщений сегодня', '—', 'Нет связи с данными'),
+      kpi('Ожидают действий', '—', 'Нет связи с данными'),
+    ].join('');
+    $('cb_commands').innerHTML = COMMANDS.map(([command, description]) =>
+      `<tr><td><b>${esc(command)}</b></td><td class="muted">${esc(description)}</td></tr>`).join('');
+    $('cb_inbox').innerHTML = '<div class="empty clientbot-empty-state" role="status"><span class="empty-icon">!</span>'
+      + '<b>Inbox недоступен</b><small>Подключите PrintFlow, чтобы увидеть непрочитанные диалоги. Их количество неизвестно.</small></div>';
+    $('cb_payments').innerHTML = '<tr><td colspan="6" class="empty">Сверка оплат недоступна без подключения PrintFlow. Текущие заявки неизвестны.</td></tr>';
     setBotLoading(false, error && error.message ? error.message : 'Ошибка API клиентского бота');
-    fail(error);
+    if (!PF.offline) fail(error);
   }
 }
 

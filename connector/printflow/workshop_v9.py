@@ -716,33 +716,60 @@ class WorkshopV9:
     def spool_label_html(self, spool_id: str) -> str:
         info = self.qr_wizard(spool_id, "spool")
         from .qrgen import svg as qr_svg
+        from .printing import _print_v2_document
+
         try:
             mark = qr_svg(info["payload"], scale=4)
         except Exception:
             mark = ""
-        hex_color = info.get("color_hex") or "#333"
-        lines = "".join(f"<div class='ln'>{_esc(x)}</div>" for x in info["lines"])
+        layout = _print_v2_document("spool-thermal")
+        if (layout.get("width_mm"), layout.get("height_mm")) != (62, 40):
+            raise RuntimeError("Макет spool-thermal должен быть 62×40 мм")
+        values = {
+            "material": info["title"],
+            "spool-data": "\n".join(x for x in info["lines"] if x != info["title"]),
+            "qr": mark or "QR недоступен",
+        }
+        blocks = []
+        for block in layout["blocks"]:
+            style = (
+                f'left:{block["x_mm"]}mm;top:{block["y_mm"]}mm;'
+                f'width:{block["width_mm"]}mm;height:{block["height_mm"]}mm;'
+                f'font-family:Arial,sans-serif;font-size:{block["font_pt"]}pt;'
+                f'font-weight:{700 if "bold" in block["font"].lower() else 400};'
+                f'line-height:{block["line_height"]};color:{block["color"]};'
+                f'text-align:{block["align"]};padding:{block.get("text_padding_mm", 0)}mm'
+            )
+            content = values.get(block["id"], "")
+            if block["kind"] == "qr" and mark:
+                content = f'<div class="spool-qr">{mark}</div>'
+            else:
+                content = _esc(content).replace("\n", "<br>")
+            if block["kind"] == "qr":
+                style += (f';border:{block.get("stroke_width_mm", 0.2)}mm solid '
+                          f'{block.get("stroke_color") or "#999999"};display:grid;'
+                          'place-items:center')
+            blocks.append(
+                f'<div class="spool-block" data-block="{_esc(block["id"])}" '
+                f'style="{style}">{content}</div>')
         return f"""<!DOCTYPE html><html lang="ru"><head><meta charset="utf-8">
 <title>Наклейка катушки</title>
 <style>
-@page {{ size: 62mm 40mm; margin: 2mm; }}
-body {{ font-family: Arial, sans-serif; margin: 0; color: #111; }}
-.card {{ width: 58mm; height: 36mm; border: 0.4mm solid #111; border-radius: 2mm;
-         display: flex; padding: 1.5mm; box-sizing: border-box; gap: 2mm; }}
-.qr {{ width: 22mm; height: 22mm; }}
-.qr svg {{ width: 100%; height: 100%; }}
-.meta {{ flex: 1; font-size: 8pt; line-height: 1.25; }}
-.sw {{ width: 6mm; height: 6mm; border-radius: 50%; border: 0.3mm solid #000;
-       background: {hex_color}; margin-bottom: 1mm; }}
-.ln {{ margin: 0 0 0.6mm; }}
-h1 {{ font-size: 9pt; margin: 0 0 1mm; }}
-@media print {{ button {{ display: none; }} }}
+@page {{ size: 62mm 40mm; margin: 0; }}
+* {{ box-sizing: border-box; }}
+html, body {{ margin: 0; padding: 0; font-family: Arial, sans-serif; color: #000; }}
+.spool-sheet {{ position: relative; width: 62mm; height: 40mm; overflow: hidden;
+                background: #fff; }}
+.spool-block {{ position: absolute; overflow: hidden; overflow-wrap: anywhere;
+                white-space: normal; }}
+.spool-qr {{ width: 22mm; height: 22mm; margin: auto; }}
+.spool-qr svg {{ display: block; width: 100%; height: 100%; }}
+.no-print {{ position: fixed; top: 8px; right: 8px; padding: 8px 14px; }}
+@media print {{ .no-print {{ display: none; }} body {{ -webkit-print-color-adjust: exact;
+                                               print-color-adjust: exact; }} }}
 </style></head><body>
-<button onclick="window.print()">Печать</button>
-<div class="card">
-  <div class="qr">{mark}</div>
-  <div class="meta"><div class="sw"></div><h1>{_esc(info['title'])}</h1>{lines}</div>
-</div></body></html>"""
+<button class="no-print" onclick="window.print()">Печать</button>
+<main class="spool-sheet">{"".join(blocks)}</main></body></html>"""
 
     # ------------------------------------------------------- shift checklist
     def shift_state(self, day: str = "") -> dict:

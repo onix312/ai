@@ -662,9 +662,27 @@ class PrintTests(unittest.TestCase):
         html = stickers("pla")
         self.assertIn("<b>PLA</b>", html)
         self.assertIn("@page", html)
+        self.db.set_settings({"public_url": "https://nozza.example"})
+        self.db.upsert("customers", {"id": "c1", "portal_code": "A 1"})
         card = business_card_html(self.db, "c1")
-        self.assertIn("NOZZA", card)
-        self.assertIn("Мой NOZZA", card)
+        self.assertEqual(4, card.count('class="bc-card"'))
+        self.assertIn('.bc-card { position:relative; width:85mm; height:55mm;', card)
+        self.assertIn('left:5mm;top:5mm;width:25.12269938650307mm;height:9mm', card)
+        self.assertIn('/assets/brand/nozza-print-crop-335-253-910-326.png', card)
+        self.assertIn("Анна", card)
+        self.assertIn("Мой NOZZA: A 1", card)
+        self.assertIn("https://nozza.example/my.html?code=A%201", card)
+        self.assertEqual(4, card.count('role="img" aria-label="QR:'))
+        self.assertEqual(4, card.count("<svg "))
+        self.assertNotIn("QR не напечатан", card)
+        self.db.upsert("customers", {"id": "c1", "name": "<svg onload=alert(1)>"})
+        escaped_card = business_card_html(self.db, "c1")
+        self.assertIn("&lt;svg onload=alert(1)&gt;", escaped_card)
+        self.assertNotIn("<svg onload=alert(1)>", escaped_card)
+        self.db.set_settings({"public_url": ""})
+        no_qr_card = business_card_html(self.db)
+        self.assertIn("QR<br>место кода", no_qr_card)
+        self.assertIn("адрес витрины не настроен", no_qr_card)
 
     def test_sticker_sheet_is_filled_to_the_end(self):
         """copies=0 — заполнить лист целиком, а не один экземпляр шаблона.
@@ -691,29 +709,183 @@ class PrintTests(unittest.TestCase):
             warranty_html(self.db, "nope")
 
     def test_warranty_ticket_carries_its_own_styles(self):
-        """Талон печатается со своими правилами, а не голым текстом.
+        """Талон печатается на отдельном A5 и повторяет все JSON блоки."""
+        import json
 
-        `pf.page(css=…)` — единственное место, куда попадают правила
-        конкретной формы. `warranty_html` собирал блок `.wt/.wt-qr/.wt-sign`,
-        но в `pf.page` его не передавал: талон уезжал на печать без рамки
-        148 мм, без размера QR и без линей подписей — голый текст на A4.
-        Нашёл линтер (F841: переменная `css` не использовалась), держит этот
-        тест. Проверяем по факту: каждый собственный класс талона обязан быть
-        описан в стилях листа, а рамка 148 мм — присутствовать.
-        """
         from connector.printflow.printing import warranty_html
         html = warranty_html(self.db, "o1")
         style, sep, body = html.partition("</style>")
         self.assertTrue(sep, "печатный лист без блока стилей")
-        used = {c for cls in re.findall(r'class="([^"]+)"', body)
-                for c in cls.split() if c.startswith("wt")}
-        self.assertIn("wt", used, "в талоне нет собственного класса .wt")
-        for cls in sorted(used):
-            self.assertRegex(style, rf"\.{cls}\s*\{{",
-                             f"класс .{cls} использован в талоне, но не описан "
-                             "в стилях листа: css формы не доехал до pf.page")
-        self.assertIn("148mm", style,
-                      "рамка талона 148 мм пропала из стилей листа")
+        self.assertIn("@page { size: A5; margin: 0; }", style)
+        self.assertIn("width:148mm; height:210mm", style)
+        self.assertIn("position:absolute", style)
+        spec = json.loads((ROOT / "site" / "assets" / "print-layouts-v2.json")
+                          .read_text(encoding="utf-8"))
+        layout = next(d for d in spec["documents"] if d["id"] == "warranty")
+        rendered = {
+            block_id: block_style
+            for block_id, block_style in re.findall(
+                r'data-block="([^"]+)" style="([^"]+)"', body)
+        }
+        self.assertEqual({b["id"] for b in layout["blocks"]}, set(rendered))
+        for block in layout["blocks"]:
+            style_text = rendered[block["id"]]
+            for prop, key in (("left", "x_mm"), ("top", "y_mm"),
+                              ("width", "width_mm"), ("height", "height_mm")):
+                self.assertIn(f'{prop}:{block[key]}mm', style_text)
+        self.assertIn('/assets/brand/nozza-print-crop-335-253-910-326.png', body)
+        self.assertIn("QR<br>место кода", body)
+
+    def test_warranty_uses_real_encoded_qr_when_configured(self):
+        from connector.printflow.printing import warranty_html
+        self.db.upsert("customers", {"id": "c1", "portal_code": "A 1"})
+        self.db.set_settings({"public_url": "https://nozza.example",
+                              "warranty_months": 12})
+        html = warranty_html(self.db, "o1")
+        self.assertIn("https://nozza.example/my.html?code=A%201", html)
+        self.assertIn('aria-label="QR: https://nozza.example/my.html?code=A%201"', html)
+        self.assertIn("<svg ", html)
+        self.assertIn("Срок гарантии: 12 мес. с даты выдачи", html)
+        self.assertNotIn("QR<br>место кода", html)
+
+    def test_b2b_forms_follow_v2_recipes(self):
+        import json
+        from connector.printflow.b2b import B2B
+
+        spec = json.loads((ROOT / "site" / "assets" / "print-layouts-v2.json")
+                          .read_text(encoding="utf-8"))
+        layouts = {doc["id"]: doc for doc in spec["documents"]}
+        for document_id in ("invoice", "cp", "receipt", "waybill"):
+            with self.subTest(document=document_id):
+                html = B2B(self.db).document("o1", document_id)
+                self.assertIn("@page{size:A4;margin:0}", html)
+                self.assertIn('class="document-sheet"', html)
+                self.assertIn('/assets/brand/nozza-print-crop-335-253-910-326.png', html)
+                rendered = {
+                    block_id: block_style
+                    for block_id, block_style in re.findall(
+                        r'data-block="([^\"]+)" style="([^\"]+)"', html)
+                }
+                recipe = layouts[document_id]
+                self.assertEqual({block["id"] for block in recipe["blocks"]},
+                                 set(rendered))
+                for block in recipe["blocks"]:
+                    for prop, key in (("left", "x_mm"), ("top", "y_mm"),
+                                      ("width", "width_mm"), ("height", "height_mm")):
+                        self.assertIn(f'{prop}:{block[key]}mm', rendered[block["id"]])
+                self.assertIn("500", html)
+                self.assertIn("Адресник", html)
+
+    def test_b2b_documents_repeat_a4_recipe_for_long_orders(self):
+        from connector.printflow.b2b import B2B
+        from connector.printflow.repo import Repo
+
+        Repo(self.db).save_order({"id": "o1", "items": [
+            {"name": f"Позиция {index}", "qty": 1, "price": index * 100}
+            for index in range(1, 7)
+        ]})
+        html = B2B(self.db).document("o1", "invoice")
+        self.assertEqual(2, html.count('<main class="document-sheet">'))
+        pages = re.findall(r'<main class="document-sheet">(.*?)</main>', html)
+        totals = [re.search(r'data-block="total"[^>]*>(.*?)</div>', page).group(1)
+                  for page in pages]
+        self.assertEqual(["", "Итого: 2 100 ₽"], totals)
+        self.assertIn("Страница 1 из 2", pages[0])
+        self.assertIn("Страница 2 из 2", pages[1])
+
+    def test_workshop_report_follows_v2_recipe(self):
+        import json
+        from connector.printflow.printing import workshop_report_html
+
+        html = workshop_report_html(self.db, 30)
+        self.assertIn("@page{size:A4;margin:0}", html)
+        self.assertIn("Цеховой отчёт", html)
+        self.assertIn("За 30 дней", html)
+        self.assertNotIn("var(--pf-line)", html)
+        spec = json.loads((ROOT / "site" / "assets" / "print-layouts-v2.json")
+                          .read_text(encoding="utf-8"))
+        layout = next(doc for doc in spec["documents"]
+                      if doc["id"] == "workshop-report")
+        rendered = {
+            block_id: block_style
+            for block_id, block_style in re.findall(
+                r'data-block="([^\"]+)" style="([^\"]+)"', html)
+        }
+        self.assertEqual({block["id"] for block in layout["blocks"]}, set(rendered))
+        for block in layout["blocks"]:
+            for prop, key in (("left", "x_mm"), ("top", "y_mm"),
+                              ("width", "width_mm"), ("height", "height_mm")):
+                self.assertIn(f'{prop}:{block[key]}mm', rendered[block["id"]])
+
+    def test_pack_sheet_follows_recipe_and_repeats_for_long_orders(self):
+        import json
+        from connector.printflow.printing import pack_sheet_html
+
+        data = {
+            "order": {"number": "42", "product": "Адресник", "qty": 1,
+                      "customer_name": "Анна"},
+            "items": [{"name": f"Позиция {i}", "qty": i} for i in range(1, 6)],
+            "brand_card": False,
+        }
+        html = pack_sheet_html(data)
+        self.assertIn("@page{size:A4;margin:0}", html)
+        self.assertEqual(2, html.count('<main class="pack-sheet">'))
+        self.assertIn("Позиция 5", html)
+        self.assertIn("Бренд-карточка не вкладывается", html)
+        self.assertIn('/assets/brand/nozza-print-crop-335-253-910-326.png', html)
+        self.assertNotIn("[изделие]", html)
+
+        spec = json.loads((ROOT / "site" / "assets" / "print-layouts-v2.json")
+                          .read_text(encoding="utf-8"))
+        layout = next(doc for doc in spec["documents"] if doc["id"] == "pack-sheet")
+        rendered = {
+            block_id: block_style
+            for block_id, block_style in re.findall(
+                r'data-block="([^\"]+)" style="([^\"]+)"', html)
+        }
+        self.assertEqual({block["id"] for block in layout["blocks"]}, set(rendered))
+        for block in layout["blocks"]:
+            style_text = rendered[block["id"]]
+            for prop, key in (("left", "x_mm"), ("top", "y_mm"),
+                              ("width", "width_mm"), ("height", "height_mm")):
+                self.assertIn(f'{prop}:{block[key]}mm', style_text)
+
+    def test_pickup_receipt_follows_thermal_recipe_and_keeps_all_lines(self):
+        import json
+        from connector.printflow.b2b import _pickup_receipt
+
+        req = {"legal_name": "NOZZA studio", "inn": "1234567890"}
+        order = {"price": 900, "paid": 400, "prepaid": 100}
+        lines = [{"name": f"Деталь {i}", "amount": i * 100} for i in range(1, 5)]
+        html = _pickup_receipt(order, req, "42", "Анна", "₽", lines,
+                               "https://nozza.example/track/42")
+        self.assertIn("@page{size:80mm auto;margin:0}", html)
+        self.assertIn('height:200mm', html)
+        self.assertIn("Выдача", html)
+        self.assertIn("Деталь 4", html)
+        self.assertIn("900 ₽", html)
+        self.assertIn("Оплачено: 500 ₽", html)
+        self.assertIn("Долг: 400 ₽", html)
+        self.assertIn("<svg ", html)
+
+        spec = json.loads((ROOT / "site" / "assets" / "print-layouts-v2.json")
+                          .read_text(encoding="utf-8"))
+        layout = next(doc for doc in spec["documents"] if doc["id"] == "pickup")
+        rendered = {
+            block_id: block_style
+            for block_id, block_style in re.findall(
+                r'data-block="([^\"]+)" style="([^\"]+)"', html)
+        }
+        self.assertTrue({block["id"] for block in layout["blocks"]}.issubset(rendered))
+        for block in layout["blocks"]:
+            style_text = rendered[block["id"]]
+            for prop, key in (("left", "x_mm"), ("width", "width_mm"),
+                              ("height", "height_mm")):
+                self.assertIn(f'{prop}:{block[key]}mm', style_text)
+            if block["id"] not in ("totals", "qr", "sign"):
+                self.assertIn(f'top:{block["y_mm"]}mm', style_text)
+            else:
+                self.assertIn(f'top:{block["y_mm"] + 10}mm', style_text)
 
     def test_print_forms_catalog_has_parameters(self):
         """Каталог форм — источник правды для панели: у каждой формы с

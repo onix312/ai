@@ -45,6 +45,7 @@ LOG_FILE = DATA_DIR / "connector.log"
 DEFAULT_SETTINGS: dict[str, object] = {
     "company_name": "NOZZA",
     "currency": "₽",
+    "warranty_months": 0,       # 0 — вписать срок от руки на гарантийном талоне
     # Энергия и амортизация
     "power_kw": 0.15,             # средняя потребляемая мощность P1S, кВт
     "energy_price": 6.0,          # ₽ за кВт·ч

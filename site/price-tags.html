@@ -21,7 +21,7 @@
 </style>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Конструктор ценников · PrintFlow</title>
+<title>NOZZA · Конструктор ценников</title>
 <link rel="icon" href="/assets/brand/favicon.svg" type="image/svg+xml">
 <style>
 /* ================================================================
@@ -298,6 +298,50 @@ dialog::backdrop { background:rgba(16,24,40,.52); backdrop-filter:blur(3px); }
 .lookup-result .ok { color:var(--ok); }
 .lookup-result .bad { color:var(--bad); }
 
+/* Final print layer: keep the existing workstation UI, render paper from JSON blocks. */
+body.price-tags-page .sheet { --paper-ink:#31242E; --paper-muted:#66555F; --paper-line:#D9C8CE; --paper-accent:#6E2BC8; --paper-soft:#F6F0F8; }
+body.price-tags-page .price-tag { display:block; flex:none; box-sizing:border-box; width:67mm; height:32mm; overflow:hidden; padding:0; border:0; border-radius:0;
+  background:#fff; color:var(--paper-ink); font-family:Arial,Helvetica,sans-serif; break-inside:avoid; }
+body.price-tags-page .price-tag::before { content:none; }
+body.price-tags-page .tag-top,body.price-tags-page .tag-body,body.price-tags-page .tag-main,body.price-tags-page .tag-bottom,
+body.price-tags-page .price-line,body.price-tags-page .price-subrow { display:contents; }
+body.price-tags-page .price-tag .tag-brand,body.price-tags-page .price-tag .tag-name,body.price-tags-page .price-tag .tag-price,
+body.price-tags-page .price-tag .qr,body.price-tags-page .price-tag .sku,body.price-tags-page .price-tag .promo-photo,
+body.price-tags-page .price-tag .barcode,body.price-tags-page .price-tag .old-price { position:absolute; box-sizing:border-box; margin:0; }
+body.price-tags-page .price-tag .tag-brand { display:block; overflow:hidden; color:#6E2BC8; font:700 7pt/1.25 Arial,Helvetica,sans-serif; letter-spacing:0; }
+body.price-tags-page .price-tag .tag-brand img { display:block; width:100%; height:100%; object-fit:contain; object-position:left center; }
+body.price-tags-page .price-tag .tag-brand span { display:none; }
+body.price-tags-page .price-tag .tag-brand .custom-brand { display:block; overflow:hidden; color:#6E2BC8; font:700 7pt/1.25 Arial,Helvetica,sans-serif; white-space:nowrap; }
+body.price-tags-page .price-tag .tag-name { display:block; overflow:hidden; color:#31242E; font:700 10pt/1.25 Arial,Helvetica,sans-serif; letter-spacing:0; white-space:normal; overflow-wrap:anywhere; }
+body.price-tags-page .price-tag .tag-price { display:block; overflow:hidden; color:#6E2BC8; font:700 13pt/1.25 Arial,Helvetica,sans-serif; letter-spacing:0; white-space:nowrap; }
+body.price-tags-page .price-tag .tag-price span { font:inherit; }
+body.price-tags-page .price-tag .qr { display:grid; place-items:center; padding:1mm; border:.2mm solid #D9C8CE; background:#fff; }
+body.price-tags-page .price-tag .qr svg { width:100%; height:100%; display:block; }
+body.price-tags-page .price-tag .qr-placeholder { color:#66555F; font:400 7pt/1.15 Arial,Helvetica,sans-serif; text-align:center; }
+body.price-tags-page .price-tag .sku { display:block; overflow:hidden; color:#66555F; font:400 6pt/1.25 Arial,Helvetica,sans-serif; text-align:left; white-space:nowrap; }
+body.price-tags-page .price-tag .badge,body.price-tags-page .price-tag .tag-desc,body.price-tags-page .price-tag .tag-meta,
+body.price-tags-page .price-tag .price-lead,body.price-tags-page .price-tag .price-note,body.price-tags-page .price-tag .footer-line { display:none !important; }
+body.price-tags-page .price-tag:not(.promo) .barcode { display:none; }
+body.price-tags-page .price-tag.promo { width:67mm; height:57mm; padding:0; border:0; border-radius:0; background:#fff; }
+body.price-tags-page .price-tag.variant-mono .tag-brand,body.price-tags-page .price-tag.variant-mono .tag-price { color:#31242E; }
+body.price-tags-page .price-tag.promo .old-price { display:block; overflow:hidden; color:#66555F; font:400 6pt/1.25 Arial,Helvetica,sans-serif; text-decoration:line-through; }
+body.price-tags-page .price-tag.promo .promo-photo { display:grid; place-items:center; overflow:hidden; border:.2mm solid #D9C8CE;
+  background:#F6F0F8; color:#66555F; font:400 9pt/1.25 Arial,Helvetica,sans-serif; }
+body.price-tags-page .price-tag.promo .promo-photo img { width:100%; height:100%; object-fit:contain; }
+body.price-tags-page .price-tag.promo .barcode { display:flex; align-items:center; justify-content:center; gap:1mm; overflow:hidden; border:.2mm solid #D9C8CE; }
+body.price-tags-page .price-tag.promo .barcode svg { display:block; width:auto !important; max-width:100%; height:auto !important; max-height:7mm; flex:none; }
+body.price-tags-page .price-tag .barcode-caption { color:#31242E; font:400 7pt/1.25 Arial,Helvetica,sans-serif; white-space:nowrap; }
+body.price-tags-page .price-tag .barcode-missing { color:#66555F; font:400 7pt/1.25 Arial,Helvetica,sans-serif; border:0; }
+@media screen {
+  body.price-tags-page .sheet.standard { padding:4.5mm; }
+  body.price-tags-page .sheet.promo { padding:6mm 4.5mm; }
+  body.price-tags-page .sheet-caption { display:none; }
+}
+@media print {
+  body.price-tags-page .sheet.standard { padding:4.5mm; }
+  body.price-tags-page .sheet.promo { padding:6mm 4.5mm; }
+}
+
 /* -------------------------------------------------------- адаптив/печать */
 @media (max-width:980px) {
   .workspace { grid-template-columns:1fr; }
@@ -317,10 +361,38 @@ dialog::backdrop { background:rgba(16,24,40,.52); backdrop-filter:blur(3px); }
   .sheet.promo { padding:6mm 4.5mm; }
   .sheet-caption { display:none; }
 }
+@media screen {
+  .price-tag { flex:none; box-shadow:none; }
+  .sheet.standard,.sheet.promo { padding:0; }
+  .sheet-caption { top:1mm; left:1mm; }
+}
 </style>
 <link rel="stylesheet" href="assets/refine.css?v=18.23.1">
+<link rel="stylesheet" href="/assets/nozza-design-v2.css?v=20.1.35">
+<style>
+@media screen {
+  body.pf-public.price-tags-page { min-height:100vh;background:#EDF1F7;color:#182033; }
+  body.pf-public.price-tags-page .topbar { background:rgba(255,255,255,.96);border-color:#DFE4EE;color:#182033; }
+  body.pf-public.price-tags-page .topbar h1 { color:#182033; }
+  body.pf-public.price-tags-page .topbar p { color:#6C7890; }
+  body.pf-public.price-tags-page .sidebar { background:#fff;border-color:#DFE4EE; }
+  body.pf-public.price-tags-page .section { border:0;border-bottom:1px solid #DFE4EE;border-radius:0;background:transparent;box-shadow:none; }
+  body.pf-public.price-tags-page .section:last-child { border:0; }
+  body.pf-public.price-tags-page .preview { background:#EDF1F7; }
+  body.pf-public.price-tags-page .preview-head { color:#6C7890; }
+  body.pf-public.price-tags-page .btn { border-color:#DFE4EE;background:#fff;color:#182033; }
+  body.pf-public.price-tags-page .btn.primary { border-color:transparent;background:linear-gradient(135deg,#4F46E5,#7C3AED);color:#fff; }
+  body.pf-public.price-tags-page .btn:disabled { opacity:.48; }
+  body.pf-public.price-tags-page .search { background:#F5F7FB;color:#182033; }
+  body.pf-public.price-tags-page .template-card,body.pf-public.price-tags-page .style-card { background:#fff;color:#182033; }
+  body.pf-public.price-tags-page .sheet { background:#fff; }
+  body.pf-public.price-tags-page .empty { background:#fff;color:#6C7890; }
+  body.pf-public.price-tags-page .empty b { color:#182033; }
+  body.pf-public.price-tags-page .one-c-card { background:#F0FAF6; }
+}
+</style>
 </head>
-<body class="pf-public">
+<body class="pf-public price-tags-page">
 <header class="topbar noprint">
   <div class="brand">
     <img src="/assets/brand/nozza-mark-1.svg" alt="NOZZA">
@@ -335,7 +407,7 @@ dialog::backdrop { background:rgba(16,24,40,.52); backdrop-filter:blur(3px); }
   <a class="btn" href="/index.html#shelf">← Стеллаж</a>
   <button class="btn" type="button" id="btnExport">⇩ CSV для 1С</button>
   <button class="btn" type="button" id="btnHelp">Как связать с 1С</button>
-  <button class="btn primary" type="button" id="btnPrint">Печать</button>
+  <button class="btn primary" type="button" id="btnPrint" disabled>Печать</button>
 </header>
 
 <div class="workspace">
@@ -374,7 +446,7 @@ dialog::backdrop { background:rgba(16,24,40,.52); backdrop-filter:blur(3px); }
           <span class="template-card"><b>Промостенд</b><small>67 × 57 мм · 15 на A4</small></span></label>
       </div>
       <div class="format-note"><b>Физические форматы без масштабирования</b>
-        <span>Обычный ценник — 67 × 32 мм. Высокий промостенд — 67 × 57 мм. В окне печати оставьте A4 и масштаб 100%; не включайте «вписать в страницу».</span></div>
+        <span>Обычный ценник — 67 × 32 мм. Высокий промостенд — 67 × 57 мм; при QR и Code128 одновременно высокий формат включается автоматически. В окне печати оставьте A4 и масштаб 100%; не включайте «вписать в страницу».</span></div>
       <label class="control"><span><i>Копий каждого товара</i><i>для повтора на полке</i></span>
         <input id="copies" type="number" min="1" max="50" value="1"></label>
     </section>
@@ -526,7 +598,8 @@ const $ = (id) => document.getElementById(id);
 const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g,
   (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
 const money = (value) => Math.round(Number(value) || 0).toLocaleString('ru-RU') + ' ₽';
-const priceDigits = (value) => Math.round(Number(value) || 0).toLocaleString('ru-RU');
+const priceDigits = (value) => value == null || value === '' || !Number.isFinite(Number(value))
+  ? '—' : Math.round(Number(value)).toLocaleString('ru-RU');
 function plural(n, one, few, many) {
   const abs = Math.abs(n) % 100, d = abs % 10;
   if (abs > 10 && abs < 20) return many;
@@ -572,6 +645,7 @@ let renderTimer = 0;
 let fatalShown = false;
 // Члены групп витрины по умолчанию скрыты: на полке висит средний ценник.
 let showGroupMembers = false;
+let printLayouts = null;
 
 /* ============================== настройки ==============================
    Единственный источник правды о полях: каждое поле знает свой элемент,
@@ -685,13 +759,23 @@ function typeOf(item, opts) {
   // Средний ценник группы в v1 — всегда промостенд 67 × 57: на мелком
   // 67 × 32 шапка ряда не читается, и формат у группы не переопределяется.
   if (item.is_group || item.kind === 'group') return 'promo';
-  return opts.template === 'card' ? normalizeType(item.tag_template) : normalizeType(opts.template);
+  const requested = opts.template === 'card' ? normalizeType(item.tag_template) : normalizeType(opts.template);
+  // JSON recipe constraint: a compact tag cannot hold both machine codes.
+  return opts.showQr && opts.showBarcode ? 'promo' : requested;
 }
 function variantOf(item, type, opts) {
   const variant = normalizeVariant(opts.variant === 'card' ? item.tag_variant : opts.variant);
   // Маленький ценник 67 × 32 не вмещает полезное фото, поэтому фото-рецепт
   // честно деградирует в акцент на цене, а не ужимает контент.
   return type === 'standard' && variant === 'photo' ? 'accent' : variant;
+}
+function recipeId(type, variant) {
+  if (type === 'promo') return variant === 'photo' ? 'promo-photo' : 'promo-offer';
+  return ({ clean: 'tag-clean', accent: 'tag-price', sale: 'tag-promo', mono: 'tag-mono' })[variant] || 'tag-clean';
+}
+function blockStyle(recipe, id) {
+  const block = recipe && recipe.blocks && recipe.blocks.find((entry) => entry.id === id);
+  return block ? `left:${block.x_mm}mm;top:${block.y_mm}mm;width:${block.width_mm}mm;height:${block.height_mm}mm` : '';
 }
 function colorOf(item, opts) {
   if (opts.colorMode === 'custom') return /^#[0-9a-fA-F]{6}$/.test(opts.accent || '') ? opts.accent : '#4f46e5';
@@ -700,14 +784,9 @@ function colorOf(item, opts) {
 
 /* ============================== ценник ============================== */
 function qrSvg(item, opts) {
-  if (!opts.showQr || !item.url || !window.QR || !window.QR.svg) return '';
+  if (!opts.showQr) return '';
+  if (!item.url || !window.QR || !window.QR.svg) return '<div class="qr qr-placeholder">QR не задан</div>';
   return `<div class="qr">${window.QR.svg(item.url, { ecl: 'M', margin: 1 })}</div>`;
-}
-function promoPhoto(item, type, variant) {
-  if (type !== 'promo' || variant !== 'photo') return '';
-  const img = item.photo && item.id
-    ? `<img src="/api/shelf/photo.jpg?id=${encodeURIComponent(String(item.id))}" alt="">` : '';
-  return `<div class="promo-photo">${img}<span class="photo-fallback">${img ? '' : 'ВАШ<br>ТОВАР'}</span></div>`;
 }
 function todayRu() {
   const now = new Date();
@@ -717,6 +796,7 @@ function todayRu() {
 function tagHtml(item, type, opts) {
   const isGroup = Boolean(item.is_group || item.kind === 'group');
   const variant = isGroup ? 'accent' : variantOf(item, type, opts);
+  const recipe = printLayouts && printLayouts[recipeId(type, variant)];
   const color = variant === 'mono' ? '#172033' : colorOf(item, opts);
   const badge = opts.badge || item.tag_badge || (isGroup ? 'Группа' : '');
   const note = item.tag_note || item.note || '';
@@ -724,43 +804,46 @@ function tagHtml(item, type, opts) {
      а пересчёт цен идёт из панели — без даты невозможно понять, свежая ли
      бумага на полке. Печатаем датой печати, а не «сегодня» в момент чтения. */
   const meta = [
-    isGroup && item.member_count ? (item.member_count + ' поз. на полке') : '',
+    isGroup && item.member_count != null && item.member_count !== '' && Number.isFinite(Number(item.member_count)) ? (item.member_count + ' поз. на полке') : '',
     item.material || '',
-    item.grams ? Math.round(item.grams) + ' г' : '',
-    opts.showStock && !isGroup ? (item.qty + ' шт в наличии') : '',
+    Number.isFinite(Number(item.grams)) && Number(item.grams) > 0 ? Math.round(item.grams) + ' г' : '',
+    opts.showStock && !isGroup && item.qty != null && item.qty !== '' && Number.isFinite(Number(item.qty)) ? (item.qty + ' шт в наличии') : '',
     opts.showDate ? 'ценник от ' + todayRu() : ''].filter(Boolean).join(' · ');
   const logo = opts.showLogo
-    ? `<span class="tag-brand"><img src="/assets/brand/nozza-mark-1.svg" alt=""><span>${esc(opts.brandName || 'NOZZA')}</span></span>`
+    ? `<span class="tag-brand" style="${blockStyle(recipe, 'brand')}">${opts.brandName
+      ? `<span class="custom-brand">${esc(opts.brandName)}</span>`
+      : '<img src="/assets/brand/nozza-print-crop-614-394-633-142.png" alt="">'}</span>`
     : '<span></span>';
-  // API стеллажа не дублирует цифры рядом с кодом: артикул уже рядом, а
-  // всю физическую высоту на 67 × 32 мм отдают полоскам сканера.
-  // Средний ценник группы — без штрихкода: касса идёт поиском + фото.
+  // Средний ценник группы не притворяется отдельным SKU.
   const barcode = (!isGroup && opts.showBarcode)
     ? (item.barcode_svg
-      ? `<div class="barcode">${item.barcode_svg.replace(/<svg\b/, '<svg preserveAspectRatio="none"')}</div>`
+      ? `<div class="barcode"><span class="barcode-caption">CODE 128</span>${item.barcode_svg.replace(/<svg\b/, '<svg preserveAspectRatio="xMinYMid meet"')}</div>`
       : '<div class="barcode"><span class="barcode-missing">нет кода 1С</span></div>')
     : '';
-  const sku = !isGroup && opts.showSku && item.sku ? `<div class="sku">арт. ${esc(item.sku)}</div>` : '';
+  const sku = !isGroup && opts.showSku && item.sku ? `<div class="sku">${esc(item.sku)}</div>` : '';
   const currentPrice = Number(item.price) || 0;
   const oldPrice = Number(item.tag_old_price) || 0;
-  const oldPriceHtml = !isGroup && oldPrice > currentPrice && currentPrice > 0 ? `<span class="old-price">было ${esc(money(oldPrice))}</span>` : '';
+  const oldPriceHtml = !isGroup && recipe && recipe.blocks.some((block) => block.id === 'old-price') && oldPrice > currentPrice && currentPrice > 0
+    ? `<span class="old-price" style="${blockStyle(recipe, 'old-price')}">${esc(money(oldPrice))}</span>` : '';
   const lead = opts.priceLead ? `<span class="price-lead">${esc(opts.priceLead)}</span>` : '';
   const priceNoteHtml = opts.priceNote ? `<span class="price-note">${esc(opts.priceNote)}</span>` : '';
   const footer = opts.footer && type === 'promo' ? `<div class="footer-line">${esc(opts.footer)}</div>` : '';
   // Группа: QR/фото штуки не печатаем — это шапка ряда, не карточка SKU.
-  const qr = isGroup ? '' : qrSvg(item, opts);
-  const photo = isGroup ? '' : promoPhoto(item, type, variant);
+  const qr = isGroup ? '' : qrSvg(item, opts).replace(/class="qr([^"]*)"/, `class="qr$1" style="${blockStyle(recipe, 'qr')}"`);
   return `<article class="price-tag ${type} variant-${variant} font-${esc(opts.fontFamily)} border-${esc(opts.borderMode)}" style="--tag-color:${esc(color)};--font-scale:${opts.fontScale / 100}">
     <div class="tag-top">${logo}${badge ? `<span class="badge">${esc(badge)}</span>` : ''}</div>
     <div class="tag-body"><div class="tag-main">
-      <div class="tag-name">${esc(item.name || 'Без названия')}</div>
+      <div class="tag-name" style="${blockStyle(recipe, 'name')}">${esc(item.name || 'Без названия')}</div>
       ${opts.showDesc && note ? `<div class="tag-desc">${esc(note)}</div>` : ''}
-      <div class="price-line">${lead}<div class="tag-price">${esc(priceDigits(item.price))} <span>₽</span></div></div>
+      <div class="price-line">${lead}<div class="tag-price" style="${blockStyle(recipe, 'price')}">${esc(priceDigits(item.price))} <span>₽</span></div></div>
       ${(oldPriceHtml || priceNoteHtml) ? `<div class="price-subrow">${oldPriceHtml}${priceNoteHtml}</div>` : ''}
       ${meta ? `<div class="tag-meta">${esc(meta)}</div>` : ''}
     </div>${qr}</div>
-    ${photo}
-    ${(barcode || sku) ? `<div class="tag-bottom">${barcode}${sku}</div>` : ''}
+    ${type === 'promo' ? `<div class="promo-photo" style="${blockStyle(recipe, 'content')}">${variant === 'photo' && item.photo && item.id
+      ? `<img src="/api/shelf/photo.jpg?id=${encodeURIComponent(String(item.id))}" alt="">`
+      : esc(note || (variant === 'photo' ? 'ФОТО НЕ ЗАДАНО' : 'ОФФЕР НЕ ЗАДАН'))}</div>` : ''}
+    ${barcode ? barcode.replace('class="barcode"', `class="barcode" style="${blockStyle(recipe, 'barcode')}"`) : ''}
+    ${sku ? sku.replace('class="sku"', `class="sku" style="${blockStyle(recipe, 'sku')}"`) : ''}
     ${footer}
   </article>`;
 }
@@ -854,6 +937,7 @@ function renderSheets() {
   $('previewText').textContent = chosen.length
     ? `Готово: ${chosen.length} ${plural(chosen.length, 'ценник', 'ценника', 'ценников')} (${opts.copies} ${plural(opts.copies, 'копия', 'копии', 'копий')} каждого) · ${pageNumber} ${plural(pageNumber, 'лист', 'листа', 'листов')}`
     : 'Нет выбранных ценников';
+  $('btnPrint').disabled = loadState !== 'ready' || chosen.length === 0;
 }
 
 function safeRender() {
@@ -863,6 +947,7 @@ function safeRender() {
     // Ошибка отрисовки не должна оставлять страницу «в подвешенном» виде.
     console.error('price-tags: render failed', error);
     $('previewText').textContent = 'Ошибка при построении листов';
+    $('btnPrint').disabled = true;
     $('sheets').innerHTML = `<div class="empty error-box"><b>Не получилось собрать листы</b>
       <span>${esc(error && error.message || String(error))}</span>
       <button class="btn primary" type="button" id="btnRenderRetry">Повторить</button></div>`;
@@ -883,6 +968,7 @@ function setSelection(predicate) {
 /* ============================== состояния загрузки ============================== */
 function setLoadState(state, message) {
   loadState = state;
+  $('btnPrint').disabled = state !== 'ready';
   const itemBox = $('itemBox'), sheets = $('sheets'), previewText = $('previewText');
   if (state === 'loading') {
     $('itemCount').textContent = '…';
@@ -992,6 +1078,19 @@ async function loadData() {
   }
 }
 
+async function loadPrintLayouts() {
+  const response = await fetch('/assets/print-layouts-v2.json', { cache: 'no-store' });
+  if (!response.ok) throw new Error(`Не удалось загрузить реестр печатных форм (код ${response.status})`);
+  const spec = await response.json();
+  if (!spec || spec.units !== 'mm' || !Array.isArray(spec.documents)) throw new Error('Неизвестный формат реестра печатных форм');
+  const ids = ['tag-clean', 'tag-price', 'tag-promo', 'tag-mono', 'promo-photo', 'promo-offer'];
+  printLayouts = Object.fromEntries(ids.map((id) => {
+    const recipe = spec.documents.find((entry) => entry.id === id);
+    if (!recipe || recipe.width_mm !== 67 || !Array.isArray(recipe.blocks)) throw new Error(`В реестре отсутствует макет ${id}`);
+    return [id, recipe];
+  }));
+}
+
 /* ============================== 1С ============================== */
 async function export1C() {
   const buttons = [$('btnExport'), $('btnExportSide')];
@@ -1091,7 +1190,10 @@ function bindEvents() {
   document.querySelectorAll('[data-tag-preset]').forEach((button) => {
     button.addEventListener('click', () => applyPreset(button.dataset.tagPreset));
   });
-  $('btnPrint').addEventListener('click', () => window.print());
+  $('btnPrint').addEventListener('click', () => {
+    if (loadState !== 'ready' || !selected.size || !$('sheets').querySelector('.price-tag')) return;
+    window.print();
+  });
   $('btnExport').addEventListener('click', export1C);
   $('btnExportSide').addEventListener('click', export1C);
   $('btnHelp').addEventListener('click', openHelp);
@@ -1119,7 +1221,15 @@ function showFatal(reason) {
 /* ============================== запуск ============================== */
 applySavedSettings();
 bindEvents();
-loadData();
+loadPrintLayouts().then(loadData).catch((error) => {
+  console.error('price-tags: print layout load failed', error);
+  setLoadState('error', error && error.message || 'Не удалось прочитать реестр макетов');
+  const retry = $('btnRetry');
+  if (retry) retry.addEventListener('click', () => loadPrintLayouts().then(loadData).catch((nextError) => {
+    console.error('price-tags: print layout retry failed', nextError);
+    setLoadState('error', nextError && nextError.message || 'Не удалось прочитать реестр макетов');
+  }));
+});
 })();
 </script>
 <script src="/assets/theme-toggle.js?v=18.23.1" defer></script>

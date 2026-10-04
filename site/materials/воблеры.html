@@ -4,34 +4,25 @@
 <title>NOZZA — воблеры на полку</title>
 <link rel="icon" href="../assets/brand/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="generator.css?v=18.23.1">
+<link rel="stylesheet" href="../assets/nozza-design-v2.css?v=18.23.1">
 <style>
-  .grid { display: grid; grid-template-columns: repeat(2, 92mm); gap: 5mm; justify-content: center; }
-  .sheet-title { font-size: 11px; font-weight: 700; color: var(--ink-soft); letter-spacing: .06em; text-transform: uppercase; margin: 0 0 3mm; }
-
-  .wob {
-    width: 92mm; height: 87mm; box-sizing: border-box; border-radius: 4mm;
-    border: 0.9mm solid var(--ink); background: #fff;
-    background-image: radial-gradient(circle at 100% 0%, #eeecff 0 30mm, transparent 30mm);
-    padding: 3.5mm 4mm 2.5mm; position: relative;
-    display: flex; flex-direction: column; cursor: pointer;
-    transition: outline .12s ease, box-shadow .12s ease;
-    page-break-inside: avoid; break-inside: avoid;
-  }
-  .wob:hover { box-shadow: 0 6px 18px -12px rgba(19,26,43,.6); }
-  .wob.selected { outline: 3px solid var(--brand); outline-offset: 2px; }
-  .wob.promo { border-color: var(--brand-2); background-image: radial-gradient(circle at 100% 0%, #f3ecff 0 30mm, transparent 30mm); }
-  .wob .hole {
-    width: 7mm; height: 7mm; border: 0.8mm solid var(--ink); border-radius: 50%;
-    align-self: center; margin-bottom: 2.5mm; flex: none;
-  }
-  .wob .name { font-size: 14.5px; font-weight: 900; line-height: 1.08; letter-spacing: -.01em; }
-  .wob .price { font-size: 24px; font-weight: 900; color: var(--brand); line-height: 1; margin: 1.8mm 0 1mm; }
-  .wob .offer { font-size: 10px; color: #42506e; line-height: 1.35; }
-  .wob .foot { margin-top: auto; display: flex; align-items: center; gap: 3mm; padding-top: 2mm; }
-  .wob .qr svg { width: 20mm; height: 20mm; display: block; }
-  .wob .ft { font-size: 8.5px; color: var(--ink-soft); line-height: 1.35; }
-  .wob .ft b { color: var(--ink); }
-  .wob .cut { border-top: 1px dashed #b9c4da; margin-top: 2mm; text-align: center; font-size: 7.5px; color: #9aa6bd; padding-top: 1mm; }
+  #sheets { overflow-x:auto; }
+  .grid { display:grid; grid-template-columns:repeat(2,var(--wobbler-width,92mm)); gap:5mm; justify-content:center; }
+  .sheet-title { margin:0 0 3mm; color:var(--ink-soft); font-size:11px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; }
+  .wob { position:relative; flex:none; width:var(--wobbler-width,92mm); height:var(--wobbler-height,87mm); overflow:hidden; background:#fff; cursor:pointer; page-break-inside:avoid; break-inside:avoid; }
+  .wob.selected { outline:2px solid var(--brand); outline-offset:2px; }
+  .wob.promo { box-shadow:inset 0 0 0 .4mm var(--brand-2); }
+  .wob-block { position:absolute; display:flex; align-items:flex-start; overflow:hidden; white-space:pre-wrap; overflow-wrap:anywhere; font-family:Arial,Helvetica,sans-serif; }
+  .wob-block.logo img { display:block; width:100%; height:100%; object-fit:contain; object-position:left center; }
+  .wob-block.circle { border-style:solid; border-radius:50%; }
+  .wob-block.qr { display:grid; place-items:center; border-style:solid; text-align:center; }
+  .wob-block.qr svg { display:block; width:100%; height:100%; }
+  .wob-block.qr.missing { color:#66555f!important; font-size:7pt!important; }
+  .print-actions { display:flex; align-items:center; gap:10px; }
+  .print-status { color:var(--ink-soft); font-size:11px; }
+  button:disabled { cursor:not-allowed; opacity:.48; }
+  @media print { #sheets { overflow:visible; } .wob.selected { outline:none; } }
+  @media(max-width:650px) { .editor .row { align-items:stretch; } .editor input.wide,.editor input { max-width:100%; min-width:0; } }
 
   .editor { background: #f4f6fc; border: 1px solid #dde2ef; border-radius: 10px; padding: 12px 14px; margin-top: 10px; }
   .editor h3 { margin: 0 0 8px; font-size: 12px; letter-spacing: .04em; text-transform: uppercase; color: var(--ink-soft); }
@@ -43,25 +34,40 @@
   .chip { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; background: #fff; border: 1px solid var(--line); border-radius: 20px; padding: 3px 10px; }
   .chip b { font-weight: 800; color: var(--brand); }
   .btn.danger { background: #fef2f2; border-color: #f4b4b4; color: #b42318; }
+  @media screen {
+    body.pf-utility { background: #1D161F; color: #F8EEE6; }
+    body.pf-utility .panel { position: static; }
+    body.pf-utility .editor { background: #352A37; border-color: #5B465C; }
+    body.pf-utility .editor h3 { color: #F8EEE6; }
+    body.pf-utility .editor label, body.pf-utility .print-status { color: #BFAFB7; }
+    body.pf-utility .editor input, body.pf-utility .editor select { background: #241B25; color: #F8EEE6; border-color: #5B465C; }
+    body.pf-utility .chip { background: #2C232E; color: #E2D2D9; border-color: #5B465C; }
+    body.pf-utility .chip b { color: #D2A1FF; }
+    body.pf-utility .note { color: #E2D2D9; background: #2C232E; border-color: #5B465C; }
+    body.pf-utility .note b { color: #F4BC80; }
+    body.pf-utility .btn:not(.primary):not(.danger) { background: #2C232E; color: #F8EEE6; border-color: #5B465C; }
+  }
 </style>
-</head><body>
+</head><body class="pf-utility">
 
 <div class="panel noprint">
   <div class="panel-row">
     <h1><img data-nz-mark src="../assets/brand/nozza-mark-1.svg" alt="">Воблеры на полку</h1>
     <div class="panel-row" data-nz-common="qr"></div>
-    <label>Общий оффер <input id="tail" data-page="tail" type="text" style="min-width:230px" value="Сделаем под вас за 1–3 дня"></label>
+    <label>Общий оффер <input id="tail" data-page="tail" type="text" style="min-width:230px" placeholder="Дополнение к офферу"></label>
     <label><input type="checkbox" id="qron" data-page="qron" checked> QR на воблере</label>
+    <label><input type="checkbox" id="confirmed" data-page="confirmed"> Макет и QR проверены</label>
+    <div class="print-actions"><button class="btn primary" id="printWobblers" type="button" disabled>Печать</button><span class="print-status" id="printStatus" role="status">Заполните поля, чтобы подготовить печать.</span></div>
   </div>
 
   <div class="editor">
     <h3>✏️ Правка воблера — кликните по воблеру на листе</h3>
     <div class="row">
       <label>Название <input id="e_name" class="wide" placeholder="Адресник с именем"></label>
-      <label>Цена <input id="e_price" style="width:100px" placeholder="от 350 ₽"></label>
+      <label>Цена <input id="e_price" style="width:100px" placeholder="Согласованная цена"></label>
     </div>
     <div class="row">
-      <label>Оффер <input id="e_offer" style="min-width:280px" placeholder="Имя + телефон + цвет"></label>
+      <label>Оффер <input id="e_offer" style="min-width:280px" placeholder="Согласованный оффер"></label>
       <label><input type="checkbox" id="e_promo"> акцентная рамка</label>
       <button class="btn primary" id="btnAdd">+ Добавить</button>
       <button class="btn" id="btnDup">Дублировать</button>
@@ -73,7 +79,7 @@
 </div>
 
 <div class="note noprint">
-  <b>Как пользоваться:</b> клик по воблеру — правка названия, цены и оффера; общий оффер и QR — в панели сверху. Воблер вырезается по контуру, отверстие — под крючок полки. Печать на плотной бумаге 200 г/м², масштаб 100 %.
+  <b>Как пользоваться:</b> выберите карточку, внесите согласованные данные и проверьте QR. Шесть макетов размещаются на A4; физический размер каждого — 92 × 87 мм. Печать начинается только после проверки данных.
 </div>
 
 <div id="sheets"></div>
@@ -83,105 +89,77 @@
 <script src="nz.js?v=18.23.1"></script>
 <script>
 'use strict';
-const $ = (id) => document.getElementById(id);
-const LS_KEY = 'wobblers';
-const PER_PAGE = 6;
-
-const START = [
-  { name: 'Адресник с именем', price: 'от 350 ₽', offer: 'Имя + телефон + цвет', promo: true },
-  { name: 'Органайзер по размерам', price: 'от 300 ₽', offer: 'Точно под ваше место' },
-  { name: 'Именная табличка', price: 'от 450 ₽', offer: 'Для питомца или дома' },
-  { name: 'QR-стойка для бизнеса', price: 'от 250 ₽', offer: 'Меню и оплата на столе' },
-  { name: 'Номерки и ценники', price: 'от 60 ₽', offer: 'Партия для кафе и точек' },
-  { name: 'Крепления и держатели', price: 'от 200 ₽', offer: 'Ремонт без ожидания доставки' },
+const $=(id)=>document.getElementById(id), LS_KEY='wobblers', PER_PAGE=6;
+const START=Array.from({length:6},()=>({name:'',price:'',offer:'',promo:false}));
+const OLD_START=[
+  {name:'Адресник с именем',price:'от 350 ₽',offer:'Имя + телефон + цвет',promo:true},
+  {name:'Органайзер по размерам',price:'от 300 ₽',offer:'Точно под ваше место'},
+  {name:'Именная табличка',price:'от 450 ₽',offer:'Для питомца или дома'},
+  {name:'QR-стойка для бизнеса',price:'от 250 ₽',offer:'Меню и оплата на столе'},
+  {name:'Номерки и ценники',price:'от 60 ₽',offer:'Партия для кафе и точек'},
+  {name:'Крепления и держатели',price:'от 200 ₽',offer:'Ремонт без ожидания доставки'},
 ];
-
-let items = [];
-let selected = -1;
-
-function load() {
-  const st = NZ.pageState({});
-  items = Array.isArray(st[LS_KEY]) && st[LS_KEY].length ? st[LS_KEY] : START.map((s) => ({ ...s }));
+let items=[],selected=-1,layout=null;
+function load(){
+  const st=NZ.pageState({}),saved=st[LS_KEY];
+  const legacy=JSON.stringify(saved)===JSON.stringify(OLD_START);
+  items=Array.isArray(saved)&&saved.length&&!legacy?saved:START.map(x=>({...x}));
+  if(st.tail==='Сделаем под вас за 1–3 дня') NZ.pageStateSave({tail:''});
 }
-function save() { NZ.pageStateSave({ [LS_KEY]: items }); }
-
-function renderWob(s, idx) {
-  const tail = $('tail').value || '';
-  const qr = $('qron').checked ? NZ.qr(NZ.contact().qrbase || NZ.contact().site, { ecl: 'M', margin: 0 }) : '';
-  return `<div class="wob${s.promo ? ' promo' : ''}${idx === selected ? ' selected' : ''}" data-idx="${idx}" title="Клик — править">
-    <div class="hole"></div>
-    <div class="name">${NZ.esc(s.name || '')}</div>
-    <div class="price">${NZ.esc(s.price || '')}</div>
-    <div class="offer">${NZ.esc(s.offer || '')}${tail ? ' · ' + NZ.esc(tail) : ''}</div>
-    <div class="foot">
-      ${qr ? `<div class="qr">${qr}</div>` : ''}
-      <div class="ft"><b>NOZZA</b><br>Отсканируйте —<br>заказать или спросить</div>
-    </div>
-    <div class="cut">вырезать · отверстие — для крючка полки</div>
-  </div>`;
+function save(){NZ.pageStateSave({[LS_KEY]:items});}
+function publicUrl(raw){try{const u=new URL(raw);return /^https?:$/.test(u.protocol)&&!(/^(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/i.test(u.hostname));}catch(_){return false;}}
+function textBlock(block,text,extraClass=''){
+  const el=document.createElement('div');el.className='wob-block '+block.kind+' '+extraClass;el.dataset.id=block.id;
+  Object.assign(el.style,{left:block.x_mm+'mm',top:block.y_mm+'mm',width:block.width_mm+'mm',height:block.height_mm+'mm',padding:(block.text_padding_mm||0)+'mm',fontSize:block.font_pt+'pt',lineHeight:String(block.line_height||1.25),fontWeight:block.font==='ArialBold'?'700':'400',color:block.color||'#31242e',textAlign:block.align||'left'});
+  if(block.stroke_color){el.style.borderColor=block.stroke_color;el.style.borderWidth=(block.stroke_width_mm||.2)+'mm';}
+  if(block.kind==='logo'){const img=document.createElement('img');img.src='../assets/brand/nozza-print-crop-614-394-633-142.png';img.alt='NOZZA';el.append(img);}
+  else if(block.kind==='qr'){
+    const contact=NZ.contact(),url=contact.qrbase||contact.site;
+    if($('qron').checked&&publicUrl(url)){el.innerHTML=NZ.qr(url,{ecl:'M',margin:0});el.setAttribute('aria-label','QR-код витрины');}
+    else {el.textContent=$('qron').checked?'QR\nместо кода':'QR отключён';el.classList.add('missing');}
+  } else if(block.kind==='circle'){el.style.borderStyle='solid';el.style.borderRadius='50%';}
+  else el.textContent=text;
+  return el;
 }
-
-function draw() {
-  save();
-  const host = $('sheets');
-  if (!items.length) {
-    host.innerHTML = '<div class="sheet"><div style="padding:40mm 10mm;text-align:center;color:var(--ink-soft);font-size:13px;line-height:1.7">Воблеров нет — добавьте кнопкой «+ Добавить».</div></div>';
-    return;
+function renderWob(item,index){
+  const card=document.createElement('div');card.className='wob'+(item.promo?' promo':'')+(index===selected?' selected':'');card.dataset.idx=index;card.title='Клик — править';card.setAttribute('role','button');card.tabIndex=0;
+  const contact=NZ.contact(),details=[item.offer||'[ОФФЕР]',$('tail').value.trim()].filter(Boolean).join(' · '),who=contact.phone||contact.tg||contact.city||'[КОНТАКТ]';
+  layout.blocks.forEach(block=>{if(block.id==='qr'&&!$('qron').checked)return;card.append(textBlock(block,block.id==='name'?(item.name||'[НАЗВАНИЕ]'):block.id==='price'?(item.price||'[ЦЕНА] ₽'):block.id==='offer'?details+'\n'+who:''));});
+  const choose=()=>select(index);card.addEventListener('click',choose);card.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();choose();}});return card;
+}
+function ready(){
+  const missing=items.length===0||items.some(x=>!String(x.name||'').trim()||!String(x.price||'').trim()||!String(x.offer||'').trim());
+  const qrMissing=$('qron').checked&&!publicUrl(NZ.contact().qrbase||NZ.contact().site);
+  $('printWobblers').disabled=missing||qrMissing||!$('confirmed').checked;
+  $('printStatus').textContent=missing?'Заполните название, цену и оффер для каждого воблера.':qrMissing?'Укажите публичную ссылку для QR или отключите его.':!$('confirmed').checked?'Подтвердите проверку текста и QR.':'Макет готов к печати в масштабе 100%.';
+}
+function draw(){
+  save();const host=$('sheets');host.replaceChildren();
+  if(!layout){$('printStatus').textContent='Загружаю геометрию из дизайн-реестра…';return;}
+  document.documentElement.style.setProperty('--wobbler-width',layout.width_mm+'mm');
+  document.documentElement.style.setProperty('--wobbler-height',layout.height_mm+'mm');
+  if(!items.length){host.textContent='Воблеров нет — добавьте кнопку «+ Добавить».';ready();return;}
+  for(let offset=0;offset<items.length;offset+=PER_PAGE){
+    const page=items.slice(offset,offset+PER_PAGE),sheet=document.createElement('section');sheet.className='sheet';
+    const title=document.createElement('div');title.className='sheet-title noprint';title.textContent=`Лист ${offset/PER_PAGE+1} из ${Math.ceil(items.length/PER_PAGE)} · ${layout.width_mm} × ${layout.height_mm} мм · ${page.length} шт`;sheet.append(title);
+    const grid=document.createElement('div');grid.className='grid';page.forEach((item,j)=>grid.append(renderWob(item,offset+j)));sheet.append(grid);host.append(sheet);
   }
-  const pages = [];
-  for (let i = 0; i < items.length; i += PER_PAGE) pages.push(items.slice(i, i + PER_PAGE));
-  host.innerHTML = pages.map((page, p) =>
-    `<div class="sheet">
-      <div class="sheet-title noprint">Лист ${p + 1} из ${pages.length} · 92 × 87 мм · ${page.length} шт</div>
-      <div class="grid">${page.map((s, j) => renderWob(s, p * PER_PAGE + j)).join('')}</div>
-    </div>`).join('');
-  host.querySelectorAll('.wob[data-idx]').forEach((el) => {
-    el.addEventListener('click', () => select(Number(el.dataset.idx)));
-  });
+  ready();
 }
-
-function select(idx) {
-  selected = idx;
-  const s = items[idx];
-  if (!s) { selected = -1; draw(); return; }
-  $('e_name').value = s.name || '';
-  $('e_price').value = s.price || '';
-  $('e_offer').value = s.offer || '';
-  $('e_promo').checked = !!s.promo;
-  $('selInfo').innerHTML = `<b>Выбрано:</b> #${idx + 1} ${NZ.esc(s.name || '')}`;
-  draw();
-}
-
-function patch(p) { if (selected >= 0 && items[selected]) { Object.assign(items[selected], p); save(); } }
-
-['e_name', 'e_price', 'e_offer'].forEach((id) => {
-  $(id).addEventListener('input', () => { patch({ name: $('e_name').value, price: $('e_price').value, offer: $('e_offer').value }); draw(); });
-});
-$('e_promo').addEventListener('change', () => { patch({ promo: $('e_promo').checked }); draw(); });
-
-$('btnAdd').addEventListener('click', () => {
-  items.push({ name: 'Новый воблер', price: 'от ___ ₽', offer: 'Что входит' });
-  select(items.length - 1);
-});
-$('btnDup').addEventListener('click', () => {
-  if (selected < 0) return alert('Сначала выберите воблер');
-  items.splice(selected + 1, 0, { ...items[selected] });
-  select(selected + 1);
-});
-$('btnDel').addEventListener('click', () => {
-  if (selected < 0) return alert('Сначала выберите воблер');
-  items.splice(selected, 1);
-  selected = -1;
-  $('selInfo').innerHTML = '<b>Выбрано:</b> нет';
-  draw();
-});
-$('btnReset').addEventListener('click', () => {
-  if (!confirm('Вернуть стартовый набор из 6 воблеров?')) return;
-  items = START.map((s) => ({ ...s }));
-  selected = -1; draw();
-});
-
+function select(index){selected=index;const s=items[index];if(!s){selected=-1;draw();return;}$('e_name').value=s.name||'';$('e_price').value=s.price||'';$('e_offer').value=s.offer||'';$('e_promo').checked=!!s.promo;$('selInfo').innerHTML=`<b>Выбрано:</b> #${index+1} ${NZ.esc(s.name||'[НАЗВАНИЕ]')}`;draw();}
+function unconfirm(){if($('confirmed').checked){$('confirmed').checked=false;NZ.pageStateSave({confirmed:false});}}
+function patch(){if(selected<0||!items[selected])return;Object.assign(items[selected],{name:$('e_name').value,price:$('e_price').value,offer:$('e_offer').value});unconfirm();save();draw();}
+['e_name','e_price','e_offer'].forEach(id=>$(id).addEventListener('input',patch));
+$('e_promo').addEventListener('change',()=>{if(selected>=0){items[selected].promo=$('e_promo').checked;unconfirm();draw();}});
+$('btnAdd').addEventListener('click',()=>{unconfirm();items.push({name:'',price:'',offer:'',promo:false});select(items.length-1);});
+$('btnDup').addEventListener('click',()=>{if(selected<0)return alert('Сначала выберите воблер');unconfirm();items.splice(selected+1,0,{...items[selected]});select(selected+1);});
+$('btnDel').addEventListener('click',()=>{if(selected<0)return alert('Сначала выберите воблер');unconfirm();items.splice(selected,1);selected=-1;$('selInfo').innerHTML='<b>Выбрано:</b> нет';draw();});
+$('btnReset').addEventListener('click',()=>{if(!confirm('Очистить макеты и вернуть шесть пустых воблеров?'))return;unconfirm();items=START.map(x=>({...x}));selected=-1;draw();});
+$('tail').addEventListener('input',()=>{unconfirm();draw();});$('qron').addEventListener('change',()=>{unconfirm();draw();});
+$('printWobblers').addEventListener('click',()=>{if(!$('printWobblers').disabled)window.print();});
 load();
 NZ.mount(draw);
+document.querySelectorAll('[data-nz]').forEach(el=>el.addEventListener('input',()=>{unconfirm();draw();}));
+fetch('../assets/print-layouts-v2.json').then(r=>{if(!r.ok)throw Error('layout');return r.json();}).then(data=>{layout=(data.documents||[]).find(x=>x.id==='wobbler');if(!layout)throw Error('wobbler');draw();}).catch(()=>{$('printStatus').textContent='Не удалось загрузить геометрию воблера из JSON.';});
 </script>
 </body></html>

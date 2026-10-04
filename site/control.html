@@ -232,8 +232,27 @@
  body.kiosk .pk-at { font-size:12px; }
 </style>
 <link rel="stylesheet" href="assets/refine.css?v=18.23.1">
+<link rel="stylesheet" href="/assets/nozza-design-v2.css?v=20.1.35">
+<style>
+/* terminal-pult.jpg: cool workshop terminal palette, independent of dashboard theme. */
+html[data-theme] body.pf-pult-page {
+  --bg:#0B121B;--bg-2:#101A25;--panel:#16212E;--panel-2:#1C2A39;--panel-3:#243548;
+  --line:#2D4052;--line-soft:#243548;--line-strong:#425B72;--text:#F2F6FB;--text-2:#D5E0EB;--muted:#A0B2C5;
+  --accent:#818CF8;--accent-2:#6D78E8;--accent-soft:rgba(129,140,248,.16);--accent-line:rgba(155,164,255,.5);
+  --ok:#50CBA5;--warn:#F3C66B;--bad:#FB8EA4;color-scheme:dark;color:#F2F6FB;background:#0B121B;
+}
+body.pf-pult-page .pk-tile,body.pf-pult-page .pk-job,body.pf-pult-page .pk-slot,
+body.pf-pult-page .pk-defect-wrap,body.pf-pult-page .pk-card,body.pf-pult-page .pk-soon,
+body.pf-pult-page .pk-cmd,body.pf-pult-page .pk-tabs { background:#16212E;border-color:#2D4052;box-shadow:none; }
+body.pf-pult-page .pk-offline { background:rgba(243,198,107,.12); }
+body.pf-pult-page .pk-empty { background:#16212E;border-color:#2D4052; }
+body.pf-pult-page .pk-btn.go { background:#50CBA5;color:#091912; }
+body.pf-pult-page .pk-btn.danger { background:#FB7185;color:#fff; }
+body.pf-pult-page .pk-tab.on { background:#1C2A39;border-color:#425B72; }
+body.pf-pult-page :focus-visible { outline-color:#A5AEFF; }
+</style>
 </head>
-<body class="pf-utility">
+<body class="pf-utility pf-pult-page">
 <div class="pk-wrap">
  <div class="pk-top">
   <button class="pk-brand" id="pk_brand" type="button" title="Долгое нажатие — киоск">

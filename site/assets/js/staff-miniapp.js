@@ -36,7 +36,15 @@
       }
     }catch(e){}
     return fetch(url, { method:method, headers:headers, body: body ? JSON.stringify(body) : null, cache:"no-store" })
-      .then(function(r){ return r.json().then(function(d){ if(!r.ok) throw new Error(d.error||("ошибка "+r.status)); return d; }); });
+      .then(function(r){
+        return r.text().then(function(text){
+          var d;
+          try { d = text ? JSON.parse(text) : {}; }
+          catch(e) { throw new Error("Коннектор недоступен"); }
+          if(!r.ok) throw new Error(r.status===401 || r.status===403 ? (d.error||"Нет доступа") : "Коннектор недоступен");
+          return d;
+        });
+      });
   }
 
   function renderWho(){
@@ -287,9 +295,10 @@
       loadQueue();
       loadPrinters();
     }).catch(function(err){
-      var who=$("who"); if(who) who.textContent=err.message||"нет доступа";
-      var net=$("net"); if(net){ net.textContent="нет доступа"; net.className="pill bad"; }
-      toast(err.message||"Нет доступа — откройте через Telegram");
+      var reason=err.message||"Нет доступа";
+      var who=$("who"); if(who) who.textContent=reason;
+      var net=$("net"); if(net){ net.textContent=reason==="Нет доступа"?"нет доступа":"нет связи"; net.className="pill bad"; }
+      toast(reason==="Нет доступа"?"Нет доступа — откройте через Telegram":reason);
     });
     // Обновление каждые 15с
     setInterval(function(){ if(document.hidden) return; loadSummary(); if(st.screen==="queue") loadQueue(); if(st.screen==="printers") loadPrinters(); }, 15000);

@@ -1,96 +1,143 @@
-<!DOCTYPE html>
-<html lang="ru"><head><meta charset="utf-8">
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>NOZZA — прайс на подставку</title>
 <link rel="icon" href="../assets/brand/favicon.svg" type="image/svg+xml">
 <style>
-  @page { size: A4 portrait; margin: 9mm; }
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: "Segoe UI", Arial, sans-serif; color: #12203c; background: #fff; }
-  .panel { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center;
-    background: #f3f6fd; border: 1px solid #dbe3f2; border-radius: 10px; padding: 10px 14px; margin-bottom: 6mm; }
-  .panel b { font-size: 13px; margin-right: 6px; }
-  .panel label { font-size: 12px; color: #5d6b85; display: flex; align-items: center; gap: 6px; }
-  .panel input { font: inherit; font-size: 12.5px; padding: 5px 8px; border: 1px solid #d6dcea; border-radius: 7px; }
-  .panel .btn { font: inherit; font-size: 12.5px; font-weight: 650; padding: 6px 13px; border-radius: 8px;
-    border: 1px solid #d6dcea; background: #fff; cursor: pointer; }
-  .panel .btn.primary { background: linear-gradient(135deg,#4f46e5,#7c3aed); color: #fff; border: 0; }
-  .note { display: none; background: #fff8e5; border: 1px solid #f0d99a; border-radius: 8px; padding: 8px 12px; margin-bottom: 5mm; font-size: 12px; color: #8a6516; }
-  .note.on { display: block; }
-  .head { background: linear-gradient(135deg, #4f46e5, #7c3aed); color: #fff; border-radius: 12px; padding: 6mm 7mm; display: flex; align-items: center; gap: 5mm; }
-  .head img { width: 16mm; height: 16mm; flex: none; }
-  .head h1 { font-size: 20pt; font-weight: 900; letter-spacing: 2px; }
-  .head p { font-size: 10pt; opacity: .9; margin-top: 1.5mm; }
-  table { width: 100%; border-collapse: collapse; margin-top: 5mm; font-size: 11pt; }
-  th { background: #1f3864; color: #fff; padding: 3mm; text-align: left; font-size: 10pt; }
-  td { border: 1px solid #dbe3f2; padding: 2.6mm 3mm; }
-  td.p { font-weight: 800; text-align: right; color: #4f46e5; white-space: nowrap; }
-  tr:nth-child(even) td { background: #f6f8fd; }
-  .foot { margin-top: 5mm; display: flex; gap: 6mm; align-items: center; border-top: 2px dashed #c9d3e8; padding-top: 5mm; }
-  .qr { width: 34mm; height: 34mm; flex: none; }
-  .qr svg { width: 100%; height: 100%; display: block; }
-  .foot .t { font-size: 10.5pt; color: #42506e; line-height: 1.5; }
-  .foot .t b { font-size: 14pt; color: #1f3864; }
-  @media print { .panel, .note { display: none; } }
-</style></head>
+  :root { color-scheme: light; font-family: Arial,Helvetica,sans-serif; color:#31242e; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:#eceaf0; font-family:Arial,Helvetica,sans-serif; }
+  .toolbar { display:flex; align-items:end; flex-wrap:wrap; gap:10px 16px; padding:12px 16px; background:#fff; border-bottom:1px solid #d9c8ce; }
+  .toolbar-title { margin-right:auto; font-size:14px; font-weight:700; }
+  .toolbar-title small { display:block; margin-top:3px; color:#66555f; font-size:11px; font-weight:400; }
+  .field { display:flex; flex-direction:column; gap:4px; color:#66555f; font-size:11px; }
+  .field input { min-height:34px; width:min(240px,100%); padding:6px 9px; border:1px solid #cbbbc7; border-radius:5px; color:#31242e; font:13px Arial,Helvetica,sans-serif; }
+  button { min-height:36px; padding:8px 14px; border:1px solid #6e2bc8; border-radius:5px; background:#6e2bc8; color:#fff; font:700 13px Arial,Helvetica,sans-serif; cursor:pointer; }
+  button.secondary { background:#fff; color:#31242e; border-color:#cbbbc7; }
+  button:disabled { opacity:.5; cursor:not-allowed; }
+  :focus-visible { outline:3px solid #9b65d6; outline-offset:2px; }
+  .notice { width:min(210mm,calc(100% - 24px)); margin:12px auto; padding:9px 12px; border:1px solid #d8b86a; border-radius:5px; background:#fff9e9; color:#634c16; font-size:12px; }
+  .notice[hidden] { display:none; }
+  .stage { overflow:auto; padding:16px 12px 32px; }
+  .sheet { position:relative; flex:none; width:210mm; height:297mm; margin:0 auto; overflow:hidden; background:#fff; color:#31242e; font-family:Arial,Helvetica,sans-serif; box-shadow:0 4px 24px #14121c33; }
+  .block { position:absolute; display:flex; align-items:flex-start; justify-content:flex-start; overflow:hidden; white-space:pre-wrap; overflow-wrap:anywhere; }
+  .block.logo img { display:block; width:100%; height:100%; object-fit:contain; object-position:left center; mix-blend-mode:normal; }
+  .block.cell { border-style:solid; }
+  .block.qr { display:grid; place-items:center; border-style:solid; }
+  .block.qr svg { display:block; width:100%; height:100%; }
+  .block.qr.missing { padding:3mm; border-style:dashed!important; color:#8a3030!important; text-align:center; }
+  .status { min-height:17px; color:#66555f; font-size:11px; }
+  @page { size:210mm 297mm; margin:0; }
+  @media print {
+    html,body { width:210mm; height:297mm; margin:0!important; padding:0!important; background:#fff!important; }
+    .toolbar,.notice { display:none!important; }
+    .stage { overflow:visible; padding:0; }
+    .sheet { width:210mm!important; height:297mm!important; margin:0; box-shadow:none; print-color-adjust:exact; -webkit-print-color-adjust:exact; }
+  }
+  @media(max-width:600px) {
+    .toolbar-title { width:100%; }
+    .field { flex:1; min-width:130px; }
+    .actions { display:flex; width:100%; justify-content:flex-end; gap:8px; }
+    .stage { padding-left:12px; padding-right:12px; }
+  }
+</style>
+</head>
 <body>
-<div class="panel">
-  <b>Прайс на подставку — данные из базы PrintFlow</b>
-  <label>Город <input id="city" value=""></label>
-  <label>Ссылка QR <input id="link" value=""></label>
-  <button class="btn primary" id="reload">↻ Обновить из PrintFlow</button>
+<div class="toolbar" aria-label="Параметры прайса">
+  <div class="toolbar-title">Прайс на подставку<small>Формат A4 · размеры и позиции из дизайн-реестра</small></div>
+  <label class="field">Город<input id="city" maxlength="80" placeholder="Город из настроек"></label>
+  <label class="field">Ссылка для QR<input id="link" type="url" inputmode="url" placeholder="https://…"></label>
+  <div class="actions"><button class="secondary" id="reload" type="button">Обновить каталог</button><button id="print" type="button" disabled>Печать</button></div>
+  <label class="field" style="flex-direction:row;align-items:center"><input id="qr-checked" type="checkbox" style="min-height:0;width:auto">Проверил ссылку и QR</label>
 </div>
-<div class="note" id="note">Коннектор не запущен — показаны демо-позиции. Запустите PrintFlow и нажмите «Обновить», чтобы подтянуть настоящие товары и цены.</div>
-<div class="head"><img id="mark" src="../assets/brand/nozza-mark-1-white.svg" alt="NOZZA"><div><h1>NOZZA</h1><p>Локальное 3D-производство · готовое в наличии и под заказ</p></div></div>
-<table><thead><tr><th>Изделие</th><th>Что под заказ</th><th style="text-align:right">Цена</th></tr></thead><tbody id="rows"></tbody></table>
-<div class="foot"><div class="qr" id="qr"></div><div class="t"><b>Цена на готовый товар — на ценнике.</b><br>Индивидуальный заказ считаем по фото, размерам, количеству и сроку.<br>Спросите на кассе — примем заявку за минуту.</div></div>
+<div class="notice" id="notice" role="status">Загружаю каталог…</div>
+<main class="stage"><section class="sheet" id="sheet" aria-label="Прайс, A4"></section></main>
 <script src="../assets/qr.js?v=18.23.1"></script>
-<script>window.QR_FALLBACK=1;if(!window.QR)window.QR={svg:function(){return '<div style="font-size:10px;color:#94a3b8">QR…</div>';}};</script>
 <script>
 (function(){
-  var DEMO = [
-    ['Адресник с именем', 'цвет, форма, шрифт', '450 ₽'],
-    ['Именная табличка', 'для питомца или дома', '350 ₽'],
-    ['Органайзер по размерам', 'под ваше место', 'от 300 ₽'],
-    ['Держатель / крепление', 'диаметр, нагрузка', 'от 200 ₽'],
-    ['QR-стойка', 'логотип и цвет точки', 'от 600 ₽'],
-    ['Номерки и ценники', 'партия от 10 шт', 'от 80 ₽'],
-  ];
-  function el(id){ return document.getElementById(id); }
-  function c(){ var o={}; try{ o=JSON.parse(localStorage.getItem('nozza:contact')||'{}'); }catch(e){} return o; }
-  function initContact(){
-    var cfg=c();
-    if(!el('city').value) el('city').value = cfg.city || 'Симферополь';
-    if(!el('link').value) el('link').value = cfg.site || 'http://127.0.0.1:8765/order.html';
-    var mark=el('mark'); if(mark) mark.src='../assets/brand/nozza-mark-1-white.svg'; // знак выбран (вариант 1), выбор удалён в 18.4.1
+  'use strict';
+  var layoutUrl='../assets/print-layouts-v2.json';
+  var sheet=document.getElementById('sheet');
+  var notice=document.getElementById('notice');
+  var printButton=document.getElementById('print');
+  var qrChecked=document.getElementById('qr-checked');
+  var entries=[];
+  var catalogReady=false;
+  var qrReady=false;
+  var cityReady=false;
+  function el(id){return document.getElementById(id);}
+  function contact(){try{return JSON.parse(localStorage.getItem('nozza:contact')||'{}');}catch(_){return {};}}
+  function safeText(value){return String(value==null?'':value);}
+  function validUrl(value){try{var u=new URL(value);return u.protocol==='https:'||u.protocol==='http:';}catch(_){return false;}}
+  function updatePrint(){printButton.disabled=!(catalogReady&&qrReady&&cityReady&&qrChecked.checked);}
+  function setNotice(text,kind){notice.textContent=text;notice.dataset.kind=kind||'';notice.hidden=!text;}
+  function put(block,node){
+    node.className='block '+(block.kind==='logo'?'logo ':block.kind==='cell'?'cell ':block.kind==='qr'?'qr ':'')+(block.id||'');
+    node.dataset.id=block.id;
+    node.style.left=block.x_mm+'mm';node.style.top=block.y_mm+'mm';
+    node.style.width=block.width_mm+'mm';node.style.height=block.height_mm+'mm';
+    node.style.padding=(block.text_padding_mm||0)+'mm';
+    node.style.fontSize=block.font_pt+'pt';node.style.lineHeight=String(block.line_height||1.25);
+    node.style.fontWeight=block.font==='ArialBold'?'700':'400';node.style.color=block.color||'#31242e';
+    node.style.background=block.background||'transparent';node.style.textAlign=block.align||'left';
+    if(block.stroke_color){node.style.borderColor=block.stroke_color;node.style.borderWidth=(block.stroke_width_mm||.2)+'mm';}
+    if(block.kind==='logo'){
+      var img=document.createElement('img');img.src='../assets/brand/nozza-print-crop-335-253-910-326.png';img.alt='NOZZA';node.appendChild(img);
+    }else if(block.kind==='qr'){
+      node.textContent='QR\nместо кода';node.style.borderColor=block.stroke_color;node.style.borderWidth=(block.stroke_width_mm||.2)+'mm';
+    }else node.textContent=block.text||'';
+    sheet.appendChild(node);
   }
-  function money(v){ return Math.round(parseFloat(v)||0).toLocaleString('ru-RU')+' ₽'; }
-  function render(rows, demo){
-    el('note').classList.toggle('on', !!demo);
-    el('rows').innerHTML = rows.map(function(r){
-      return '<tr><td><b>'+r[0]+'</b></td><td>'+r[1]+'</td><td class="p">'+r[2]+'</td></tr>';
-    }).join('');
+  function render(layout){
+    entries=layout.blocks;
+    sheet.replaceChildren();
+    entries.forEach(function(block){put(block,document.createElement('div'));});
+    document.querySelectorAll('.block[data-id^="cell-"]').forEach(function(cell){cell.textContent='';});
+    updateDynamic();
   }
-  function qr(){
-    var link = el('link').value || 'http://127.0.0.1:8765/order.html';
-    var box = el('qr');
-    if (window.QR) box.innerHTML = QR.svg(link, { ecl: 'M', margin: 1 });
-    else box.textContent = 'QR: ' + link;
-  }
-  function load(){
-    initContact();
-    var rows = [], demo = false;
-    fetch('/api/catalog').then(function(r){ return r.json(); }).then(function(d){
-      (d.catalog||[]).slice(0,14).forEach(function(it){
-        rows.push([it.name, it.material || 'под заказ', it.price ? money(it.price) : 'по расчёту']);
+  function money(value){var n=Number(value);return Number.isFinite(n)?new Intl.NumberFormat('ru-RU',{maximumFractionDigits:2}).format(n)+' ₽':'';}
+  function updateDynamic(){
+    var cfg=contact();
+    var city=el('city').value.trim()||safeText(cfg.city).trim();
+    cityReady=!!city;
+    var metadata=sheet.querySelector('[data-id="metadata"]');
+    if(metadata)metadata.textContent=(city?city+' · ':'')+'Актуальные данные каталога';
+    for(var i=0;i<10;i++){
+      var item=catalogReady?window.__priceCatalog[i]:null;
+      [['0',item&&item.name||''],['1',item&&(item.notes||item.material)||''],['2',item?money(item.price):'']].forEach(function(v){
+        var node=sheet.querySelector('[data-id="cell-'+i+'-'+v[0]+'"]');if(node)node.textContent=safeText(v[1]);
       });
-      render(rows.length ? rows : DEMO, !rows.length);
-    }).catch(function(){ render(DEMO, true); });
-    qr();
+    }
+    var link=el('link').value.trim()||cfg.site||'';
+    var qr=sheet.querySelector('[data-id="qr"]');
+    qrReady=validUrl(link)&&!!window.QR&&typeof window.QR.svg==='function';
+    if(qrReady){qr.innerHTML=window.QR.svg(link,{ecl:'M',margin:1});qr.classList.remove('missing');qr.setAttribute('aria-label','QR-код ссылки '+link);}
+    else{qr.textContent='QR\nДобавьте публичную ссылку';qr.classList.add('missing');qr.removeAttribute('aria-label');}
+    updatePrint();
   }
-  el('reload').addEventListener('click', load);
-  ['city','link'].forEach(function(id){ el(id).addEventListener('input', function(){ var cfg=c(); cfg.city=el('city').value; cfg.site=el('link').value; try{ localStorage.setItem('nozza:contact', JSON.stringify(cfg)); }catch(e){} qr(); }); });
-  load();
+  function loadCatalog(){
+    catalogReady=false;window.__priceCatalog=[];updateDynamic();updatePrint();setNotice('Загружаю актуальный каталог…','loading');
+    fetch('/api/catalog',{headers:{Accept:'application/json'}}).then(function(response){if(!response.ok)throw new Error('HTTP '+response.status);return response.json();}).then(function(data){
+      var rows=Array.isArray(data.catalog)?data.catalog:[];
+      window.__priceCatalog=rows.filter(function(item){return item&&item.name&&item.archived!==1;}).slice(0,10);
+      if(!window.__priceCatalog.length){setNotice('Каталог доступен, но в нём нет активных позиций. Печать прайса отключена.','empty');return;}
+      catalogReady=true;setNotice(window.__priceCatalog.length<10?'В каталоге '+window.__priceCatalog.length+' позиций; незаполненные строки оставлены пустыми.':'Загружены актуальные позиции каталога.','ready');updateDynamic();
+    }).catch(function(){catalogReady=false;window.__priceCatalog=[];updateDynamic();setNotice('Каталог недоступен. Демо-цены не подставляются; подключите PrintFlow, чтобы загрузить реальные позиции.','error');});
+  }
+  var savedContact=contact();
+  el('city').value=safeText(savedContact.city);
+  el('link').value=safeText(savedContact.site);
+  fetch(layoutUrl).then(function(r){if(!r.ok)throw new Error('layout');return r.json();}).then(function(data){
+    var layout=(data.documents||[]).find(function(d){return d.id==='price-list';});
+    if(!layout)throw new Error('missing price-list');render(layout);loadCatalog();
+  }).catch(function(){setNotice('Не удалось загрузить дизайн-реестр печатных форм.','error');});
+  ['city','link'].forEach(function(id){el(id).addEventListener('input',function(){var cfg=contact();cfg[id==='city'?'city':'site']=el(id).value;try{localStorage.setItem('nozza:contact',JSON.stringify(cfg));}catch(_){}updateDynamic();});});
+  qrChecked.addEventListener('change',updatePrint);
+  el('reload').addEventListener('click',loadCatalog);
+  printButton.addEventListener('click',function(){if(!printButton.disabled)window.print();});
 })();
 </script>
-</body></html>
+</body>
+</html>

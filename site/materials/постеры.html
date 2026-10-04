@@ -5,145 +5,6 @@
 <link rel="icon" href="../assets/brand/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="generator.css?v=18.23.1">
 <style>
-  /* Постер — общий каркас. Темы (П3) меняют фон и краски,
-     акцентные цвета приходят инлайн-переменными с панели. */
-  .poster {
-    height: 281mm; display: flex; flex-direction: column; position: relative; overflow: hidden;
-    border-radius: 2mm; padding: 2mm;
-    --pf-a: var(--brand); --pf-a2: var(--brand-2);
-    -webkit-print-color-adjust: exact; print-color-adjust: exact;
-    cursor: pointer; transition: box-shadow .12s;
-  }
-  .poster.selected { box-shadow: 0 0 0 3px var(--pf-a); }
-  .sheet.a3 .poster { height: 404mm; }
-  .poster.t-dark { background: #10131a; color: #fff; --line: rgba(255,255,255,.22); --ink-soft: rgba(233,238,250,.72); }
-  .poster.t-ink  { background: linear-gradient(160deg, #0b0d12 20%, #171b28 100%); color: #fff; --line: rgba(255,255,255,.22); --ink-soft: rgba(233,238,250,.72); }
-  .p-top { display: flex; align-items: center; gap: 5mm; }
-  .p-top img { width: 22mm; height: 22mm; }
-  .p-word { font-size: 40px; font-weight: 900; letter-spacing: .06em; line-height: 1; }
-  .sheet.a3 .p-word { font-size: 58px; }
-  .p-tag { font-size: 12px; color: var(--ink-soft); letter-spacing: .1em; text-transform: uppercase; margin-top: 2mm; }
-  .sheet.a3 .p-tag { font-size: 16px; }
-  .p-hero { margin-top: 14mm; font-size: 52px; font-weight: 900; line-height: 1.03; letter-spacing: -.02em; }
-  .sheet.a3 .p-hero { font-size: 74px; margin-top: 20mm; }
-  .poster.compact .p-hero { font-size: 40px; }
-  .sheet.a3 .poster.compact .p-hero { font-size: 56px; }
-  .p-hero em { font-style: normal; background: linear-gradient(120deg, var(--pf-a), var(--pf-a2)); -webkit-background-clip: text; background-clip: text; color: transparent; }
-  .p-lead { margin-top: 8mm; font-size: 17px; line-height: 1.5; color: var(--ink-soft); max-width: 150mm; }
-  .sheet.a3 .p-lead { font-size: 23px; max-width: 215mm; }
-  .p-list { margin-top: 10mm; display: flex; flex-direction: column; gap: 4mm; }
-  .p-item { display: flex; align-items: baseline; gap: 4mm; font-size: 16px; }
-  .sheet.a3 .p-item { font-size: 22px; }
-  .p-num { font-size: 13px; font-weight: 900; color: #fff; flex: none; width: 8mm; height: 8mm; border-radius: 50%; background: linear-gradient(135deg, var(--pf-a), var(--pf-a2)); display: inline-flex; align-items: center; justify-content: center; transform: translateY(1mm); }
-  .sheet.a3 .p-num { width: 11mm; height: 11mm; font-size: 17px; }
-  .p-item b { font-weight: 750; }
-  .p-item span { color: var(--ink-soft); }
-  .p-bottom { margin-top: auto; padding-top: 8mm; border-top: 2px solid var(--line); display: flex; align-items: center; justify-content: space-between; gap: 8mm; }
-  .p-contact { font-size: 15px; line-height: 1.7; }
-  .sheet.a3 .p-contact { font-size: 20px; }
-  .p-contact b { font-size: 19px; }
-  .sheet.a3 .p-contact b { font-size: 26px; }
-  .p-contact .muted { color: var(--ink-soft); font-size: 13px; }
-  .sheet.a3 .p-contact .muted { font-size: 17px; }
-  .p-qr { text-align: center; flex: none; }
-  .p-qr svg { width: 38mm; height: 38mm; display: block; background: #fff; padding: 1.5mm; border-radius: 2mm; }
-  .sheet.a3 .p-qr svg { width: 52mm; height: 52mm; }
-  .p-qr div { font-size: 10px; color: var(--ink-soft); margin-top: 2mm; letter-spacing: .05em; }
-  .p-strip { position: absolute; right: -30mm; top: 60mm; width: 90mm; height: 90mm; background: linear-gradient(135deg, var(--pf-a), var(--pf-a2)); opacity: .07; border-radius: 22mm; transform: rotate(18deg); }
-  .poster.t-dark .p-strip, .poster.t-ink .p-strip { opacity: .16; }
-  .steps { display: flex; flex-direction: column; gap: 5mm; margin-top: 10mm; }
-  .step { display: flex; gap: 5mm; align-items: flex-start; }
-  .step .sn { font-size: 22px; font-weight: 900; background: linear-gradient(120deg, var(--pf-a), var(--pf-a2)); -webkit-background-clip: text; background-clip: text; color: transparent; line-height: 1; flex: none; width: 12mm; }
-  .sheet.a3 .step .sn { font-size: 30px; width: 16mm; }
-  .step .st { font-size: 17px; font-weight: 750; }
-  .sheet.a3 .step .st { font-size: 23px; }
-  .step .sd { font-size: 13.5px; color: var(--ink-soft); margin-top: 1mm; line-height: 1.45; }
-  .sheet.a3 .step .sd { font-size: 18px; }
-  /* П15 «Мы в Telegram»: крупный QR в центре */
-  .poster.tg { justify-content: flex-start; }
-  .p-bigqr { margin: 14mm auto 0; text-align: center; }
-  .poster.t-dark .p-bigqr svg, .poster.t-ink .p-bigqr svg { background: #fff; }
-  .p-bigqr svg { width: 88mm; height: 88mm; padding: 4mm; background: #fff; border-radius: 4mm; }
-  .sheet.a3 .p-bigqr svg { width: 120mm; height: 120mm; }
-  .p-bigqr .cap { margin-top: 5mm; font-size: 16px; font-weight: 750; letter-spacing: .02em; }
-  .sheet.a3 .p-bigqr .cap { font-size: 22px; }
-  .p-bigqr .cap small { display: block; font-size: 12.5px; color: var(--ink-soft); font-weight: 400; margin-top: 2mm; }
-  /* П16 «Акция»: плашка срока */
-  .p-until { display: inline-flex; align-items: center; gap: 3mm; margin-top: 10mm; padding: 3.5mm 7mm; border-radius: 99mm; background: linear-gradient(135deg, var(--pf-a), var(--pf-a2)); color: #fff; font-size: 16px; font-weight: 800; letter-spacing: .02em; align-self: flex-start; }
-  .sheet.a3 .p-until { font-size: 22px; padding: 5mm 9mm; }
-  /* П9 «Витрина-QR»: сетка товаров + крупный QR */
-  .p-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4mm; margin-top: 10mm; }
-  .sheet.a3 .p-grid { gap: 6mm; }
-  .p-card { background: rgba(255,255,255,.08); border: 1px solid var(--line); border-radius: 3mm; padding: 4mm; text-align: center; }
-  .poster.t-dark .p-card, .poster.t-ink .p-card { background: rgba(255,255,255,.05); }
-  .p-card .p-img { width: 100%; aspect-ratio: 1; background: linear-gradient(135deg, var(--pf-a), var(--pf-a2)); border-radius: 2mm; margin-bottom: 3mm; display: flex; align-items: center; justify-content: center; font-size: 32px; color: #fff; }
-  .sheet.a3 .p-card .p-img { font-size: 44px; }
-  .p-card .p-name { font-size: 13px; font-weight: 700; margin-bottom: 2mm; }
-  .sheet.a3 .p-card .p-name { font-size: 18px; }
-  .p-card .p-price { font-size: 15px; font-weight: 900; color: var(--pf-a); }
-  .sheet.a3 .p-card .p-price { font-size: 21px; }
-  /* П10 «B2B-партнёрам»: деловой стиль */
-  .p-b2b { margin-top: 10mm; display: flex; flex-direction: column; gap: 5mm; }
-  .p-b2b-item { display: flex; gap: 4mm; align-items: flex-start; padding: 4mm; background: rgba(255,255,255,.06); border-left: 3px solid var(--pf-a); border-radius: 2mm; }
-  .poster.t-dark .p-b2b-item, .poster.t-ink .p-b2b-item { background: rgba(255,255,255,.04); }
-  .p-b2b-item .icon { font-size: 24px; flex: none; }
-  .sheet.a3 .p-b2b-item .icon { font-size: 32px; }
-  .p-b2b-item .text { flex: 1; }
-  .p-b2b-item .text b { font-size: 15px; display: block; margin-bottom: 2mm; }
-  .sheet.a3 .p-b2b-item .text b { font-size: 21px; }
-  .p-b2b-item .text span { font-size: 12px; color: var(--ink-soft); }
-  .sheet.a3 .p-b2b-item .text span { font-size: 17px; }
-  /* П11 «Ремонт и апгрейд»: прайс-сетка */
-  .p-repair { margin-top: 10mm; display: grid; grid-template-columns: repeat(2, 1fr); gap: 4mm; }
-  .sheet.a3 .p-repair { gap: 6mm; }
-  .p-repair-item { padding: 5mm; background: rgba(255,255,255,.08); border-radius: 3mm; border: 1px solid var(--line); }
-  .poster.t-dark .p-repair-item, .poster.t-ink .p-repair-item { background: rgba(255,255,255,.05); }
-  .p-repair-item .name { font-size: 14px; font-weight: 700; margin-bottom: 2mm; }
-  .sheet.a3 .p-repair-item .name { font-size: 20px; }
-  .p-repair-item .price { font-size: 18px; font-weight: 900; color: var(--pf-a); }
-  .sheet.a3 .p-repair-item .price { font-size: 25px; }
-  .p-repair-item .desc { font-size: 11px; color: var(--ink-soft); margin-top: 2mm; }
-  .sheet.a3 .p-repair-item .desc { font-size: 15px; }
-  /* П12 «Именные сувениры»: примеры + поле «ваше имя» */
-  .p-named { margin-top: 10mm; display: flex; flex-direction: column; gap: 6mm; }
-  .p-named-examples { display: flex; gap: 4mm; justify-content: center; }
-  .p-named-ex { width: 60mm; height: 40mm; background: linear-gradient(135deg, var(--pf-a), var(--pf-a2)); border-radius: 3mm; display: flex; align-items: center; justify-content: center; font-size: 20px; font-weight: 900; color: #fff; }
-  .sheet.a3 .p-named-ex { width: 85mm; height: 56mm; font-size: 28px; }
-  .p-named-input { margin-top: 6mm; padding: 6mm; border: 2px dashed var(--pf-a); border-radius: 4mm; text-align: center; }
-  .p-named-input .label { font-size: 14px; color: var(--ink-soft); margin-bottom: 3mm; }
-  .sheet.a3 .p-named-input .label { font-size: 20px; }
-  .p-named-input .field { font-size: 28px; font-weight: 900; color: var(--pf-a); min-height: 12mm; border-bottom: 2px solid var(--line); }
-  .sheet.a3 .p-named-input .field { font-size: 40px; min-height: 17mm; }
-  /* П13 «Срочно! 24 часа»: яркий постер-молния */
-  .poster.urgent { background: linear-gradient(135deg, #dc2626 0%, #991b1b 100%) !important; color: #fff !important; }
-  .poster.urgent .p-hero { font-size: 64px; }
-  .sheet.a3 .poster.urgent .p-hero { font-size: 90px; }
-  .poster.urgent .p-hero em { background: linear-gradient(120deg, #fbbf24, #f59e0b) !important; -webkit-background-clip: text !important; background-clip: text !important; color: transparent !important; }
-  .poster.urgent .p-tag, .poster.urgent .p-lead, .poster.urgent .p-contact .muted { color: rgba(255,255,255,.85) !important; }
-  .p-urgent-badge { display: inline-flex; align-items: center; gap: 3mm; margin-top: 8mm; padding: 4mm 8mm; background: #fbbf24; color: #991b1b; border-radius: 99mm; font-size: 20px; font-weight: 900; letter-spacing: .03em; align-self: flex-start; }
-  .sheet.a3 .p-urgent-badge { font-size: 28px; padding: 6mm 12mm; }
-  .p-urgent-list { margin-top: 10mm; display: flex; flex-direction: column; gap: 4mm; }
-  .p-urgent-item { display: flex; align-items: baseline; gap: 4mm; font-size: 16px; }
-  .sheet.a3 .p-urgent-item { font-size: 22px; }
-  .p-urgent-item .icon { font-size: 20px; }
-  .sheet.a3 .p-urgent-item .icon { font-size: 28px; }
-  /* П14 «Потрогай материалы»: образцы с тактильными зонами */
-  .p-samples { margin-top: 10mm; display: grid; grid-template-columns: repeat(3, 1fr); gap: 5mm; }
-  .sheet.a3 .p-samples { gap: 7mm; }
-  .p-sample { padding: 5mm; background: rgba(255,255,255,.1); border-radius: 3mm; text-align: center; border: 2px solid var(--line); }
-  .poster.t-dark .p-sample, .poster.t-ink .p-sample { background: rgba(255,255,255,.06); }
-  .p-sample .swatch { width: 100%; aspect-ratio: 1; border-radius: 50%; margin-bottom: 3mm; border: 3px solid var(--line); }
-  .p-sample .name { font-size: 14px; font-weight: 700; margin-bottom: 2mm; }
-  .sheet.a3 .p-sample .name { font-size: 20px; }
-  .p-sample .props { font-size: 11px; color: var(--ink-soft); line-height: 1.4; }
-  .sheet.a3 .p-sample .props { font-size: 15px; }
-  .p-touch-hint { margin-top: 8mm; padding: 4mm; background: rgba(255,255,255,.08); border-radius: 3mm; text-align: center; font-size: 13px; color: var(--ink-soft); }
-  .sheet.a3 .p-touch-hint { font-size: 18px; padding: 6mm; }
-  .p-off { opacity: .38; outline: 2px dashed var(--line); outline-offset: 3mm; position: relative; }
-  .p-off-tag { position: absolute; top: 6mm; right: 6mm; font-size: 11px; color: var(--ink-soft); border: 1px solid var(--line); border-radius: 99mm; padding: 1.5mm 5mm; background: rgba(255,255,255,.6); }
-  .poster.t-dark .p-off-tag, .poster.t-ink .p-off-tag { background: rgba(16,19,26,.6); color: rgba(233,238,250,.8); }
-  @media print { .p-off { display: none !important; } }
-
   /* ------------------------------------------------ правка (не печатается) */
   .editor { background: #f4f6fc; border: 1px solid #dde2ef; border-radius: 10px; padding: 12px 14px; margin-top: 10px; }
   .editor h3 { margin: 0 0 8px; font-size: 12px; letter-spacing: .04em; text-transform: uppercase; color: var(--ink-soft); }
@@ -158,42 +19,64 @@
   .toggles { width: 100%; }
   .toggles label { font-size: 12px; color: var(--ink-soft); display: inline-flex; align-items: center; gap: 6px; }
   .legend { font-size: 11.5px; color: var(--ink-soft); }
+  /* Печатаемые листы используют координатную сетку реестра v2. */
+  #sheets .sheet { position:relative;display:block;width:210mm;height:297mm;min-height:0;margin:16px auto;padding:0;overflow:hidden;background:#fff;box-shadow:0 10px 40px -20px rgba(19,26,43,.6); }
+  #sheets { overflow-x:auto; }
+  #sheets .poster { position:absolute;inset:0;width:100%;height:100%;min-height:0;padding:0;border:0;border-radius:0;overflow:hidden;display:block;cursor:default;box-shadow:none!important;transition:none; }
+  #sheets .poster.selected { outline:2px solid #6e2bc8;outline-offset:-1mm; }
+  #sheets .poster.p-off { opacity:.38;outline:2px dashed #aab1c1;outline-offset:-3mm; }
+  #sheets .poster.t-color { background:#f6f0f8;color:#31242e; }
+  #sheets .poster.t-dark { background:#1d161f;color:#f8eee6; }
+  #sheets .design-block { position:absolute;display:flex;align-items:flex-start;white-space:pre-wrap;overflow:hidden;overflow-wrap:anywhere;font-family:Arial,Helvetica,sans-serif;font-weight:400; }
+  #sheets .design-block[data-id="brand"] img { width:100%;height:100%;object-fit:contain;object-position:left center; }
+  #sheets .design-block[data-id^="photo-"] { display:grid;place-items:center;border:.2mm dashed #d9c8ce;color:#66555f;text-align:center; }
+  #sheets .design-block[data-id^="photo-"] img { width:100%;height:100%;object-fit:cover; }
+  #sheets .design-block[data-id="qr"] { display:grid;place-items:center;border:.2mm solid #d9c8ce; }
+  #sheets .design-block[data-id="qr"] svg { width:100%;height:100%;display:block;background:#fff; }
+  #sheets .poster.t-dark .design-block[data-id="hero"],#sheets .poster.t-dark .design-block[data-id="contact"],#sheets .poster.t-dark .design-block[data-id^="item-"] { color:#f8eee6!important; }
+  #sheets .poster.t-dark .design-block[data-id="lead"] { color:#cbbbc7!important; }
+  #sheets .poster.t-dark .design-block[data-id^="item-"] { background:#382c3b!important; }
+  #sheets .poster.t-color .design-block[data-id="hero"] { color:#6e2bc8!important; }
+  #sheets .poster.t-color .design-block[data-id="lead"],#sheets .poster.t-color .design-block[data-id="contact"] { color:#625966!important; }
+  #sheets .poster .p-off-tag { position:absolute;z-index:3;top:6mm;right:6mm;padding:1.5mm 5mm;border:1px solid #cbd2df;border-radius:99mm;background:#fff;color:#596579;font-size:3mm; }
+  @media print {
+    html,body { margin:0!important;padding:0!important;background:#fff!important; }
+    #sheets .sheet { width:var(--poster-page-width,210mm)!important;height:var(--poster-page-height,297mm)!important;min-height:0;margin:0;padding:0;box-shadow:none;page-break-after:always; }
+    #sheets .sheet:last-child { page-break-after:auto; }
+    #sheets .sheet:has(>.poster.p-off) { display:none!important; }
+    #sheets .poster { width:100%;height:100%; }
+    #sheets .poster.selected { outline:none; }
+  }
+  @media (max-width:600px) {
+    .editor .row label:has(textarea) { width:100%;min-width:0;align-items:stretch; }
+    .editor textarea.wide { width:100%;min-width:0; }
+    .editor input.wide { min-width:0;max-width:100%; }
+  }
 </style>
 </head><body>
 <div class="panel noprint">
   <div class="panel-row">
     <h1><img data-nz-mark src="../assets/brand/nozza-mark-1.svg" alt="">Постеры — конструктор</h1>
     <label>Формат <select id="fmt" data-page="fmt"><option value="a4">A4</option><option value="a3">A3</option></select></label>
-    <label>Тема <select id="theme" data-page="theme">
-      <option value="light">Светлая</option>
-      <option value="dark">Тёмная</option>
-      <option value="ink">Чёрная с градиентом</option>
+    <label>Вариант <select id="theme" data-page="theme">
+      <option value="light">Белый</option>
+      <option value="color">Цветной</option>
+      <option value="dark">Тёмный</option>
     </select></label>
-    <label>Акцент <input type="color" id="accent1" data-page="accent1" value="#4f46e5" style="width:34px;padding:2px"></label>
-    <label>Акцент 2 <input type="color" id="accent2" data-page="accent2" value="#7c3aed" style="width:34px;padding:2px"></label>
-    <span id="paletteRow" style="display:inline-flex;gap:6px;flex-wrap:wrap;align-items:center"></span>
-    <label>QR ведёт <select id="qrSrc" data-page="qrSrc">
-      <option value="qr">на ссылку QR</option>
-      <option value="tg">в Telegram</option>
-      <option value="custom">на свою ссылку</option>
-    </select></label>
-    <input type="text" id="qrCustom" data-page="qrCustom" placeholder="своя ссылка https://…" style="min-width:170px">
-    <div class="panel-row" data-nz-common="qr"></div>
-    <button class="btn primary" type="button" data-nz-print>Печать</button>
+    <label>Город <input type="text" id="contactCity" data-page="contactCity" placeholder="Город" style="width:110px"></label>
+    <label>Контакт <input type="text" id="contactText" data-page="contactText" placeholder="Телефон / Telegram" style="width:170px"></label>
+    <label>Ссылка QR <input type="url" id="qrUrl" data-page="qrUrl" placeholder="https://…" style="width:190px"></label>
+    <button class="btn primary" type="button" id="printPosters" disabled>Печать</button>
   </div>
   <div class="panel-row toggles">
-    <label><input type="checkbox" id="optStrip" data-page="optStrip" checked> Декоративная полоса</label>
-    <label><input type="checkbox" id="optNums" data-page="optNums" checked> Номерки у пунктов</label>
-    <label><input type="checkbox" id="optQr" data-page="optQr" checked> QR в подвале</label>
-    <label><input type="checkbox" id="optCompact" data-page="optCompact"> Компактный заголовок</label>
-    <span class="legend" id="printInfo"></span>
+    <label><input type="checkbox" id="printConfirmed"> Текст и ссылка QR проверены для печати</label>
+    <span class="legend" id="printInfo" role="status"></span>
   </div>
   <div class="editor">
     <h3>✏️ Правка постера — кликните по постеру на листе</h3>
     <div class="row">
       <label>Заголовок <input id="e_title" class="wide" placeholder="Печатаем"></label>
       <label>Строка 2 (акцент) <input id="e_em" placeholder="вещи под вас"></label>
-      <label>Слоган <input id="e_slogan" placeholder="Там, где рождается форма · {город}" style="min-width:250px"></label>
     </div>
     <div class="row">
       <label>Описание <textarea id="e_lead" class="wide" rows="2" placeholder="Один-два предложения о том, что вы делаете"></textarea>
@@ -202,6 +85,7 @@
       <label>Пункт <select id="e_item"></select></label>
       <label>Жирный текст <input id="e_item_b" placeholder="Готовые изделия на полке" style="min-width:220px"></label>
       <label>Пояснение <input id="e_item_s" placeholder="— забирайте сразу" style="min-width:220px"></label>
+      <label id="e_photo_row" hidden>Фото образца <input id="e_photo" type="file" accept="image/*" style="max-width:190px"></label>
       <button class="btn" type="button" id="btnAdd" title="Добавить пункт">＋</button>
       <button class="btn danger" type="button" id="btnDel" title="Удалить текущий пункт">🗑</button>
       <button class="btn" type="button" id="btnUp" title="Поднять пункт">↑</button>
@@ -209,16 +93,15 @@
       <button class="btn" type="button" id="btnDup" title="Дублировать пункт">⧉</button>
     </div>
     <div class="row">
-      <label id="e_until_row" hidden>Акция до <input id="e_until" placeholder="до 31 августа" style="min-width:170px"></label>
       <label><input type="checkbox" id="e_print" checked> Печатать этот постер</label>
       <span class="legend">Пункты работают и как шаги «Как заказать»: жирный текст — название шага, пояснение — деталь.</span>
     </div>
   </div>
 </div>
-<div class="note noprint"><b>Куда вешать:</b> «Печатаем вещи под вас» — над полкой или за прилавком; «Как заказать своё» — рядом с образцами; «Мы в Telegram» — у кассы; «Акция» — на видное место и менять по сезону; «Витрина» — над стеллажом с готовыми изделиями; «B2B-партнёрам» — в зоне переговоров; «Ремонт» — у входа или в сервисной зоне; «Именные сувениры» — у кассы для импульсных покупок; «Срочно! 24 часа» — на видное место для срочных клиентов; «Потрогай материалы» — рядом с образцами пластиков. Формат A3 читается с 3–4 метров, A4 — с 1,5 метра. Кликните по постеру, чтобы править его текст; снятый с печати постер показывается бледным и не попадает в печать. Правки, тема и контакты сохраняются и переносятся кнопками «Сохранить/Загрузить шаблон».</div>
+<div class="note noprint"><b>Подготовка к печати:</b> выберите лист, отредактируйте текст, добавьте действующие контакты и ссылку QR, затем отметьте проверку содержимого. Размеры и координаты загружаются из реестра print-layouts-v2.json; неподтверждённые демо-сроки и цены не подставляются. Печатная команда открывает системный диалог только после явного нажатия.</div>
 <div id="sheets"></div>
+<style id="page-rule">@page { size:A4 portrait;margin:0; }</style>
 <script src="../assets/qr.js?v=18.23.1"></script>
-<script>window.QR_FALLBACK=1;if(!window.QR)window.QR={svg:function(){return '<div style="font-size:10px;color:#94a3b8">QR…</div>';}};</script>
 <script src="nz.js?v=18.23.1"></script>
 <script>
 'use strict';
@@ -325,186 +208,178 @@ const START = [
 let posters = [];
 let selected = 0;     // индекс постера в правке
 let curItem = 0;      // индекс пункта внутри постера
+let printLayouts = [];
+const posterLayoutIds = { services:'poster-services',order:'poster-order',tg:'poster-tg',promo:'poster-promo',showcase:'poster-showcase',b2b:'poster-b2b',repair:'poster-repair',named:'poster-named',urgent:'poster-urgent',samples:'poster-samples' };
+
+function safeStarter(source, layout) {
+  const itemCount = layout.blocks.filter(block => /^item-\d+$/.test(block.id) || /^caption-\d+$/.test(block.id)).length;
+  return { ...source, title:layout.title, em:'', slogan:'', lead:'[СОГЛАСОВАННОЕ ОПИСАНИЕ]', until:'',
+    items:Array.from({length:itemCount},(_,i)=>({b:'[ЗАГОЛОВОК]',s:'[ОПИСАНИЕ / УСЛОВИЕ]'})), print:true };
+}
+
+function sanitizeSavedPoster(saved) {
+  const source=START.find(item=>item.tpl===saved.tpl);
+  const layout=printLayouts.find(item=>item.id===posterLayoutIds[saved.tpl]);
+  if(!source||!layout)return saved;
+  const clean={...saved};
+  if(clean.title===source.title)clean.title=layout.title;
+  if(clean.em===source.em)clean.em='';
+  if(clean.slogan===source.slogan)clean.slogan='';
+  if(clean.lead===source.lead)clean.lead='[СОГЛАСОВАННОЕ ОПИСАНИЕ]';
+  if(Array.isArray(clean.items))clean.items=clean.items.map((item,i)=>{
+    const demo=source.items[i];if(!demo)return item;
+    return {...item,b:item.b===demo.b?'[ЗАГОЛОВОК]':item.b,s:item.s===demo.s?'[ОПИСАНИЕ / УСЛОВИЕ]':item.s};
+  });
+  return clean;
+}
 
 function load() {
   const st = NZ.pageState({});
-  posters = Array.isArray(st[LS_KEY]) && st[LS_KEY].length ? st[LS_KEY] : START.map(p => ({ ...p, id: NZ.uid('ps') }));
+  posters = Array.isArray(st[LS_KEY]) && st[LS_KEY].length ? st[LS_KEY].map(sanitizeSavedPoster) : START.map(p => {
+    const layout = printLayouts.find(item => item.id === posterLayoutIds[p.tpl]);
+    return { ...safeStarter(p,layout), id:NZ.uid('ps') };
+  });
   posters.forEach(p => { if (!Array.isArray(p.items)) p.items = []; if (p.print == null) p.print = true; });
   // П4/П3/П5/П6: если пользователь ни разу не открывал новый конструктор,
   // тема светлая и все детали включены — вид как раньше.
   $('fmt').value = st.fmt || 'a4';
   $('theme').value = st.theme || 'light';
-  $('qrSrc').value = st.qrSrc || 'qr';
-  if (st.optStrip === undefined) $('optStrip').checked = true; else $('optStrip').checked = !!st.optStrip;
-  if (st.optNums === undefined) $('optNums').checked = true; else $('optNums').checked = !!st.optNums;
-  if (st.optQr === undefined) $('optQr').checked = true; else $('optQr').checked = !!st.optQr;
-  $('optCompact').checked = !!st.optCompact;
-  if (!st.accent1) $('accent1').value = '#4f46e5';
-  if (!st.accent2) $('accent2').value = '#7c3aed';
-  buildPalettes();
+  if ($('theme').value === 'ink') $('theme').value = 'color';
+  let contact={};try{contact=JSON.parse(localStorage.getItem('nozza:contact')||'{}')||{};}catch(_){}
+  $('contactCity').value=st.contactCity??contact.city??'';
+  $('contactText').value=st.contactText??[contact.phone,contact.tg].filter(Boolean).join(' · ');
+  $('qrUrl').value=st.qrUrl??contact.qrbase??contact.site??'';
 }
 
 // В83: палитры постеров пресетами — бренд и сезоны, один клик = два акцента.
-function buildPalettes() {
-  const row = document.getElementById('paletteRow');
-  if (!row || row.dataset.ready === '1') return;
-  row.dataset.ready = '1';
-  const PALETTES = [
-    ['Бренд', '#4f46e5', '#7c3aed'],
-    ['Неон', '#06b6d4', '#a21caf'],
-    ['Новогодние', '#0e7490', '#155e75'],
-    ['8 Марта', '#db2777', '#be185d'],
-    ['Осень', '#b45309', '#92400e'],
-    ['Графит', '#334155', '#0f172a'],
-    ['Лайм', '#16a34a', '#65a30d'],
-  ];
-  row.innerHTML = PALETTES.map((p, i) =>
-    `<button class="btn" type="button" data-pl="${i}" title="Палитра «${p[0]}»">`
-    + `<span style="display:inline-flex;vertical-align:-3px;margin-right:5px">`
-    + `<i style="width:12px;height:12px;border-radius:50%;background:${p[1]};display:inline-block;border:1.5px solid #fff;margin-left:-5px"></i>`
-    + `<i style="width:12px;height:12px;border-radius:50%;background:${p[2]};display:inline-block;border:1.5px solid #fff"></i></span>${p[0]}</button>`).join('');
-  row.addEventListener('click', (e) => {
-    const btn = e.target.closest('[data-pl]');
-    if (!btn) return;
-    const pal = PALETTES[Number(btn.dataset.pl)];
-    if (!pal) return;
-    $('accent1').value = pal[1];
-    $('accent2').value = pal[2];
-    if (typeof draw === 'function') draw();
-    save();
-  });
-}
 function save() {
   NZ.pageStateSave({
     [LS_KEY]: posters,
-    fmt: $('fmt').value, theme: $('theme').value, qrSrc: $('qrSrc').value,
-    optStrip: $('optStrip').checked, optNums: $('optNums').checked,
-    optQr: $('optQr').checked, optCompact: $('optCompact').checked,
+    fmt: $('fmt').value, theme: $('theme').value,
+    contactCity:$('contactCity').value,contactText:$('contactText').value,qrUrl:$('qrUrl').value,
   });
 }
 
-function qrLink() {
-  const c = NZ.contact();
-  const src = $('qrSrc').value;
-  if (src === 'custom') return ($('qrCustom').value || '').trim() || c.qrbase || c.site;
-  if (src === 'tg') { const tg = String(c.tg || '').replace(/^@/, ''); return tg ? 'https://t.me/' + tg : c.qrbase; }
-  return c.qrbase || c.site;
+function configuredQr() {
+  const typed = ($('qrUrl').value || '').trim();
+  if (typed) return typed;
+  let saved = {};
+  try { saved = JSON.parse(localStorage.getItem('nozza:contact') || '{}') || {}; } catch (_) {}
+  return String(saved.qrbase || saved.site || '').trim();
 }
 
-const fill = (s, city) => String(s == null ? '' : s)
-  .replace(/\{город\}/g, city).replace(/\{городе\}/g, city);
-
-function foot(qrSvg, opts) {
-  const c = NZ.contact();
-  const city = c.city || 'Симферополь';
-  const short = String(qrLink() || '').replace(/^https?:\/\//, '');
-  const dark = $('theme').value !== 'light';
-  return `<div class="p-bottom"><div class="p-contact"><b>${NZ.esc(c.phone || '')}</b><br>` +
-    `${NZ.esc(short)} · ${NZ.esc(city)}<br><span class="muted">Telegram ${NZ.esc(c.tg || '')}</span></div>` +
-    (opts.qr && qrSvg ? `<div class="p-qr">${qrSvg}<div>Наведите камеру</div></div>` : '') + `</div>`;
+function validQrTarget(value) {
+  try {
+    const url = new URL(value);
+    return ['https:','http:'].includes(url.protocol) && !!url.hostname
+      && !/^(localhost|127\.|0\.0\.0\.0|\[::1\])/i.test(url.hostname);
+  } catch (_) { return false; }
 }
 
-function itemsHtml(p, opts) {
-  return p.items.map((it, i) => opts.nums
-    ? `<div class="p-item"><span class="p-num">${i + 1}</span><div><b>${NZ.esc(it.b || '')}</b> <span>${NZ.esc(it.s || '')}</span></div></div>`
-    : `<div class="p-item"><div><b>${NZ.esc(it.b || '')}</b> <span>${NZ.esc(it.s || '')}</span></div></div>`).join('');
-}
-
-function stepsHtml(p) {
-  return p.items.map((it, i) => `<div class="step"><div class="sn">${String(i + 1).padStart(2, '0')}</div>` +
-    `<div><div class="st">${NZ.esc(it.b || '')}</div><div class="sd">${NZ.esc(it.s || '')}</div></div></div>`).join('');
+function posterReady(poster, target, qrReady) {
+  const layout=printLayouts.find(item=>item.id===posterLayoutIds[poster.tpl]);
+  if(!layout||!qrReady||!target||!$('contactText').value.trim()||!$('contactCity').value.trim())return false;
+  if(!poster.title?.trim()||!poster.lead?.trim()||/\[[^\]]+\]/.test(poster.lead))return false;
+  const itemBlocks=layout.blocks.filter(block=>/^item-\d+$/.test(block.id)||/^caption-\d+$/.test(block.id));
+  for(const block of itemBlocks){
+    const item=poster.items[Number(block.id.match(/\d+/)?.[0])]||{};
+    if(!item.b?.trim()||!item.s?.trim()||/\[[^\]]+\]/.test(item.b)||/\[[^\]]+\]/.test(item.s))return false;
+  }
+  if(layout.blocks.some(block=>/^photo-\d+$/.test(block.id))&&layout.blocks.filter(block=>/^photo-\d+$/.test(block.id)).some(block=>!poster.items[Number(block.id.match(/\d+/)?.[0])]?.image))return false;
+  return true;
 }
 
 function draw() {
   save();
-  const a3 = $('fmt').value === 'a3';
-  if (!pageStyle) { pageStyle = document.createElement('style'); document.head.appendChild(pageStyle); }
-  pageStyle.textContent = a3 ? '@page { size: A3; margin: 8mm; }' : '@page { size: A4; margin: 8mm; }';
-
-  const cls = 'sheet' + (a3 ? ' a3' : '');
-  const theme = $('theme').value;
-  const opts = { strip: $('optStrip').checked, nums: $('optNums').checked,
-                 qr: $('optQr').checked, compact: $('optCompact').checked };
-  const accent = `--pf-a:${$('accent1').value};--pf-a2:${$('accent2').value}`;
-  const c = NZ.contact();
-  const city = c.city || 'Симферополь';
-  const qrSvg = NZ.qr(qrLink(), { ecl: 'M', margin: 1 });
-  const mark = NZ.markSrc(theme !== 'light');
-  const sel = p => selected === p ? ' selected' : '';
-
-  const head = p => `<div class="p-top"><img src="${mark}" alt=""><div><div class="p-word">NOZZA</div>` +
-    `<div class="p-tag">${NZ.esc(fill(p.slogan || '', city))}</div></div></div>`;
-  const hero = p => `<div class="p-hero">${NZ.esc(p.title || '')}${p.em ? `<br><em>${NZ.esc(p.em || '')}</em>` : ''}</div>`;
-  const base = p => `t-${theme}${opts.compact ? ' compact' : ''}${p.print ? '' : ' p-off'}${sel(posters.indexOf(p))}`;
-  const off = p => p.print ? '' : `<div class="p-off-tag noprint">не печатается</div>`;
-
-  const tgLinkBig = (() => { const tg = String(c.tg || '').replace(/^@/, ''); return tg ? 'https://t.me/' + tg : qrLink(); })();
-  const bigQr = NZ.qr(tgLinkBig, { ecl: 'M', margin: 1 });
-
-  $('sheets').innerHTML = posters.map(p => {
-    const common = `<div class="poster ${base(p)}" data-idx="${posters.indexOf(p)}" style="${accent}" title="Клик — править этот постер">` +
-      (opts.strip ? '<div class="p-strip"></div>' : '') + off(p) + head(p);
-    if (p.tpl === 'services') return `<div class="${cls}">` + common + hero(p) +
-      `<div class="p-lead">${NZ.esc(fill(p.lead || '', city))}</div><div class="p-list">${itemsHtml(p, opts)}</div>` +
-      foot(qrSvg, opts) + `</div></div>`;
-    if (p.tpl === 'order') return `<div class="${cls}">` + common + hero(p) +
-      `<div class="steps">${stepsHtml(p)}</div>` +
-      `<div class="p-lead" style="margin-top:10mm">${NZ.esc(fill(p.lead || '', city))}</div>` +
-      foot(qrSvg, opts) + `</div></div>`;
-    if (p.tpl === 'tg') return `<div class="${cls}"><div class="poster tg ${base(p)}" data-idx="${posters.indexOf(p)}" style="${accent}" title="Клик — править этот постер">` +
-      (opts.strip ? '<div class="p-strip"></div>' : '') + off(p) + head(p) + hero(p) +
-      `<div class="p-lead">${NZ.esc(fill(p.lead || '', city))}</div>` +
-      `<div class="p-bigqr">${bigQr}<div class="cap">${NZ.esc(c.tg || '')}<small>Наведите камеру — откроется канал</small></div></div>` +
-      `<div class="p-list">${itemsHtml(p, opts)}</div>` + foot(qrSvg, opts) + `</div></div>`;
-    /* П9 showcase: сетка товаров + QR */
-    if (p.tpl === 'showcase') return `<div class="${cls}">` + common + hero(p) +
-      `<div class="p-lead">${NZ.esc(fill(p.lead || '', city))}</div>` +
-      `<div class="p-grid">${p.items.map(it => `<div class="p-card"><div class="p-img">${NZ.esc(it.b || '')}</div><div class="p-name">${NZ.esc(it.s || '')}</div></div>`).join('')}</div>` +
-      foot(qrSvg, opts) + `</div></div>`;
-    /* П10 b2b: деловой стиль */
-    if (p.tpl === 'b2b') return `<div class="${cls}">` + common + hero(p) +
-      `<div class="p-lead">${NZ.esc(fill(p.lead || '', city))}</div>` +
-      `<div class="p-b2b">${p.items.map(it => `<div class="p-b2b-item"><div class="icon">${NZ.esc(it.b || '')}</div><div class="text"><b>${NZ.esc(it.s || '')}</b></div></div>`).join('')}</div>` +
-      foot(qrSvg, opts) + `</div></div>`;
-    /* П11 repair: прайс-сетка */
-    if (p.tpl === 'repair') return `<div class="${cls}">` + common + hero(p) +
-      `<div class="p-lead">${NZ.esc(fill(p.lead || '', city))}</div>` +
-      `<div class="p-repair">${p.items.map(it => `<div class="p-repair-item"><div class="name">${NZ.esc(it.b || '')}</div><div class="price">${NZ.esc(it.s || '')}</div></div>`).join('')}</div>` +
-      foot(qrSvg, opts) + `</div></div>`;
-    /* П12 named: примеры + поле */
-    if (p.tpl === 'named') return `<div class="${cls}">` + common + hero(p) +
-      `<div class="p-lead">${NZ.esc(fill(p.lead || '', city))}</div>` +
-      `<div class="p-named"><div class="p-named-examples">${p.items.slice(0, 3).map(it => `<div class="p-named-ex">${NZ.esc(it.b || '')}</div>`).join('')}</div>` +
-      `<div class="p-named-input"><div class="label">Ваше имя или кличка питомца</div><div class="field">___________</div></div></div>` +
-      foot(qrSvg, opts) + `</div></div>`;
-    /* П13 urgent: яркий постер */
-    if (p.tpl === 'urgent') return `<div class="${cls}"><div class="poster urgent ${base(p)}" data-idx="${posters.indexOf(p)}" title="Клик — править этот постер">` +
-      off(p) + head(p) + hero(p) +
-      `<div class="p-urgent-badge">⚡ +50% к цене</div>` +
-      `<div class="p-lead">${NZ.esc(fill(p.lead || '', city))}</div>` +
-      `<div class="p-urgent-list">${p.items.map(it => `<div class="p-urgent-item"><span class="icon">${NZ.esc(it.b || '')}</span><span>${NZ.esc(it.s || '')}</span></div>`).join('')}</div>` +
-      foot(qrSvg, opts) + `</div></div>`;
-    /* П14 samples: образцы материалов */
-    if (p.tpl === 'samples') return `<div class="${cls}">` + common + hero(p) +
-      `<div class="p-lead">${NZ.esc(fill(p.lead || '', city))}</div>` +
-      `<div class="p-samples">${p.items.map(it => `<div class="p-sample"><div class="swatch" style="background:${NZ.esc(it.color || '#999')}"></div><div class="name">${NZ.esc(it.b || '')}</div><div class="props">${NZ.esc(it.s || '')}</div></div>`).join('')}</div>` +
-      `<div class="p-touch-hint">👆 Потрогайте образцы перед заказом</div>` +
-      foot(qrSvg, opts) + `</div></div>`;
-    /* promo (П16) */
-    return `<div class="${cls}">` + common + hero(p) +
-      (p.until ? `<div class="p-until">⏳ ${NZ.esc(p.until)}</div>` : '') +
-      `<div class="p-lead">${NZ.esc(fill(p.lead || '', city))}</div><div class="p-list">${itemsHtml(p, opts)}</div>` +
-      foot(qrSvg, opts) + `</div></div>`;
+  if (!printLayouts.length) {
+    $('sheets').innerHTML = '<div class="note">Загружаю геометрию печатных шаблонов…</div>';
+    $('printPosters').disabled = true;
+    return;
+  }
+  const scale = $('fmt').value === 'a3' ? Math.SQRT2 : 1;
+  const width = scale > 1 ? 297 : 210, height = scale > 1 ? 420 : 297;
+  document.documentElement.style.setProperty('--poster-page-width', width + 'mm');
+  document.documentElement.style.setProperty('--poster-page-height', height + 'mm');
+  $('page-rule').textContent = `@page { size:${width}mm ${height}mm;margin:0; }`;
+  const contact = { city:$('contactCity').value.trim(), text:$('contactText').value.trim() };
+  const target = configuredQr();
+  const qrReady = validQrTarget(target) && window.QR && typeof window.QR.svg === 'function';
+  const theme = $('theme').value === 'dark' ? 'dark' : ($('theme').value === 'color' ? 'color' : 'white');
+  $('sheets').innerHTML = posters.map((poster,index) => {
+    const layout = printLayouts.find(item => item.id === posterLayoutIds[poster.tpl]);
+    if (!layout) return '';
+    const sheet = document.createElement('section');
+    sheet.className = 'sheet' + (scale > 1 ? ' a3' : '');
+    sheet.style.width=width+'mm';sheet.style.height=height+'mm';
+    sheet.dataset.layout = layout.id;
+    const page = document.createElement('div');
+    page.className = 'poster t-' + theme + (poster.print ? '' : ' p-off') + (index===selected?' selected':'');
+    page.dataset.idx = String(index);
+    page.style.width = layout.width_mm * scale + 'mm';
+    page.style.height = layout.height_mm * scale + 'mm';
+    const textForBlock = block => {
+      if (block.id === 'hero') return [poster.title || layout.title,poster.em || ''].filter(Boolean).join('\n');
+      if (block.id === 'lead') return poster.lead || '[СОГЛАСОВАННОЕ ОПИСАНИЕ]';
+      if (block.id === 'contact') return `${contact.text || '[ТЕЛЕФОН / TELEGRAM]'}\n${contact.city || '[ГОРОД / КРАТКИЙ АДРЕС]'}`;
+      if (block.id === 'cta') return contact.text || '[TELEGRAM / АДРЕС ВИТРИНЫ]';
+      const itemMatch = block.id.match(/^item-(\d+)$/);
+      const captionMatch = block.id.match(/^caption-(\d+)$/);
+      const match = itemMatch || captionMatch;
+      if (match) {
+        const item = poster.items[Number(match[1])] || {};
+        if (itemMatch) return `${String(Number(match[1])+1).padStart(2,'0')} · ${item.b || '[ЗАГОЛОВОК]'}\n${item.s || '[ОПИСАНИЕ / УСЛОВИЕ]'}`;
+        return `${item.b || '[НАЗВАНИЕ]'}\n${item.s || '[ЦЕНА / СВОЙСТВА]'}`;
+      }
+      const photoMatch=block.id.match(/^photo-(\d+)$/);
+      if(photoMatch)return poster.items[Number(photoMatch[1])]?.image||'[ФОТО / ОБРАЗЕЦ]';
+      return block.text || '';
+    };
+    layout.blocks.forEach(block => {
+      const node = document.createElement('div');
+      node.className = 'design-block';
+      node.dataset.id = block.id;
+      const mm = value => (Number(value) || 0) * scale;
+      Object.assign(node.style,{
+        left:mm(block.x_mm)+'mm',top:mm(block.y_mm)+'mm',width:mm(block.width_mm)+'mm',height:mm(block.height_mm)+'mm',
+        color:theme === 'dark' && block.id !== 'brand' && block.id !== 'qr' ? (block.id === 'lead' ? '#CBBBC7' : '#F8EEE6') : (block.color || '#31242E'),
+        background:block.background || 'transparent',fontSize:Math.max(1.5,(Number(block.font_pt)||9)*0.352778*scale)+'mm',
+        fontWeight:/bold/i.test(block.font||'')?700:400,lineHeight:String(Number(block.line_height)||1.25),
+        textAlign:block.align||'left',padding:mm(block.text_padding_mm)+'mm',
+        border:block.stroke_width_mm?`${mm(block.stroke_width_mm)}mm solid ${block.stroke_color||'#D9C8CE'}`:'0'
+      });
+      if (block.kind === 'logo') {
+        const crop = Array.isArray(block.source_crop_px) ? block.source_crop_px : null;
+        const cropName = crop ? crop.map(v=>Math.max(0,Math.round(Number(v)||0))).join('-') : '';
+        const source = crop ? `/assets/brand/${theme === 'dark' ? 'nozza-print-dark' : 'nozza-print-crop'}-${cropName}.png` : '/assets/brand/nozza-selected-v2.png';
+        const img = document.createElement('img'); img.src=source;img.alt='NOZZA';node.append(img);
+      } else if (block.kind === 'qr') {
+        if (qrReady) node.innerHTML = window.QR.svg(target,{ecl:'M',margin:1});
+        else node.textContent = 'QR\n[УКАЖИТЕ ССЫЛКУ]';
+      } else if(/^photo-\d+$/.test(block.id)&&poster.items[Number(block.id.slice(6))]?.image){
+        const image=document.createElement('img');image.src=poster.items[Number(block.id.slice(6))].image;image.alt='Образец изделия';node.append(image);
+      } else node.textContent = textForBlock(block);
+      page.append(node);
+    });
+    if (!poster.print) {
+      const badge=document.createElement('div');badge.className='p-off-tag noprint';badge.textContent='не печатается';page.append(badge);
+    }
+    sheet.append(page);
+    return sheet.outerHTML;
   }).join('');
-
-  const toPrint = posters.filter(p => p.print).length;
-  $('printInfo').textContent = toPrint
-    ? `В печать попадёт ${toPrint} из ${posters.length} постеров`
-    : `Все постеры сняты с печати — в печать уйдут все`;
-  syncEditor();
+  const selectedCount = posters.filter(p => p.print).length;
+  const incomplete = posters.filter(p=>p.print&&!posterReady(p,target,qrReady)).length;
+  const canPrint = selectedCount > 0 && incomplete === 0 && $('printConfirmed').checked;
+  $('printPosters').disabled = !canPrint;
+  $('printPosters').textContent = 'Печать ' + selectedCount + ' из ' + posters.length;
+  $('printInfo').textContent = !qrReady
+    ? `${selectedCount} из ${posters.length} выбраны · укажите публичную HTTP(S)-ссылку для QR.`
+    : (incomplete
+      ? `${selectedCount} из ${posters.length} выбраны · заполните текст, контакт и обязательные фото (${incomplete} не готовы).`
+      : (! $('printConfirmed').checked
+      ? `${selectedCount} из ${posters.length} выбраны · подтвердите проверку текста и QR.`
+      : `${selectedCount} из ${posters.length} выбраны · A${scale > 1 ? '3' : '4'} · координаты из реестра`));
 }
 
-let pageStyle = null;
 
 /* ------------------------------------------------------------- редактор */
 function syncEditor() {
@@ -512,10 +387,9 @@ function syncEditor() {
   if (!p) { selected = 0; return draw(); }
   $('e_title').value = p.title || '';
   $('e_em').value = p.em || '';
-  $('e_slogan').value = p.slogan || '';
   $('e_lead').value = p.lead || '';
-  $('e_until').value = p.until || '';
-  $('e_until_row').hidden = p.tpl !== 'promo';
+  $('e_photo_row').hidden = !['showcase','samples'].includes(p.tpl);
+  $('e_photo').value='';
   $('e_print').checked = !!p.print;
   curItem = Math.min(curItem, Math.max(0, p.items.length - 1));
   $('e_item').innerHTML = p.items.map((it, i) =>
@@ -529,37 +403,53 @@ function syncEditor() {
 
 function bind() {
   const patch = fn => { fn(posters[selected]); save(); draw(); };
-  $('e_title').addEventListener('input', () => bind(p => { p.title = $('e_title').value; }));
-  $('e_em').addEventListener('input', () => bind(p => { p.em = $('e_em').value; }));
-  $('e_slogan').addEventListener('input', () => bind(p => { p.slogan = $('e_slogan').value; }));
-  $('e_lead').addEventListener('input', () => bind(p => { p.lead = $('e_lead').value; }));
-  $('e_until').addEventListener('input', () => bind(p => { p.until = $('e_until').value; }));
-  $('e_print').addEventListener('change', () => bind(p => { p.print = $('e_print').checked; }));
+  const edit = fn => { $('printConfirmed').checked=false;patch(fn); };
+  $('e_title').addEventListener('input', () => edit(p => { p.title = $('e_title').value; }));
+  $('e_em').addEventListener('input', () => edit(p => { p.em = $('e_em').value; }));
+  $('e_lead').addEventListener('input', () => edit(p => { p.lead = $('e_lead').value; }));
+  $('e_print').addEventListener('change', () => edit(p => { p.print = $('e_print').checked; }));
 
   $('e_item').addEventListener('change', () => { curItem = +$('e_item').value || 0; syncEditor(); });
-  $('e_item_b').addEventListener('input', () => bind(p => { (p.items[curItem] || {}).b = $('e_item_b').value; }));
-  $('e_item_s').addEventListener('input', () => bind(p => { (p.items[curItem] || {}).s = $('e_item_s').value; }));
-
-  $('btnAdd').addEventListener('click', () => bind(p => { p.items.push({ b: 'Новый пункт', s: '' }); curItem = p.items.length - 1; }));
-  $('btnDel').addEventListener('click', () => bind(p => { p.items.splice(curItem, 1); curItem = Math.max(0, curItem - 1); }));
-  $('btnDup').addEventListener('click', () => bind(p => { p.items.splice(curItem + 1, 0, { ...p.items[curItem] }); curItem += 1; }));
-  $('btnUp').addEventListener('click', () => bind(p => { if (curItem > 0) { [p.items[curItem - 1], p.items[curItem]] = [p.items[curItem], p.items[curItem - 1]]; curItem -= 1; } }));
-  $('btnDown').addEventListener('click', () => bind(p => { if (curItem < p.items.length - 1) { [p.items[curItem + 1], p.items[curItem]] = [p.items[curItem], p.items[curItem + 1]]; curItem += 1; } }));
-
-  $('sheets').addEventListener('click', (ev) => {
-    const el = ev.target.closest('.poster');
-    if (!el) return;
-    selected = +el.getAttribute('data-idx') || 0;
-    curItem = 0;
-    draw();
+  $('e_item_b').addEventListener('input', () => edit(p => { (p.items[curItem] || {}).b = $('e_item_b').value; }));
+  $('e_item_s').addEventListener('input', () => edit(p => { (p.items[curItem] || {}).s = $('e_item_s').value; }));
+  $('e_photo').addEventListener('change',()=>{
+    const file=$('e_photo').files&&$('e_photo').files[0];if(!file)return;
+    if(!file.type.startsWith('image/'))return;
+    const reader=new FileReader();reader.onload=()=>edit(p=>{(p.items[curItem]||{}).image=String(reader.result||'');});reader.readAsDataURL(file);
   });
 
-  ['fmt', 'theme', 'qrSrc', 'qrCustom', 'accent1', 'accent2', 'optStrip', 'optNums', 'optQr', 'optCompact']
-    .forEach(id => $(id).addEventListener('input', draw));
+  $('btnAdd').addEventListener('click', () => edit(p => { p.items.push({ b: '[ЗАГОЛОВОК]', s: '[ОПИСАНИЕ / УСЛОВИЕ]' }); curItem = p.items.length - 1; }));
+  $('btnDel').addEventListener('click', () => edit(p => { p.items.splice(curItem, 1); curItem = Math.max(0, curItem - 1); }));
+  $('btnDup').addEventListener('click', () => edit(p => { p.items.splice(curItem + 1, 0, { ...p.items[curItem] }); curItem += 1; }));
+  $('btnUp').addEventListener('click', () => edit(p => { if (curItem > 0) { [p.items[curItem - 1], p.items[curItem]] = [p.items[curItem], p.items[curItem - 1]]; curItem -= 1; } }));
+  $('btnDown').addEventListener('click', () => edit(p => { if (curItem < p.items.length - 1) { [p.items[curItem + 1], p.items[curItem]] = [p.items[curItem], p.items[curItem + 1]]; curItem += 1; } }));
+
+  ['fmt','theme','contactCity','contactText','qrUrl'].forEach(id => $(id).addEventListener('input', () => {
+    $('printConfirmed').checked=false;draw();
+  }));
+  $('printConfirmed').addEventListener('change',draw);
+  $('printPosters').addEventListener('click',()=>{if(!$('printPosters').disabled&&validQrTarget(configuredQr())&&window.QR?.svg)window.print();});
+  $('sheets').addEventListener('click',ev=>{
+    const page=ev.target.closest('.poster');if(!page)return;
+    selected=Number(page.dataset.idx)||0;curItem=0;syncEditor();draw();
+  });
 }
 
-load();
-NZ.mount(draw);
-bind();
+async function initPosters() {
+  try {
+    const response=await fetch('/assets/print-layouts-v2.json');
+    if(!response.ok)throw new Error('HTTP '+response.status);
+    const spec=await response.json();
+    if(spec.units!=='mm')throw new Error('Размеры реестра должны быть в миллиметрах');
+    printLayouts=spec.documents.filter(item=>Object.values(posterLayoutIds).includes(item.id));
+    if(printLayouts.length!==10)throw new Error('Ожидалось 10 шаблонов постеров');
+    load();NZ.mount(draw);bind();syncEditor();
+  } catch(error) {
+    $('sheets').innerHTML='<div class="note status err">Не удалось загрузить геометрию: '+NZ.esc(error.message||'ошибка')+'</div>';
+    $('printInfo').textContent='Печать заблокирована: нет проверенной геометрии.';
+    $('printPosters').disabled=true;
+  }
+}
+initPosters();
 </script>
 </body></html>

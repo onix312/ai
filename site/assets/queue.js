@@ -41,6 +41,31 @@ function matchJob(j, q) {
 
 /* ==================================================== рендер очереди */
 function renderQueue() {
+  const unavailable = !PF.dataReady && PF.offline;
+  if (unavailable) {
+    text('queue_sub', 'Нет связи с PrintFlow — состояние заданий неизвестно.');
+    text('queue_pulse_all', '—');
+    text('queue_pulse_active', '—');
+    text('queue_pulse_queued', '—');
+    text('queue_pulse_unassigned', '—');
+    $$('#queue_pulse [data-queue-pulse]').forEach((button) => { button.disabled = true; });
+    const host = $('queue_list');
+    if (host) host.innerHTML = '<div class="empty"><span class="big">⚠</span><b>Очередь печати недоступна</b>'
+      + '<span>Подключитесь к PrintFlow, чтобы увидеть задания и состояние принтеров.</span></div>';
+    const history = $('queue_history');
+    if (history) history.innerHTML = '<div class="empty compact"><b>Журнал печати недоступен</b>'
+      + '<span>История заданий появится после подключения к PrintFlow.</span></div>';
+    const auto = $('queue_auto');
+    if (auto) auto.disabled = true;
+    const next = $('queue_next');
+    if (next) next.disabled = true;
+    return;
+  }
+  $$('#queue_pulse [data-queue-pulse]').forEach((button) => { button.disabled = false; });
+  const auto = $('queue_auto');
+  if (auto) auto.disabled = false;
+  const next = $('queue_next');
+  if (next) next.disabled = false;
   const queue = PF.state.jobs.queue || [];
   const running = queue.filter((j) => j.state === 'running').length;
   const active = queue.filter((j) => ['uploading', 'starting', 'running'].includes(j.state)).length;
@@ -51,7 +76,7 @@ function renderQueue() {
   text('queue_pulse_active', active);
   text('queue_pulse_queued', queued);
   text('queue_pulse_unassigned', unassigned);
-  $('#queue_pulse [data-queue-pulse]').forEach((button) => {
+  $$('#queue_pulse [data-queue-pulse]').forEach((button) => {
     button.classList.toggle('on', (button.dataset.queuePulse || 'all') === queueFilter);
   });
 
@@ -391,10 +416,13 @@ function checkFinished(jobs) {
 function render() {
   checkFinished(PF.state.jobs.queue || []);
   renderQueue();
+  if (!PF.dataReady && PF.offline) return;
   renderHistory();
 }
 
 PF.on('ready', () => { bind(); render(); });
+PF.on('connection', () => { if (PF.viewOn('queue')) render(); });
+PF.on('live', () => { if (PF.offline && PF.viewOn('queue')) render(); });
 PF.on('data', PF.whenView('queue', render));
 PF.on('view', (d) => {
   if (d.view === 'queue') { historyLimit = 24; render(); }

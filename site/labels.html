@@ -21,7 +21,7 @@
 </style>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Наклейки · PrintFlow</title>
+<title>NOZZA · Наклейки и этикетки</title>
 <style>
  :root { --ink:#111827; --muted:#64748b; --line:#dbe2ee; --bg:#f4f6fb; }
  * { box-sizing:border-box; }
@@ -38,23 +38,50 @@
  .bar button.primary { background:#4f46e5; border-color:transparent; color:#fff; }
  .warn { margin:12px 16px; padding:10px 12px; border-radius:10px;
    background:#fff7ed; color:#9a3412; font-size:13px; }
- .sheet { padding:16px; display:grid; grid-template-columns:repeat(auto-fill,minmax(180px,1fr)); gap:12px; }
- .tag { background:#fff; border:1px dashed #94a3b8; border-radius:12px; padding:10px;
-   break-inside:avoid; page-break-inside:avoid; }
- .tag .qr { display:flex; justify-content:center; }
- .tag .qr svg { width:132px; height:132px; }
- .tag .sw { width:100%; height:8px; border-radius:4px; margin:6px 0 4px; }
- .tag b { display:block; font-size:13px; line-height:1.25; }
- .tag small { display:block; color:var(--muted); font-size:10.5px; word-break:break-all; margin-top:3px; }
+ .sheet { padding:16px; display:grid; grid-template-columns:repeat(auto-fill,70mm);
+   justify-content:start; gap:12px; }
+ .print-sheet { display:contents; }
+ .tag { position:relative; width:70mm; height:50mm; padding:0; overflow:hidden;
+   background:#fff; color:#111827; border:0; border-radius:0; break-inside:avoid;
+   page-break-inside:avoid; }
+ .tag-block { position:absolute; overflow:hidden; overflow-wrap:anywhere; white-space:normal; }
+ .tag-block img { display:block; width:100%; height:100%; object-fit:contain; object-position:left center; }
+ .tag-block .qr { width:100%; height:100%; }
+ .tag-block .qr svg { display:block; width:100%; height:100%; background:#fff; }
  .empty { grid-column:1/-1; padding:40px 16px; text-align:center; color:var(--muted); }
  @media print {
-   body { background:#fff; }
+   @page { size:A4; margin:0; }
+   html, body { width:210mm; margin:0; padding:0; background:#fff; }
    .bar, .warn { display:none !important; }
-   .sheet { padding:0; gap:6mm; grid-template-columns:repeat(3, 1fr); }
-   .tag { border-style:solid; }
+   .sheet { display:block; padding:0; }
+   .print-sheet { width:210mm; height:297mm; padding:15mm 0 16mm; display:grid;
+     grid-template-columns:repeat(2,70mm); grid-template-rows:repeat(5,50mm);
+     justify-content:center; align-content:start; gap:4mm; overflow:hidden;
+     break-after:page; page-break-after:always; }
+   .print-sheet:last-child { break-after:auto; page-break-after:auto; }
+   .tag { margin:0; }
+   .empty { display:none !important; }
  }
 </style>
 <link rel="stylesheet" href="assets/refine.css?v=18.23.1">
+<link rel="stylesheet" href="/assets/nozza-design-v2.css?v=20.1.35">
+<style>
+@media screen {
+  body.pf-public { min-height:100vh;background:#0D141E;color:#111827; }
+  body.pf-public .bar { background:#fff;border-color:#DBE2EE;color:#111827; }
+  body.pf-public .bar b { color:#111827; }
+  body.pf-public .bar small { display:inline;margin-top:0;color:#94A3B8; }
+  body.pf-public .bar a,body.pf-public .bar button { background:#fff;color:#111827;border-color:#CBD5E1; }
+  body.pf-public .bar button.primary { background:#4F46E5;border-color:#4F46E5;color:#fff; }
+  body.pf-public .bar button:disabled { opacity:.48;cursor:not-allowed;filter:none; }
+  body.pf-public .sheet > .empty { min-height:150px;display:grid;place-content:center;gap:9px;border:1px solid #2D4052;border-radius:12px;background:#16212E;color:#A0B2C5; }
+  body.pf-public .sheet > .empty b { color:#F2F6FB; }
+  body.pf-public .warn { border:1px solid rgba(240,163,104,.42);background:rgba(240,163,104,.09);color:#F4BC80; }
+  body.pf-public .tag { color:#111827;background:#fff;border-color:#94A3B8;border-radius:12px; }
+  body.pf-public .tag small { color:#64748B; }
+  body.pf-public .tag .qr svg { background:#fff; }
+}
+</style>
 </head>
 <body class="pf-public">
 <div class="bar">
@@ -63,7 +90,7 @@
  <a href="/labels.html?kind=spool">Катушки</a>
  <a href="/price-tags.html">Ценники</a>
  <a href="/labels.html?kind=all">Всё</a>
- <button class="primary" type="button" id="printBtn">Печать</button>
+ <button class="primary" type="button" id="printBtn" disabled>Печать</button>
 </div>
 <div id="warn" class="warn" hidden></div>
 <div class="sheet" id="sheet"></div>
@@ -73,9 +100,6 @@
 (function () {
   'use strict';
   var kind = new URLSearchParams(location.search).get('kind') || 'all';
-  function swatchOf(s) { // многоцветная катушка — градиентный свотч (М1)
-    return window.PFSpoolColor ? PFSpoolColor.swatchCss(s, '') : (s.color_hex || '');
-  }
   // Старые закладки «labels?kind=shelf» ведём в полноценный конструктор.
   if (kind === 'shelf') { location.replace('/price-tags.html'); return; }
   function esc(s) {
@@ -87,16 +111,74 @@
     if (!url || !window.QR || !window.QR.svg) return '';
     return window.QR.svg(url, { size: 132, dark: '#111827', light: '#ffffff' });
   }
-  function card(title, rest, url, hex) {
-    return '<article class="tag">'
-      + '<div class="qr">' + qr(url) + '</div>'
-      + (hex ? '<div class="sw" style="background:' + esc(hex) + '"></div>' : '')
-      + '<b>' + esc(title) + '</b>'
-      + (rest ? '<small>' + esc(rest) + '</small>' : '')
-      + '<small>' + esc(url) + '</small></article>';
+  var layouts = {};
+  function card(type, item) {
+    var title = type === 'spool'
+      ? [item.material, item.color_name].filter(Boolean).join(' ')
+      : (item.name || 'Позиция');
+    var recipe = layouts[type === 'spool' ? 'spool-a4' : 'shelf-qr'];
+    var rest = type === 'spool'
+      ? [item.brand, item.remaining_grams != null ? Math.round(item.remaining_grams) + ' г' : '',
+          item.ams_slot ? 'слот ' + item.ams_slot : ''].filter(Boolean).join('\n')
+      : [item.price != null ? Math.round(item.price) + ' ₽' : '',
+          item.qty != null ? item.qty + ' шт' : ''].filter(Boolean).join('\n');
+    return '<article class="tag" aria-label="' + esc(title) + '">'
+      + recipe.blocks.map(function (block) {
+        var content = '';
+        if (block.kind === 'logo') {
+          var crop = (block.source_crop_px || []).map(function (v) { return Math.round(v); }).join('-');
+          content = '<img src="/assets/brand/nozza-print-crop-' + crop + '.png" alt="NOZZA">';
+        } else if (block.kind === 'qr') {
+          content = '<div class="qr">' + qr(item.url) + '</div>';
+        } else if (block.id === 'details') {
+          content = esc([rest, item.url].filter(Boolean).join('\n')).replace(/\n/g, '<br>');
+        }
+        var style = 'left:' + block.x_mm + 'mm;top:' + block.y_mm + 'mm;'
+          + 'width:' + block.width_mm + 'mm;height:' + block.height_mm + 'mm;'
+          + 'font: ' + block.font_pt + 'pt Arial,sans-serif;'
+          + 'font-weight:' + (/bold/i.test(block.font) ? 700 : 400) + ';'
+          + 'line-height:' + block.line_height + ';color:' + block.color + ';'
+          + 'text-align:' + block.align + ';padding:' + (block.text_padding_mm || 0) + 'mm;';
+        if (block.kind === 'qr') style += 'border:' + (block.stroke_width_mm || 0.2)
+          + 'mm solid ' + (block.stroke_color || '#999') + ';';
+        return '<div class="tag-block" data-block="' + esc(block.id) + '" style="'
+          + style + '">' + content + '</div>';
+      }).join('') + '</article>';
   }
-  document.getElementById('printBtn').addEventListener('click', function () { window.print(); });
-  fetch('/api/labels?kind=' + encodeURIComponent(kind)).then(function (r) { return r.json(); }).then(function (d) {
+  function printSheets(cards) {
+    var pages = [];
+    for (var i = 0; i < cards.length; i += 10) {
+      pages.push('<section class="print-sheet">' + cards.slice(i, i + 10).join('') + '</section>');
+    }
+    return pages.join('');
+  }
+  var printBtn = document.getElementById('printBtn');
+  printBtn.addEventListener('click', function () {
+    if (!document.querySelector('#sheet .tag')) return;
+    window.print();
+  });
+  function loadLabels() {
+  printBtn.disabled = true;
+  document.getElementById('sub').textContent = 'загрузка…';
+  Promise.all([
+    fetch('/api/labels?kind=' + encodeURIComponent(kind)).then(function (r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.json();
+    }),
+    fetch('/assets/print-layouts-v2.json').then(function (r) {
+      if (!r.ok) throw new Error('print recipes unavailable');
+      return r.json();
+    })
+  ]).then(function (results) {
+    var d = results[0];
+    var spec = results[1];
+    layouts = Object.fromEntries(spec.documents
+      .filter(function (entry) { return entry.id === 'spool-a4' || entry.id === 'shelf-qr'; })
+      .map(function (entry) { return [entry.id, entry]; }));
+    if (!layouts['spool-a4'] || !layouts['shelf-qr']) throw new Error('print recipes unavailable');
+    if ([layouts['spool-a4'], layouts['shelf-qr']].some(function (entry) {
+      return entry.width_mm !== 70 || entry.height_mm !== 50;
+    })) throw new Error('unexpected label size');
     var titles = { spool: 'QR катушек', spools: 'QR катушек', shelf: 'Ценники стеллажа', all: 'Катушки и ценники' };
     document.getElementById('sub').textContent = titles[kind] || titles.all;
     if (d.reachable === false) {
@@ -107,20 +189,21 @@
     }
     var html = [];
     (d.spools || []).forEach(function (s) {
-      var rest = [s.brand, s.remaining_grams != null ? Math.round(s.remaining_grams) + ' г' : '']
-        .filter(Boolean).join(' · ');
-      html.push(card((s.material || '') + ' ' + (s.color_name || ''), rest, s.url, swatchOf(s)));
+      html.push(card('spool', s));
     });
     (d.shelf || []).forEach(function (i) {
-      var rest = (i.price != null ? Math.round(i.price) + ' ₽' : '')
-        + (i.qty != null ? ' · ' + i.qty + ' шт' : '');
-      html.push(card(i.name || 'Позиция', rest, i.url, ''));
+      html.push(card('shelf', i));
     });
-    document.getElementById('sheet').innerHTML = html.join('')
-      || '<div class="empty">Нечего печатать: склад и стеллаж пусты.</div>';
+    document.getElementById('sheet').innerHTML = printSheets(html)
+      || '<div class="empty"><b>Этикеток пока нет</b><span>После загрузки товаров и катушек здесь появятся макеты для печати.</span></div>';
+    printBtn.disabled = html.length === 0;
   }).catch(function () {
-    document.getElementById('sheet').innerHTML = '<div class="empty">Нет связи с PrintFlow.</div>';
+    document.getElementById('sub').textContent = 'данные недоступны';
+    document.getElementById('sheet').innerHTML = '<div class="empty"><b>Нет связи с PrintFlow</b><span>Макеты этикеток пока неизвестны. Проверьте подключение и повторите загрузку.</span><button class="primary" type="button" id="labelsRetry">↻ Повторить</button></div>';
+    document.getElementById('labelsRetry').addEventListener('click', loadLabels);
   });
+  }
+  loadLabels();
 })();
 </script>
 <script src="/assets/theme-toggle.js?v=18.23.1" defer></script>

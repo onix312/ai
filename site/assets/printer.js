@@ -96,7 +96,50 @@ function renderTabs() {
   const host = $('pr_park') || $('pr_tabs');
   if (!host) return;
   const configured = (PF.state.printers || []).length;
-  $('pr_empty').hidden = list.length > 0 || configured > 0;
+  const empty = $('pr_empty');
+  const unavailable = !PF.dataReady && PF.offline;
+  const showOffline = () => {
+    const workspace = $('pr_workspace');
+    if (!workspace) return;
+    workspace.hidden = false;
+    workspace.classList.add('pr-offline-workspace');
+    host.innerHTML = ['Парк принтеров','Модель станка','Статус и текущая печать'].map((title) => '<div class="pr-offline-card"><b>' + title + '</b><span>Данные недоступны · подключите PrintFlow</span></div>').join('');
+    $$('.pcmd, .cmd-btn, [data-cmd], [data-set], [data-jog], #pr_schedule_btn, #pr_suggest_btn', workspace)
+      .forEach((control) => { control.hidden = true; control.disabled = true; });
+    $$('.v19-pr-operator-actions', workspace).forEach((actions) => {
+      actions.innerHTML = '<span class="pr-offline-chip">Команды недоступны без связи</span>';
+    });
+    ['pr_operator_name', 'pr_task'].forEach((id) => { const node = $(id); if (node) node.textContent = '—'; });
+    ['pr_operator_state', 'pr_order', 'pr_ready_sub'].forEach((id) => { const node = $(id); if (node) node.textContent = 'Нет связи с PrintFlow'; });
+    ['pr_state', 'pr_ready_chip'].forEach((id) => { const node = $(id); if (node) node.textContent = 'Нет связи'; });
+    ['pr_progress', 'pr_layers', 'pr_remaining', 'pr_eta', 'pr_speed', 'pr_wifi', 'pr_spent', 'pr_cost_total', 'pr_job_profit', 'pr_nozzle', 'pr_nozzle_t', 'pr_bed', 'pr_bed_t', 'pr_chamber', 'pr_fan_part', 'pr_fan_aux', 'pr_fan_cham']
+      .forEach((id) => { const node = $(id); if (node) node.textContent = '—'; });
+    ['pr_ready', 'pr_suggest'].forEach((id) => {
+      const node = $(id);
+      if (node) node.innerHTML = '<div class="empty compact"><b>Нет связи с данными</b><span>Состояние очереди и станка пока неизвестно.</span></div>';
+    });
+    const job = $('pr_job');
+    if (job) job.classList.remove('running');
+    const ring = $('pr_ring');
+    if (ring) ring.style.strokeDashoffset = '283';
+  };
+  if (empty) {
+    empty.hidden = unavailable || list.length > 0 || configured > 0;
+    const icon = $('pr_empty_icon'), title = $('pr_empty_title'), copy = $('pr_empty_copy'), add = $('pr_empty_add');
+    if (icon) icon.textContent = unavailable ? '⚠' : '◉';
+    if (title) title.textContent = unavailable ? 'Не удалось загрузить парк принтеров' : 'Принтер ещё не добавлен';
+    if (copy) copy.textContent = unavailable
+      ? 'Подключитесь к PrintFlow: сведения об оборудовании пока недоступны.'
+      : 'Подключите Bambu Lab по локальной сети.';
+    if (add) add.hidden = unavailable;
+  }
+  $('pr_workspace').hidden = unavailable || (list.length === 0 && configured === 0);
+  if (unavailable) {
+    host.innerHTML = '';
+    showOffline();
+    return;
+  }
+  $('pr_workspace').classList.remove('pr-offline-workspace');
   $('pr_workspace').hidden = list.length === 0 && configured === 0;
   if (!list.length) {
     host.innerHTML = configured && !live
@@ -3139,8 +3182,49 @@ PF.on('live', () => { if (PF.viewOn('printers')) renderLive(); else renderTopPil
 PF.on('data', PF.whenView('printers', () => { renderLive(); }));
 PF.on('printers', PF.whenView('printers', () => { renderTabs(); }));
 PF.on('view', (d) => {
-  if (d.view === 'printers') { loadFiles(); loadEvents(); loadAmsMemory(PF.state.activePrinter); }
+  if (d.view === 'printers') {
+    if (!PF.dataReady && PF.offline) renderTabs();
+    else if (PF.offline) showPrinterOfflineView();
+    loadFiles(); loadEvents(); loadAmsMemory(PF.state.activePrinter);
+  }
 });
+PF.on('connection', () => { if (PF.viewOn('printers')) renderTabs(); });
+
+function showPrinterOfflineView() {
+  const host = $('pr_park') || $('pr_tabs');
+  if (!host) return;
+  const empty = $('pr_empty');
+  if (empty) {
+    empty.hidden = false;
+    $('pr_empty_icon').textContent = '⚠';
+    $('pr_empty_title').textContent = 'Не удалось загрузить парк принтеров';
+    $('pr_empty_copy').textContent = 'Подключитесь к PrintFlow: сведения об оборудовании пока недоступны.';
+    $('pr_empty_add').hidden = true;
+  }
+  const workspace = $('pr_workspace');
+  if (!workspace) return;
+  workspace.hidden = false;
+  workspace.classList.add('pr-offline-workspace');
+  host.innerHTML = ['Парк принтеров','Модель станка','Статус и текущая печать'].map((title) => '<div class="pr-offline-card"><b>' + title + '</b><span>Данные недоступны · подключите PrintFlow</span></div>').join('');
+  $$('.pcmd, .cmd-btn, [data-cmd], [data-set], [data-jog], #pr_schedule_btn, #pr_suggest_btn', workspace)
+    .forEach((control) => { control.hidden = true; control.disabled = true; });
+  $$('.v19-pr-operator-actions', workspace).forEach((actions) => {
+    actions.innerHTML = '<span class="pr-offline-chip">Команды недоступны без связи</span>';
+  });
+  ['pr_operator_name', 'pr_task'].forEach((id) => { const node = $(id); if (node) node.textContent = '—'; });
+  ['pr_operator_state', 'pr_order', 'pr_ready_sub'].forEach((id) => { const node = $(id); if (node) node.textContent = 'Нет связи с PrintFlow'; });
+  ['pr_state', 'pr_ready_chip'].forEach((id) => { const node = $(id); if (node) node.textContent = 'Нет связи'; });
+  ['pr_progress', 'pr_layers', 'pr_remaining', 'pr_eta', 'pr_speed', 'pr_wifi', 'pr_spent', 'pr_cost_total', 'pr_job_profit', 'pr_nozzle', 'pr_nozzle_t', 'pr_bed', 'pr_bed_t', 'pr_chamber', 'pr_fan_part', 'pr_fan_aux', 'pr_fan_cham']
+    .forEach((id) => { const node = $(id); if (node) node.textContent = '—'; });
+  ['pr_ready', 'pr_suggest'].forEach((id) => {
+    const node = $(id);
+    if (node) node.innerHTML = '<div class="empty compact"><b>Нет связи с данными</b><span>Состояние очереди и станка пока неизвестно.</span></div>';
+  });
+  const job = $('pr_job');
+  if (job) job.classList.remove('running');
+  const ring = $('pr_ring');
+  if (ring) ring.style.strokeDashoffset = '283';
+}
 
 PF.modules.printer = { command, openJob, loadFiles, renderLive, openPrinterModal, fillPrintModal, convertActiveToOrder, convertJobToOrder };
 })();

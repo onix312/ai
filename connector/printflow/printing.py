@@ -24,12 +24,14 @@
 """
 from __future__ import annotations
 
+import json
 from datetime import datetime, timedelta
 from typing import Any
+from urllib.parse import quote
 
 from . import printforms as pf
 from .accounting import Accounting, num
-from .config import now_iso
+from .config import ROOT, now_iso
 from .db import Database
 
 
@@ -178,55 +180,186 @@ SHEET_AREAS: dict[str, dict[str, float]] = {
 
 # ---------------------------------------------------------------- цеховой отчёт
 def workshop_report_html(db: Database, days: int = 30) -> str:
-    """Печатный цеховой отчёт (идея 21): A4, линейка масштаба, экранирование."""
-    r = workshop_report(db, days)
-    rows = "".join(
-        f"<tr><td>{pf.esc(t['product'])}</td><td>{t['qty']}</td>"
-        f"<td>{t['revenue']:,.0f} ₽</td></tr>".replace(",", " ")
-        for t in r["top"][:8]) or "<tr><td colspan='3'>—</td></tr>"
-    top_line = r["top"][0]["product"] if r["top"] else ""
-    css = """
-  h1 { font-size: 19pt; font-weight: 800; }
-  h2 { font-size: 12pt; margin: 6mm 0 2mm; }
-  table { border-collapse: collapse; width: 100%; }
-  td, th { border: .25mm solid var(--pf-line); padding: 2mm 3mm; font-size: 10pt; }
-  th { background: var(--pf-panel-2); text-align: left; }
-  .kpi { display: flex; gap: 3mm; margin: 4mm 0; flex-wrap: wrap; }
-  .kpi div { flex: 1 1 28mm; border: .25mm solid var(--pf-line);
-             border-radius: 2mm; padding: 3mm; }
-  .kpi b { display: block; font-size: 13pt; }
-  .kpi span { color: var(--pf-muted); font-size: 8.5pt; }
-"""
-    kpi = "".join(
-        f'<div><b>{value}</b><span>{pf.esc(label)}</span></div>'
-        for value, label in (
-            (f"{r['income']:,.0f} ₽".replace(",", " "), "выручка"),
-            (f"{r['profit']:,.0f} ₽".replace(",", " "),
-             f"прибыль (маржа {r['margin']:.0f}%)"),
-            (f"{r['print_hours']:.0f} ч", "время печати"),
-            (f"{r['grams']:,.0f} г".replace(",", " "), "пластик"),
-            (f"{r['jobs_done']}", f"заданий, брак {r['failure_rate']:.0f}%"),
-            (f"{r['customers_new']}", "новых клиентов"),
-        ))
-    foot = pf.join_meta([
-        str(r["company"]),
-        "локальное 3D-производство",
-        f"прибыль на час печати: {r['profit_per_print_hour']:,.0f} ₽/ч".replace(",", " "),
-        f"энергия: {r['energy_kwh']:.1f} кВт·ч",
-        f"себестоимость брака: {r['defects_cost']:,.0f} ₽".replace(",", " "),
-    ])
-    body = (
-        f'<div class="pf-head"><div><h1>{pf.esc(r["company"])} — цеховой отчёт</h1>'
-        f'<div class="pf-sub">за {r["period_days"]} дней · сформирован '
-        f'{pf.esc(str(r["generated_at"])[:10])}</div></div>'
-        f'<span style="margin-left:auto">{pf.brand_line("NOZZA", "")}</span></div>'
-        f'<div class="kpi">{kpi}</div>'
-        f'<h2>Топ изделий{(" (" + pf.esc(top_line) + ")") if top_line else ""}</h2>'
-        f'<table><tr><th>Изделие</th><th>Шт.</th><th>Выручка</th></tr>{rows}</table>'
-        f'<div class="pf-foot"><span>{pf.esc(foot)}</span></div>'
-        f'{pf.ruler()}'
+    """Цеховой отчёт A4 по 44 абсолютным блокам рецепта v2."""
+    report = workshop_report(db, days)
+    layout = _print_v2_document("workshop-report")
+    if (layout.get("width_mm"), layout.get("height_mm")) != (210, 297):
+        raise RuntimeError("Макет workshop-report должен быть A4 210×297 мм")
+
+    money = lambda value: f"{num(value):,.0f}".replace(",", " ")
+    values = {
+        "document-title": "Цеховой отчёт",
+        "metadata": (f"За {report['period_days']} дней · сформирован "
+                     f"{str(report['generated_at'])[:10]}\n{report['company']}"),
+        "top-title": "Топ изделий",
+        "th-0": "Изделие", "th-1": "Шт.", "th-2": "Выручка",
+        "kpi-label-0": "Выручка",
+        "kpi-value-0": f"{money(report['income'])} ₽",
+        "kpi-label-1": "Прибыль / маржа",
+        "kpi-value-1": f"{money(report['profit'])} ₽ · {report['margin']:.0f}%",
+        "kpi-label-2": "Время печати",
+        "kpi-value-2": f"{report['print_hours']:.0f} ч",
+        "kpi-label-3": "Пластик",
+        "kpi-value-3": f"{money(report['grams'])} г",
+        "kpi-label-4": "Заданий / брак",
+        "kpi-value-4": f"{report['jobs_done']} / {report['failure_rate']:.0f}%",
+        "kpi-label-5": "Новых клиентов",
+        "kpi-value-5": str(report["customers_new"]),
+        "footer": (f"Прибыль на час печати: {money(report['profit_per_print_hour'])} ₽/ч · "
+                   f"энергия: {report['energy_kwh']:.1f} кВт·ч · "
+                   f"себестоимость брака: {money(report['defects_cost'])} ₽"),
+    }
+    top = report["top"][:8]
+    for row in range(8):
+        item = top[row] if row < len(top) else {}
+        values[f"cell-{row}-0"] = str(item.get("product") or ("—" if row == 0 and not top else ""))
+        values[f"cell-{row}-1"] = str(item.get("qty", ""))
+        values[f"cell-{row}-2"] = f"{money(item['revenue'])} ₽" if item else ""
+
+    blocks = []
+    for block in layout["blocks"]:
+        weight = 700 if "bold" in str(block.get("font", "")).lower() else 400
+        style = (
+            f'left:{block["x_mm"]}mm;top:{block["y_mm"]}mm;'
+            f'width:{block["width_mm"]}mm;height:{block["height_mm"]}mm;'
+            f'font-family:Arial,sans-serif;font-size:{block["font_pt"]}pt;'
+            f'font-weight:{weight};line-height:{block.get("line_height", 1.25)};'
+            f'color:{block["color"]};background:{block.get("background") or "transparent"};'
+            f'text-align:{block["align"]};padding:{block.get("text_padding_mm", 0)}mm;'
+            f'border-radius:{block.get("radius_mm", 0)}mm'
+        )
+        if block["kind"] == "logo":
+            crop = "-".join(str(int(value)) for value in block["source_crop_px"])
+            content = (f'<img src="/assets/brand/nozza-print-crop-{crop}.png" alt="NOZZA" '
+                       'style="display:block;width:100%;height:100%;object-fit:contain;'
+                       'object-position:left center">')
+        else:
+            content = pf.esc(values.get(block["id"], "")).replace("\n", "<br>")
+        if block["kind"] == "cell":
+            style += (f';border:{block.get("stroke_width_mm", 0.2)}mm solid '
+                      f'{block.get("stroke_color") or "#E8E2E7"}')
+        blocks.append(
+            f'<div class="report-block report-{block["kind"]}" '
+            f'data-block="{pf.esc(block["id"])}" style="{style}">{content}</div>')
+
+    return (
+        "<!DOCTYPE html><html lang=\"ru\"><head><meta charset=\"utf-8\">"
+        f"<title>Цеховой отчёт — {pf.esc(report['company'])}</title>"
+        "<style>@page{size:A4;margin:0}*{box-sizing:border-box}"
+        "html,body{margin:0;min-height:100%;font-family:Arial,sans-serif;color:#31242E}"
+        "body{background:#EEEAF0;padding:20px 0}.report-sheet{position:relative;"
+        "width:210mm;height:297mm;margin:0 auto;background:#fff;overflow:hidden}"
+        ".report-block{position:absolute;overflow:hidden;overflow-wrap:anywhere;white-space:normal}"
+        ".report-logo img{object-fit:contain}.report-cell{border-collapse:collapse}"
+        "@media print{body{background:#fff;padding:0;-webkit-print-color-adjust:exact;"
+        "print-color-adjust:exact}.report-sheet{margin:0}}"
+        "@media screen{.report-sheet{box-shadow:0 6px 30px #31242E20}}"
+        ".no-print{position:fixed;z-index:2;right:18px;top:18px;border:0;border-radius:9px;"
+        "padding:11px 18px;background:#6E2BC8;color:#fff;font:600 14px Arial,sans-serif;"
+        "cursor:pointer}@media print{.no-print{display:none}}</style></head><body>"
+        "<button class=\"no-print\" onclick=\"window.print()\">Печать / PDF</button>"
+        f'<main class="report-sheet">{"".join(blocks)}</main></body></html>'
     )
-    return pf.page(f"Цеховой отчёт — {r['company']}", body, css=css, margin="12mm")
+
+
+def pack_sheet_html(data: dict[str, Any]) -> str:
+    """Render the order packing checklist from its A4 v2 recipe."""
+    layout = _print_v2_document("pack-sheet")
+    if (layout.get("width_mm"), layout.get("height_mm")) != (210, 297):
+        raise RuntimeError("Макет pack-sheet должен оставаться A4 210×297 мм")
+    order = data["order"]
+    items = data.get("items") or []
+    if not items:
+        items = [{"name": order.get("product"), "qty": order.get("qty") or 1}]
+    chunks = [items[index:index + 4] for index in range(0, len(items), 4)] or [[]]
+    checklist = [
+        "Изделие проверено по чек-листу качества",
+        ("Бренд-карточка NOZZA" if data.get("brand_card")
+         else "Бренд-карточка не вкладывается"),
+        "Бирка с названием и QR (если есть)",
+        "Упаковка: плёнка / коробка, вложение — бумага",
+        "Если заказ — подарок, убрать ценник",
+    ]
+    def qty_text(value: Any) -> str:
+        qty = num(value)
+        if abs(qty - round(qty)) < 0.0005:
+            return str(int(round(qty)))
+        return f"{qty:.3f}".rstrip("0").rstrip(".")
+
+    sheets = []
+    for page_index, rows in enumerate(chunks):
+        values = {
+            "document-title": f"Карточка упаковки · заказ №{order.get('number') or ''}",
+            "metadata": (f"№ {order.get('number') or '—'} · Клиент: "
+                         f"{order.get('customer_name') or '—'}"
+                         + (f" · Страница {page_index + 1} из {len(chunks)}"
+                            if len(chunks) > 1 else "")),
+            "th-0": "Изделие", "th-1": "Кол-во",
+            "check-title": "Что положить",
+            "footer": f"Сформировано автоматически · {now_iso()[:16].replace('T', ' ')}",
+        }
+        rendered = []
+        for block in layout["blocks"]:
+            block_id = block["id"]
+            value = values.get(block_id, "")
+            if block_id.startswith("cell-"):
+                row_index, col_index = (int(part) for part in block_id.split("-")[1:])
+                item = rows[row_index] if row_index < len(rows) else {}
+                value = (str(item.get("name") or order.get("product") or "")
+                         if col_index == 0 else
+                         qty_text(item.get("qty")) if item else "")
+            elif block_id.startswith("check-label-"):
+                value = checklist[int(block_id.rsplit("-", 1)[1])]
+
+            style = (
+                f'left:{block["x_mm"]}mm;top:{block["y_mm"]}mm;'
+                f'width:{block["width_mm"]}mm;height:{block["height_mm"]}mm;'
+                f'font-family:Arial,sans-serif;font-size:{block["font_pt"]}pt;'
+                f'font-weight:{700 if "bold" in block["font"].lower() else 400};'
+                f'line-height:{block["line_height"]};color:{block["color"]};'
+                f'text-align:{block["align"]};padding:{block.get("text_padding_mm", 0)}mm;'
+                f'background:{block.get("background") or "transparent"};'
+                f'border-radius:{block.get("radius_mm", 0)}mm'
+            )
+            if block["kind"] == "logo":
+                crop = "-".join(str(int(part)) for part in block["source_crop_px"])
+                content = (f'<img src="/assets/brand/nozza-print-crop-{crop}.png" '
+                           'alt="NOZZA" style="display:block;width:100%;height:100%;'
+                           'object-fit:contain;object-position:left center">')
+            elif block["kind"] == "checkbox":
+                style += (f';border:{block.get("stroke_width_mm", 0.2)}mm solid '
+                          f'{block.get("stroke_color") or "#D9C8CE"}')
+                content = ""
+            else:
+                content = pf.esc(value).replace("\n", "<br>")
+            if block["kind"] == "cell":
+                style += (f';border:{block.get("stroke_width_mm", 0.2)}mm solid '
+                          f'{block.get("stroke_color") or "#D9C8CE"}')
+            rendered.append(
+                f'<div class="pack-block pack-{block["kind"]}" '
+                f'data-block="{pf.esc(block_id)}" style="{style}">{content}</div>')
+        sheets.append(f'<main class="pack-sheet">{"".join(rendered)}</main>')
+
+    return (
+        "<!DOCTYPE html><html lang=\"ru\"><head><meta charset=\"utf-8\">"
+        f"<title>Карточка упаковки — заказ №{pf.esc(order.get('number') or '')}</title>"
+        "<style>@page{size:A4;margin:0}*{box-sizing:border-box}"
+        "html,body{margin:0;padding:0;font-family:Arial,sans-serif;color:#31242E}"
+        "body{background:#EEEAF0;padding:20px 0}.pack-sheet{position:relative;"
+        "width:210mm;height:297mm;margin:0 auto 16px;overflow:hidden;background:#fff;"
+        "page-break-after:always;break-after:page}.pack-sheet:last-of-type{"
+        "page-break-after:auto;break-after:auto}.pack-block{position:absolute;"
+        "overflow:hidden;overflow-wrap:anywhere;white-space:normal}"
+        "@media screen{.pack-sheet{box-shadow:0 6px 30px #31242E20}}"
+        "@media print{body{background:#fff;padding:0;-webkit-print-color-adjust:exact;"
+        "print-color-adjust:exact}.pack-sheet{margin:0}}"
+        ".no-print{position:fixed;z-index:2;right:18px;top:18px;border:0;"
+        "border-radius:9px;padding:11px 18px;background:#6E2BC8;color:#fff;"
+        "font:600 14px Arial,sans-serif;cursor:pointer}"
+        "@media print{.no-print{display:none}}</style></head><body>"
+        "<button class=\"no-print\" onclick=\"window.print()\">Печать / PDF</button>"
+        + "".join(sheets) + "</body></html>"
+    )
 
 
 # ---------------------------------------------------------------- визитка 2.0
@@ -238,6 +371,17 @@ def _print_base_url(db: Database) -> str:
     Теперь пустой адрес — это отсутствие QR и честная подпись на листе.
     """
     return str(db.setting("public_url", "") or "").strip().rstrip("/")
+
+
+def _print_v2_document(document_id: str) -> dict[str, Any]:
+    """Прочитать один физический рецепт из каталога печатных макетов v2."""
+    spec_path = ROOT / "site" / "assets" / "print-layouts-v2.json"
+    spec = json.loads(spec_path.read_text(encoding="utf-8"))
+    layout = next((item for item in spec.get("documents", [])
+                   if item.get("id") == document_id), None)
+    if not layout:
+        raise RuntimeError(f"Макет {document_id} не найден в print-layouts-v2.json")
+    return layout
 
 
 def business_card_html(db: Database, customer_id: str = "") -> str:
@@ -264,14 +408,7 @@ def business_card_html(db: Database, customer_id: str = "") -> str:
         code = str(c.get("portal_code") or "")
         name = str(c.get("name") or "")
     public = _print_base_url(db)
-    qr_url = ""
-    if code:
-        qr_url = f"{public}/my.html?code={code.upper()}"
-        my_line = (f'Мой NOZZA: <b>{pf.esc(code.upper())}</b> — покажите код, '
-                   f'покажем заказ')
-    else:
-        qr_url = f"{public}/track.html"
-        my_line = "Спросите код «Мой NOZZA» — покажем ваш заказ онлайн"
+    qr_url = f"{public}/my.html?code={quote(code.upper(), safe='')}" if code else f"{public}/track.html"
     qr = ""
     if public and qr_url:
         try:
@@ -279,55 +416,86 @@ def business_card_html(db: Database, customer_id: str = "") -> str:
         except Exception:
             qr = ""
     if qr:
-        mark = f'<div class="bc-qr" role="img" aria-label="QR: {pf.esc(qr_url)}">{qr}</div>'
+        mark = qr
+        qr_note = ""
     else:
-        mark = ('<div class="bc-noqr">QR не напечатан: адрес витрины не настроен '
-                '(настройка «Адрес витрины»)</div>')
+        mark = "QR<br>место кода"
+        qr_note = "QR не напечатан: адрес витрины не настроен (настройка «Адрес витрины»)."
     company = str(db.setting("company_name", "NOZZA") or "NOZZA")
-    short = pf.short_name(company, 28)
     client = pf.short_name(name, 38)
-    cards = ""
-    for _ in range(4):
-        cards += (
-            f'<div class="pf-cell bc">'
-            f'<div class="bc-co">{pf.esc(short)}</div>'
-            f'<div class="bc-ttl">3D-цех · напечатаем по вашим размерам</div>'
-            f'<div class="bc-meta">Витрина: {pf.esc(public) if public else "не настроена"}</div>'
-            f'<div class="bc-line">{my_line}</div>'
-            f'{"<div class=bc-nm>Подготовлено для: " + pf.esc(client) + "</div>" if client else ""}'
-            f'{mark}</div>'
+    layout = _print_v2_document("business-personal")
+    if not layout or layout.get("width_mm") != 85 or layout.get("height_mm") != 55:
+        raise RuntimeError("Макет business-personal 85×55 мм не найден в print-layouts-v2.json")
+
+    values = {
+        "slogan": "3D-производство\n" + (pf.short_name(company, 36) if company.upper() != "NOZZA"
+                                           else "3D-цех · напечатаем по вашим размерам"),
+        "contact": "\n".join((
+            f"Мой NOZZA: {code.upper()}" if code else "Мой NOZZA: уточните код заказа",
+            f"Витрина: {public}" if public else "Витрина не настроена",
+            f"Для: {client}" if client else "Для покупателя",
+        )),
+    }
+    blocks = []
+    for block in layout["blocks"]:
+        font_weight = 700 if "bold" in block["font"].lower() else 400
+        styles = (
+            f'left:{block["x_mm"]}mm;top:{block["y_mm"]}mm;'
+            f'width:{block["width_mm"]}mm;height:{block["height_mm"]}mm;'
+            f'font-size:{block["font_pt"]}pt;font-weight:{font_weight};'
+            f'line-height:{block["line_height"]};color:{block["color"]};'
+            f'background:{block.get("background") or "transparent"};'
+            f'text-align:{block["align"]};padding:{block.get("text_padding_mm", 0)}mm'
         )
+        if block["kind"] == "logo":
+            crop = "-".join(str(int(value)) for value in block["source_crop_px"])
+            content = (f'<img src="/assets/brand/nozza-print-crop-{crop}.png" '
+                       'alt="NOZZA" style="display:block;width:100%;height:100%;'
+                       'object-fit:contain;object-position:left center">')
+            kind = "logo"
+        elif block["kind"] == "qr":
+            content = mark
+            kind = "qr"
+        else:
+            value = values.get(block["id"], block.get("text", ""))
+            content = pf.esc(value).replace("\n", "<br>")
+            kind = "text"
+        if block["kind"] == "qr":
+            styles += (f';border:{block.get("stroke_width_mm", 0)}mm solid '
+                       f'{block.get("stroke_color") or "#D9C8CE"};display:grid;place-items:center')
+        extra_class = " bc-noqr" if block["kind"] == "qr" and not qr else ""
+        role = (f' role="img" aria-label="QR: {pf.esc(qr_url)}"'
+                if block["kind"] == "qr" and qr else "")
+        blocks.append(
+            f'<div class="bc-block bc-{kind}{extra_class}"{role} '
+            f'style="{styles}">{content}</div>')
+    cards = ''.join(f'<div class="bc-card">{"".join(blocks)}</div>' for _ in range(4))
     css = """
-  .pf-grid { display: grid; width: 178mm; margin: 0 auto;
-             grid-template-columns: repeat(2, 85mm); grid-auto-rows: 55mm;
-             gap: 8mm; }
-  .bc { border: .25mm solid var(--pf-line); border-left: 2.6mm solid var(--pf-accent);
-        border-radius: 2mm; padding: 4mm 5mm; display: flex; flex-direction: column;
-        gap: 1mm; }
-  .bc-co { font-size: 15pt; font-weight: 800; letter-spacing: -.01em; }
-  .bc-ttl { font-size: 9pt; color: var(--pf-muted); }
-  .bc-meta, .bc-line, .bc-nm { font-size: 8.5pt; color: var(--pf-muted); }
-  .bc-nm { color: var(--pf-ink); font-weight: 600; }
-  .bc-line b { color: var(--pf-accent); }
-  .bc-qr { margin-top: auto; }
-  .bc-qr svg { width: 20mm; height: 20mm; display: block; }
-  .bc-noqr { margin-top: auto; max-width: 52mm; font-size: 7.5pt;
-             color: var(--pf-warn); }
+  .pf-grid { display:grid; width:178mm; margin:0 auto;
+             grid-template-columns:repeat(2,85mm); grid-auto-rows:55mm; gap:8mm; }
+  .bc-card { position:relative; width:85mm; height:55mm; overflow:hidden;
+             box-sizing:border-box; background:#fff; color:#31242e;
+             font:10pt Arial,sans-serif; page-break-inside:avoid; break-inside:avoid; }
+  .bc-block { position:absolute; box-sizing:border-box; overflow:hidden;
+              white-space:pre-line; line-height:1.25; }
+  .bc-block img { display:block; width:100%; height:100%;
+                  object-fit:contain; object-position:left center; }
+  .bc-qr { font-size:7pt; color:#66555f; text-align:center; }
+  .bc-qr svg { display:block; width:100%; height:100%; }
+  .bc-noqr { display:grid; place-content:center; }
 """
     body = (
-        f'<div class="pf-head" style="margin-bottom:4mm">'
-        f'{pf.brand_line(company, "визитки · 85 × 55 мм, 4 на лист")}</div>'
         f'<div class="pf-grid">{cards}</div>'
         f'{pf.ruler()}'
-        f'<div class="pf-note" style="margin-top:2mm">Резать по границе: 85 × 55 мм, '
-        f'бумага 250–300 г/м².</div>'
+        f'<div class="pf-note" style="margin-top:2mm">Резать по границе: 85 × 55 мм, бумага 250–300 г/м².'
+        f'{" " + pf.esc(qr_note) if qr_note else ""}</div>'
     )
-    return pf.page(f"Визитки {short}", body, css=css, margin="10mm")
+    return pf.page(f"Визитки {pf.short_name(company, 28)}", body, css=css, margin="10mm")
 
 
 # ---------------------------------------------------------------- гарантийный талон
 def warranty_html(db: Database, order_id: str, customer_id: str = "") -> str:
-    """Гарантийный талон заказа (идея 123) — A5 внутри A4.
+    """Гарантийный талон заказа (идея 123) — отдельный лист A5 по JSON.
 
     Срок гарантии печатается только если он задан в настройках
     (``warranty_months``); иначе на листе строка для заполнения от руки —
@@ -345,12 +513,14 @@ def warranty_html(db: Database, order_id: str, customer_id: str = "") -> str:
         code = str(c.get("portal_code") or "")
     public = _print_base_url(db)
     qr = ""
+    qr_url = ""
     if public and code:
         try:
-            qr = qr_svg(f"{public}/my.html?code={code.upper()}", level="M",
-                        border=2, compact=True)
+            qr_url = f"{public}/my.html?code={quote(code.upper(), safe='')}"
+            qr = qr_svg(qr_url, level="M", border=2, compact=True)
         except Exception:
             qr = ""
+            qr_url = ""
     months = num(db.setting("warranty_months", 0), 0)
     if months:
         term = f"Срок гарантии: {int(months)} мес. с даты выдачи"
@@ -359,41 +529,69 @@ def warranty_html(db: Database, order_id: str, customer_id: str = "") -> str:
     issued = str(order.get("closed_at") or order.get("updated_at") or "")[:10]
     number = str(order.get("number") or order_id)
     product = pf.short_name(str(order.get("product") or "изделие"), 60)
-    company = str(db.setting("company_name", "NOZZA") or "NOZZA")
+    layout = _print_v2_document("warranty")
+    if (layout.get("width_mm"), layout.get("height_mm")) != (148, 210):
+        raise RuntimeError("Макет warranty должен оставаться форматом A5 148×210 мм")
+    values = {
+        "title": "Гарантийный талон",
+        "field-0": f"Заказ: № {number}",
+        "field-1": f"Изделие: {product}",
+        "field-2": f"Дата выдачи: {issued or '—'}",
+        "field-3": term,
+        "terms": "Гарантия не покрывает механические повреждения, нагрузку выше "
+                 "расчётной и нагрев выше рабочей температуры материала.",
+        "qr": qr or "QR\nместо кода",
+        "qr-note": "Заказ, фото и статус «Мой NOZZA»\n" + (
+            public.removeprefix("https://").removeprefix("http://")
+            if qr_url else "Адрес витрины не настроен" if not public
+            else "Личный QR-код заказа не настроен"),
+        "signatures": "Выдал ______________       Получил ______________",
+    }
+    blocks = []
+    for block in layout["blocks"]:
+        font_weight = 700 if "bold" in str(block.get("font", "")).lower() else 400
+        styles = (
+            f'left:{block["x_mm"]}mm;top:{block["y_mm"]}mm;'
+            f'width:{block["width_mm"]}mm;height:{block["height_mm"]}mm;'
+            f'font-family:Arial,sans-serif;font-size:{block["font_pt"]}pt;'
+            f'font-weight:{font_weight};line-height:{block["line_height"]};'
+            f'color:{block["color"]};background:{block.get("background") or "transparent"};'
+            f'text-align:{block["align"]};padding:{block.get("text_padding_mm", 0)}mm;'
+            f'border-radius:{block.get("radius_mm", 0)}mm'
+        )
+        if block["kind"] == "logo":
+            crop = "-".join(str(int(value)) for value in block["source_crop_px"])
+            content = (f'<img src="/assets/brand/nozza-print-crop-{crop}.png" '
+                       'alt="NOZZA" style="display:block;width:100%;height:100%;'
+                       'object-fit:contain;object-position:left center">')
+        elif block["kind"] == "qr" and qr:
+            content = qr
+        elif block["kind"] == "qr":
+            content = pf.esc(block.get("text") or values["qr"]).replace("\n", "<br>")
+        else:
+            content = pf.esc(values.get(block["id"], block.get("text", "")))
+            content = content.replace("\n", "<br>")
+        if block["kind"] == "qr":
+            styles += (f';border:{block.get("stroke_width_mm", 0)}mm solid '
+                       f'{block.get("stroke_color") or "#D9C8CE"};display:grid;place-items:center')
+        role = (f' role="img" aria-label="QR: {pf.esc(qr_url)}"'
+                if block["kind"] == "qr" and qr_url else "")
+        blocks.append(
+            f'<div class="wt-block wt-{block["kind"]}"{role} '
+            f'data-block="{pf.esc(block["id"])}" '
+            f'style="{styles}">{content}</div>')
     css = """
-  .wt { width: 148mm; margin: 0 auto; border: .3mm solid var(--pf-line);
-        border-radius: 2mm; padding: 6mm 8mm; }
-  .wt h1 { font-size: 18pt; }
-  .wt dl { display: grid; grid-template-columns: 42mm 1fr; gap: 2mm 4mm;
-           margin: 5mm 0; font-size: 10.5pt; }
-  .wt dt { color: var(--pf-muted); }
-  .wt dd { margin: 0; font-weight: 600; }
-  .wt-qr { display: flex; align-items: center; gap: 4mm; margin-top: 4mm; }
-  .wt-qr svg { width: 24mm; height: 24mm; }
-  .wt-sign { margin-top: 8mm; display: flex; gap: 8mm; font-size: 9pt;
-             color: var(--pf-muted); }
-  .wt-sign span { border-top: .25mm solid var(--pf-line); padding-top: 1.5mm;
-                  min-width: 60mm; }
+  .wt-sheet { position:relative; width:148mm; height:210mm; margin:0;
+              overflow:hidden; page-break-after:always; break-after:page; }
+  .wt-block { position:absolute; box-sizing:border-box; overflow:hidden;
+              white-space:pre-line; }
+  .wt-logo img { object-fit:contain; object-position:left center; }
+  .wt-qr { display:grid; place-items:center; }
+  .wt-qr svg { display:block; width:100%; height:100%; }
 """
-    qr_block = (f'<div class="wt-qr">{qr}<span class="pf-note">QR: заказ, '
-                f'фото и статус «Мой NOZZA»</span></div>') if qr else (
-        '<div class="pf-note">QR не напечатан: в настройках не задан адрес витрины.</div>')
-    body = (
-        f'<div class="wt">'
-        f'<div class="pf-head">{pf.brand_line(company, "гарантийный талон")}</div>'
-        f'<h1 style="margin-top:4mm">Гарантийный талон</h1>'
-        f'<dl><dt>Заказ</dt><dd>№{pf.esc(number)}</dd>'
-        f'<dt>Изделие</dt><dd>{pf.esc(product)}</dd>'
-        f'<dt>Дата выдачи</dt><dd>{pf.esc(issued) or "—"}</dd>'
-        f'<dt>Условия</dt><dd>{pf.esc(term)}</dd></dl>'
-        f'<div class="pf-note">Гарантия не покрывает механические повреждения, '
-        f'нагрузку выше расчётной и нагрев выше рабочей температуры материала.</div>'
-        f'{qr_block}'
-        f'<div class="wt-sign"><span>Выдал</span><span>Получил</span></div>'
-        f'</div>{pf.ruler()}'
-    )
+    body = f'<div class="wt-sheet">{"".join(blocks)}</div>'
     return pf.page(f"Гарантийный талон — заказ №{number}", body, css=css,
-                   margin="14mm")
+                   size="A5", margin="0")
 
 
 # ---------------------------------------------------------------- таблички цеха

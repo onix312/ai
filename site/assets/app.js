@@ -46,10 +46,20 @@ function renderDashboard() {
   const farm = (live && live.farm) || {};
   const s = (PF.state.finance && PF.state.finance.summary) || PF.state.summary || {};
   const orders = PF.state.orders || [];
+  if (!PF.dataReady) {
+    if (PF.offline) {
+      put('dash_kpis', [
+        'Печатает сейчас', 'Очередь печати', 'Активные заказы',
+        'Просрочено сроков', 'Ожидает оплаты', 'Прибыль за период',
+      ].map((label) => kpi(label, '—', 'Нет связи с данными')).join(''));
+      renderDashboardWorkspaces([], s);
+    }
+    return;
+  }
   const finals = PF.finalStatusIds();
   const activeOrders = orders.filter((o) => !finals.includes(o.status));
   const today = U.todayISO();
-  const late = activeOrders.filter((o) => o.due && o.due <= today);
+  const late = activeOrders.filter((o) => o.due && o.due < today);
   const paidOf = (o) => Math.max(num(o.paid), num(o.prepaid));
   const pipeline = activeOrders.reduce((a, o) => a + Math.max(0, num(o.price) - paidOf(o)), 0);
   // В KPI «Очередь» должны попадать задания, а не весь объём незавершённых заказов:
@@ -81,9 +91,13 @@ function renderDashboard() {
       load > 100 ? 'bad' : load > 85 ? 'warn' : '',
       `<div class="bar ${load > 100 ? 'bad' : load > 85 ? 'warn' : ''}"><i style="width:${clamp(load, 0, 100)}%"></i></div>`),
     kpi('Активные заказы', String(activeOrders.length), `В очереди запуска: ${nfmt(farm.queued)}`),
+    kpi('Просрочено сроков', String(late.length), 'Активные заказы с прошедшим сроком', late.length ? 'bad' : 'ok'),
+    kpi('Ожидает оплаты', money(pipeline), 'Долг по активным заказам', pipeline ? 'warn' : 'ok'),
     kpi('Прибыль за период', money(s.profit), `маржа ${pct(s.margin)}` + (farm.today_hours ? ` · сегодня ${nfmt(farm.today_hours, 1)} ч` : ''), num(s.profit) >= 0 ? 'ok' : 'bad'),
   ].join(''));
   animateKpis();
+
+  renderDashboardWorkspaces(activeOrders, s);
 
   const series = (PF.state.finance && PF.state.finance.series) || [];
   const cut = series.slice(-PF.state.dashDays);
@@ -168,6 +182,46 @@ function renderDashboard() {
   applyDashOrder();
 }
 
+function renderDashboardWorkspaces(activeOrders, summary) {
+  const rows = $('dash_order_rows');
+  if (rows) {
+    const recent = activeOrders.slice().sort((a, b) => {
+      const da = String(a.due || '9999-12-31');
+      const db = String(b.due || '9999-12-31');
+      return da.localeCompare(db) || num(b.id) - num(a.id);
+    }).slice(0, 5);
+    rows.innerHTML = !PF.dataReady
+      ? '<tr><td colspan="6"><div class="empty compact">Список заказов недоступен. Проверьте связь с PrintFlow.</div></td></tr>'
+      : recent.length ? recent.map((order) => {
+      const status = PF.status(order.status);
+      const due = order.due ? dateText(order.due) : 'Без срока';
+      const late = order.due && order.due < U.todayISO();
+      const paid = Math.max(num(order.paid), num(order.prepaid));
+      const debt = Math.max(0, num(order.price) - paid);
+      return `<tr data-order="${esc(order.id)}">`
+        + `<td><button class="n2-order-open" type="button" data-order-open="${esc(order.id)}">№${esc(order.number)}</button></td>`
+        + `<td>${esc(order.product || 'Изделие')}</td>`
+        + `<td>${esc(order.customer_name || 'Без клиента')}</td>`
+        + `<td><span class="tag ${late ? 'bad' : ''}">${esc(status.name)}</span></td>`
+        + `<td class="right"><b>${money(order.price)}</b>${debt ? `<small class="n2-order-debt">долг ${money(debt)}</small>` : ''}</td>`
+        + `<td class="${late ? 'n2-order-late' : ''}">${esc(due)}</td></tr>`;
+    }).join('') : '<tr><td colspan="6"><div class="empty compact">Активных заказов нет.</div></td></tr>';
+  }
+  const period = Math.max(1, num(PF.state.dashDays) || 7);
+  const profit = Number(summary.profit);
+  const margin = Number(summary.margin);
+  const finance = $('dash_finance_summary');
+  if ($('dash_finance_period')) $('dash_finance_period').textContent = `За ${period} ${period === 1 ? 'день' : 'дней'} · из сводки финансов`;
+  if (finance) {
+    const knownProfit = Number.isFinite(profit);
+    const knownMargin = Number.isFinite(margin);
+    finance.innerHTML = `<div class="n2-finance-main ${knownProfit && profit < 0 ? 'negative' : ''}">`
+      + `<span>Прибыль</span><b>${knownProfit ? money(profit) : 'Нет данных'}</b></div>`
+      + `<div class="n2-finance-meta"><span>Маржа</span><b>${knownMargin ? pct(margin) : '—'}</b></div>`
+      + `<div class="n2-finance-note">Сводка PrintFlow · период ${period} дн.</div>`;
+  }
+}
+
 /* ===================================================== v19: AI-брифинг смены
    Брифинг детерминированный: /api/assistant/day собирает те же факты, что
    видят План, Финансы, Долги и Парк. Модель здесь не вызывается. */
@@ -180,7 +234,11 @@ function renderAiBriefing() {
     return;
   }
   if (!data.ok) {
-    host.innerHTML = '<div class="v19-ai-brief-empty">' + esc(data.reason || 'Для брифинга пока мало данных.') + '</div>';
+    const reason = String(data.reason || 'Для брифинга пока мало данных.')
+      .replace(/<[^>]*>/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    host.innerHTML = '<div class="v19-ai-brief-empty">' + esc(reason.slice(0, 180) || 'Брифинг временно недоступен.') + '</div>';
     if ($('dash_ai_hint')) $('dash_ai_hint').textContent = 'Брифинг обновится вместе с данными цеха';
     return;
   }
@@ -206,7 +264,7 @@ async function refreshAiBriefing() {
   try {
     PF.state.aiBriefing = await get('/api/assistant/day', { kind: 'briefing', days: 1 });
   } catch (e) {
-    PF.state.aiBriefing = { ok: false, reason: e.message || 'Брифинг недоступен' };
+    PF.state.aiBriefing = { ok: false, reason: 'Брифинг временно недоступен' };
   } finally {
     aiBriefingBusy = false;
   }
@@ -609,6 +667,19 @@ function refreshHeroCamera(host, printer) {
 function renderActivePrint() {
   const host = $('dash_active');
   const live = PF.state.live;
+  if (!PF.dataReady && PF.offline) {
+    const dot = $('dash_hero_dot');
+    if (dot) dot.className = 'hero-live-dot off';
+    if ($('dash_active_sub')) $('dash_active_sub').textContent = 'Состояние парка недоступно';
+    if (host) {
+      if (host.dataset.heroKey !== 'offline') {
+        host.dataset.heroKey = 'offline';
+        host.innerHTML = '<div class="empty compact"><b>Не удалось загрузить состояние принтеров</b>'
+          + '<span>Подключитесь к PrintFlow, чтобы увидеть парк, задания и телеметрию.</span></div>';
+      }
+    }
+    return;
+  }
   const printers = (live && live.printers) || [];
 
   // Смарт-фокус: выбранный оператором или приоритетный принтер
@@ -2119,6 +2190,23 @@ async function deleteMaterial(id) {
   } catch (e) { fail(e); }
 }
 
+function syncSettingsAvailability() {
+  const unknown = !PF.ready || (PF.offline && !PF.state.version);
+  const notice = $('settings_connection_notice');
+  if (notice) notice.hidden = !unknown;
+  const controls = [
+    ...$$('[data-setting]', $('view-settings')),
+    ...$$('.pane input:not([type="search"]), .pane select, .pane textarea', $('view-settings')),
+    ...$$('.pane button', $('view-settings')),
+    $('settings_save'), $('settings_reset'),
+  ].filter(Boolean);
+  controls.forEach((control) => { control.disabled = unknown; });
+}
+syncSettingsAvailability();
+PF.on('connection', syncSettingsAvailability);
+PF.on('bootstrap', syncSettingsAvailability);
+PF.on('ready', syncSettingsAvailability);
+
 function renderSettings() {
   const s = PF.state.settings;
   /* Каждая карточка рисуется независимо (18.6.3): сбой одной (нет элемента в
@@ -2311,7 +2399,10 @@ function renderSettings() {
         const lastErr = errBits.join(' · ') || (data.last_error ? String(data.last_error) : '');
         if (lastErr) html += `<span style="display:block;margin-top:4px;color:var(--bad,#ef4444)">Ошибка: ${esc(lastErr)}</span>`;
         el.innerHTML = html;
-      }).catch(() => {});
+      }).catch(() => {
+        const el = $('studio_status');
+        if (el) el.innerHTML = '<span>⚠</span><span>Статус Bambu Studio и шлюза недоступен без подключения к PrintFlow.</span>';
+      });
       get('/api/slicer/status').then((data) => {
         const el = $('studio_status');
         if (!el || !data) return;
@@ -2319,7 +2410,10 @@ function renderSettings() {
           ? ` · слайсер ${esc(data.name || data.bin || '')}`
           : ' · CLI-слайсер не найден';
         if (el.lastElementChild) el.lastElementChild.textContent += extra;
-      }).catch(() => {});
+      }).catch(() => {
+        const el = $('studio_status');
+        if (el && el.lastElementChild) el.lastElementChild.textContent += ' · статус слайсера недоступен';
+      });
     }
   });
 
@@ -2357,7 +2451,7 @@ function renderSettings() {
   });
 
   safe('theme', () => {
-    if ($('set_cloud')) renderCloudSettings(s).then(restoreSettingsDraft);
+    if ($('set_cloud')) renderCloudSettings(s).then(() => { restoreSettingsDraft(); syncSettingsAvailability(); });
     if ($('set_theme')) $('set_theme').value = s.theme || 'system';
     put('set_accent', ACCENTS.map(([name, color]) =>
       `<button type="button" data-accent="${name}" class="${(s.accent || 'indigo') === name ? 'on' : ''}" style="background:${color}" title="${name}"></button>`).join(''));
@@ -2370,7 +2464,9 @@ function renderSettings() {
         + `<small>${esc(p.model || '')} · ${esc(p.host || 'IP не задан')} · ${p.has_access_code ? 'код сохранён' : 'нет Access Code'}`
         + `${livep ? ' · ' + esc(livep.printer.state_label) : ''}</small></div>`
         + `<button class="btn sm" type="button" data-printer-edit="${esc(p.id)}">Изменить</button></div>`;
-    }).join('') : '<div class="empty compact"><span>Принтеры не добавлены.</span></div>');
+    }).join('') : PF.offline && !PF.state.version
+      ? '<div class="empty compact"><span>Парк принтеров недоступен без подключения к PrintFlow.</span></div>'
+      : '<div class="empty compact"><span>Принтеры не добавлены.</span></div>');
   });
 
   safe('misc', () => {
@@ -2382,8 +2478,8 @@ function renderSettings() {
       button.classList.toggle('on', button.dataset.setShortcut === settingsPane);
     });
     // 17.0 (И4): вкладки «Касса / СБП / Банк» и «Все настройки» строятся из схемы
-    renderCashierSettings().catch(() => {});
-    renderAllSettings().catch(() => {
+    renderCashierSettings().then(syncSettingsAvailability).catch(() => {});
+    renderAllSettings().then(syncSettingsAvailability).catch(() => {
       if ($('set_all_fields')) {
         put('set_all_fields', '<div class="empty compact"><span>Схема настроек недоступна — проверьте связь с коннектором.</span></div>');
       }
@@ -2391,6 +2487,7 @@ function renderSettings() {
     renderUpdateInfo();
   });
   restoreSettingsDraft();
+  syncSettingsAvailability();
 }
 
 /* ============================================================ обновления */
@@ -3773,6 +3870,10 @@ async function renderTour() {
 /* =============================================================== старт */
 PF.on('ready', () => {
   bind();
+  if (PF.offline && !PF.dataReady) {
+    renderDashboard();
+    renderActivePrint();
+  }
   renderSettings();
   initLibraryChecks();
   initCopyButtons();
@@ -4357,6 +4458,58 @@ on('idea_search_form', 'submit', (event) => {
   const host = $('idea_candidates');
   if (host) host.innerHTML = links.map(([label, url]) => `<a class="btn sm" href="${url}" target="_blank" rel="noopener noreferrer">Искать на ${label} ↗</a>`).join(' ');
 });
+
+// Keep dashboard period and actions beside the page heading at every viewport.
+// Other routes have no page-level actions here, so the empty host can remain in
+// the compact topbar menu for shared status controls.
+function arrangeDashboardHeader(viewName) {
+  const menu = $('dashboard_action_menu');
+  const popover = $('dashboard_action_popover');
+  const preferences = $('header_preferences');
+  const offlineBar = $('offline-bar');
+  const dashboard = $('view-dashboard');
+  const topbar = $('topbar');
+  const actions = (dashboard && dashboard.querySelector('.view-head .head-actions'))
+    || (popover && popover.querySelector('.head-actions'));
+  if (!menu || !popover || !dashboard || !actions) return;
+  const compact = window.matchMedia('(max-width:460px)').matches;
+  const movableHeaderItems = ['live_pill', 'sound_btn', 'density_btn', 'theme_btn'].map((id) => $(id)).filter(Boolean);
+  if (preferences && topbar) {
+    if (compact) {
+      movableHeaderItems.forEach((item) => {
+        if (item.parentElement !== preferences) preferences.append(item);
+      });
+    } else {
+      movableHeaderItems.forEach((item) => {
+        const anchor = item.id === 'live_pill' ? $('incidents_btn') : $('pf_ai_open');
+        if (item.parentElement !== topbar) topbar.insertBefore(item, anchor);
+      });
+    }
+  }
+  const isDashboard = viewName === 'dashboard';
+  menu.hidden = false;
+  if (offlineBar && offlineBar.parentElement !== popover) popover.prepend(offlineBar);
+  if (isDashboard) {
+    const head = dashboard.querySelector('.view-head');
+    if (head && actions.parentElement !== head) head.append(actions);
+  } else if (actions.parentElement !== popover) {
+    popover.append(actions);
+  }
+}
+arrangeDashboardHeader((location.hash || '#dashboard').slice(1));
+PF.on('view', (d) => arrangeDashboardHeader(d.view));
+window.addEventListener('hashchange', () => arrangeDashboardHeader((location.hash || '#dashboard').slice(1)));
+window.addEventListener('popstate', () => arrangeDashboardHeader((location.hash || '#dashboard').slice(1)));
+window.addEventListener('pf-ai-rail-state', () => arrangeDashboardHeader((location.hash || '#dashboard').slice(1)));
+let headerArrangeFrame = 0;
+window.addEventListener('resize', () => {
+  if (headerArrangeFrame) cancelAnimationFrame(headerArrangeFrame);
+  headerArrangeFrame = requestAnimationFrame(() => {
+    headerArrangeFrame = 0;
+    arrangeDashboardHeader((location.hash || '#dashboard').slice(1));
+  });
+});
+
 on('idea_import_form', 'submit', async (event) => {
   event.preventDefault();
   if (productIdeasState.importing) return;

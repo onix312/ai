@@ -3,33 +3,34 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="light dark">
-<title>PrintFlow — управление 3D-производством</title>
+<title>NOZZA — управление 3D-производством</title>
 <link rel="icon" href="assets/brand/favicon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="assets/brand/favicon.svg">
 <link rel="manifest" href="/manifest.webmanifest">
-<meta name="theme-color" content="#0d1417">
+<meta name="theme-color" content="#1D161F">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="PrintFlow">
-<script src="assets/theme-init.js?v=18.23.4"></script>
-<link rel="stylesheet" href="assets/tokens.css?v=18.23.4">
-<link rel="stylesheet" href="assets/fonts.css?v=18.23.4">
-<link rel="stylesheet" href="assets/theme.css?v=18.23.4">
-<link rel="stylesheet" href="assets/app.css?v=18.23.4">
-<link rel="stylesheet" href="assets/more.css?v=18.23.4">
-<link rel="stylesheet" href="assets/controls.css?v=18.23.4">
-<link rel="stylesheet" href="assets/refine.css?v=18.23.4">
-<link rel="stylesheet" href="assets/v19-shell.css?v=19.7.0">
+<script src="assets/theme-init.js?v=20.2.0"></script>
+<link rel="stylesheet" href="assets/tokens.css?v=20.2.0">
+<link rel="stylesheet" href="assets/fonts.css?v=20.2.0">
+<link rel="stylesheet" href="assets/theme.css?v=20.2.0">
+<link rel="stylesheet" href="assets/app.css?v=20.2.0">
+<link rel="stylesheet" href="assets/more.css?v=20.2.0">
+<link rel="stylesheet" href="assets/controls.css?v=20.2.0">
+<link rel="stylesheet" href="assets/refine.css?v=20.2.0">
+<link rel="stylesheet" href="assets/v19-shell.css?v=19.7.1">
+<link rel="stylesheet" href="assets/nozza-design-v2.css?v=20.2.0">
 </head><body class="pf-v19">
 <a class="skip-link" href="#views" id="skip_link">Перейти к содержимому</a>
 <div class="top-load" id="top_load" hidden aria-hidden="true"></div>
-<div class="splash" id="splash" aria-hidden="true"><div class="pf-splash-mark"></div><b>PrintFlow</b><span>Поднимаем производственный контур…</span></div>
+<div class="splash" id="splash" aria-hidden="true"><div class="pf-splash-mark"></div><b>NOZZA</b><span>Поднимаем производственный контур…</span></div>
 <button class="up-btn" id="up_btn" type="button" aria-label="Наверх" hidden>↑</button>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs><linearGradient id="pfgrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="var(--accent)"></stop><stop offset="100%" stop-color="var(--accent-2)"></stop></linearGradient></defs></svg>
 
 <div id="shell">
 <nav id="side">
- <div class="brand"><span class="pf-brand-mark" aria-hidden="true"></span><div><b>PrintFlow</b><small>локальное 3D-производство</small></div></div>
+ <div class="brand"><img class="brand-logo nozza-brand-logo" src="assets/brand/nozza-logo.svg" alt=""><div><b>NOZZA</b><small>производство и мастерская</small></div></div>
  <label class="nav-find"><span>⌕</span><input id="nav_find" type="search" placeholder="Найти раздел…" autocomplete="off"></label>
  <div class="side-scroll" id="nav_scroll">
   <div class="nav-group">
@@ -63,18 +64,18 @@
      <a class="nav-link" href="#library" data-view="library" data-find="библиотека инструкция faq помощь материалы чеклист"><span class="ic" data-icon="book">▤</span>Библиотека</a>
      <a class="nav-link" href="#pages" data-view="pages" data-find="страницы хаб касса трек полка tv ярлыки ценники ссылки qr телефоны lan"><span class="ic" data-icon="grid">▦</span>Страницы</a>
      <a class="nav-link" href="#system-map" data-view="system-map" data-find="карта системы graph функции модули возможности ai схема"><span class="ic" data-icon="hexagon">◆</span>Карта системы</a>
-     <a class="nav-link" href="#settings" data-view="settings" data-find="настройки налог тема облако telegram тариф данные касса сбп банк"><span class="ic" data-icon="sliders">⚙</span>Настройки</a>
     </div>
    </details>
   </div>
   <p class="nav-empty" id="nav_empty" hidden>Нет такого раздела. Попробуйте «принтер», «касса», «пластик».</p>
  </div>
  <div class="side-foot">
+  <a class="nav-link side-settings-link" id="side_settings_link" href="#settings" data-view="settings" data-find="настройки налог тема облако telegram тариф данные касса сбп банк"><span class="ic" data-icon="sliders">⚙</span>Настройки</a>
   <button class="conn-chip" id="conn_chip" type="button"><span class="dot" id="conn_dot"></span><span><b id="conn_title">Проверяем связь…</b><small id="conn_sub">Локальный коннектор</small></span></button>
  </div>
 </nav>
 
-<div id="main">
+ <div id="main">
  <header id="topbar">
   <button id="burger" type="button" aria-label="Меню" aria-controls="side" aria-expanded="false"><span class="ic" data-icon="menu">☰</span></button>
   <div class="top-title"><b id="top_title">Обзор</b><span id="top_sub">Производство, деньги и принтеры в одном месте</span></div>
@@ -82,10 +83,14 @@
   <button class="cmd-trigger" id="cmd_open" type="button"><span class="ic" data-icon="search">⌕</span><span class="label">Команда или поиск…</span><kbd>Ctrl K</kbd></button>
   <div class="live-pill" id="live_pill" hidden><span class="dot" id="live_dot"></span><span><b id="live_name">—</b> <small id="live_state"></small></span></div>
   <button class="icon-btn inc-bell" id="incidents_btn" type="button" title="Инциденты: тревоги станков и цеха (Alt+I)" aria-label="Инциденты"><span class="ic" data-icon="siren">⚠</span></button>
-  <button class="icon-btn" id="sound_btn" type="button" title="Звуки панели" aria-pressed="true"><span class="ic" data-icon="volume">🔔</span></button>
-  <button class="icon-btn" id="density_btn" type="button" title="Плотность интерфейса"><span class="ic" data-icon="layout">◫</span></button>
-  <button class="icon-btn" id="theme_btn" type="button" title="Тема оформления"><span class="ic" data-icon="theme">◐</span></button>
-  <button class="pf-ai-trigger" id="pf_ai_open" type="button" aria-controls="pf_ai_rail" aria-expanded="false" title="Nozza · Alt+A"><span class="pf-ai-dot"></span><span class="pf-ai-label">Nozza</span></button>
+  <button class="icon-btn" id="sound_btn" type="button" title="Звуки панели" aria-label="Звуки панели" aria-pressed="true"><span class="ic" data-icon="volume">🔔</span></button>
+  <button class="icon-btn" id="density_btn" type="button" title="Плотность интерфейса" aria-label="Плотность интерфейса"><span class="ic" data-icon="layout">◫</span></button>
+  <button class="icon-btn" id="theme_btn" type="button" title="Тема оформления" aria-label="Тема оформления"><span class="ic" data-icon="theme">◐</span></button>
+  <button class="pf-ai-trigger" id="pf_ai_open" type="button" aria-label="Открыть помощника Nozza" aria-controls="pf_ai_rail" aria-expanded="false" title="Nozza · Alt+A"><span class="pf-ai-dot"></span><span class="pf-ai-label">Nozza</span></button>
+  <details id="dashboard_action_menu" class="dashboard-action-menu" hidden>
+   <summary class="icon-btn" aria-label="Статус подключения и действия" title="Статус подключения и действия">•••</summary>
+   <div class="dashboard-action-popover" id="dashboard_action_popover"><div class="header-preferences" id="header_preferences" role="group" aria-label="Настройки шапки"></div></div>
+  </details>
   <button class="btn primary" id="quick_order" type="button"><span class="ic" data-icon="plus">+</span>Заказ</button>
  </header>
 
@@ -95,9 +100,9 @@
    <div class="pf-ai-rail-title"><b>Nozza</b><small id="pf_ai_state">Luma core · проверяем локальный AI…</small></div>
    <span class="pf-ai-rail-spacer"></span>
    <a class="icon-btn" href="/assistant.html" target="_blank" rel="noopener" title="Открыть полную панель AI" aria-label="Открыть полную панель AI">↗</a>
-   <button class="icon-btn" id="pf_ai_close" type="button" aria-label="Закрыть Nozza">×</button>
+  <button class="icon-btn" id="pf_ai_close" type="button" aria-label="Свернуть Nozza">×</button>
   </div>
-  <iframe class="pf-ai-frame" id="pf_ai_frame" title="Nozza" data-src="/assistant.html?embed=1"></iframe>
+   <iframe class="pf-ai-frame" id="pf_ai_frame" title="Nozza" data-src="/assistant.html?embed=1&v=2"></iframe>
  </aside>
  <button class="pf-ai-scrim" id="pf_ai_scrim" type="button" aria-label="Закрыть Nozza"></button>
 
@@ -147,7 +152,7 @@
   </div>
  </div>
 
- <!-- v19: первый экран отвечает на два вопроса — что происходит и что делать -->
+ <!-- NOZZA v2: живой принтерский контур сохраняет функциональный блок и данные. -->
  <div class="v19-today-grid">
   <div class="card hero-pult-card" id="dash_hero_pult">
    <div class="card-head hero-pult-head">
@@ -183,11 +188,17 @@
    </div>
   </div>
  </div>
+ <!-- Six live KPI from PrintFlow; values are filled from the current data source. -->
+ <div class="kpi-grid kpi-grid-4" id="dash_kpis" data-widget="kpis">
+  <div class="kpi"><span class="label"><i class="skel" style="width:52%"></i></span><b class="value"><i class="skel" style="width:64%;height:24px"></i></b><span class="sub"><i class="skel" style="width:74%"></i></span></div>
+  <div class="kpi"><span class="label"><i class="skel" style="width:52%"></i></span><b class="value"><i class="skel" style="width:64%;height:24px"></i></b><span class="sub"><i class="skel" style="width:74%"></i></span></div>
+  <div class="kpi"><span class="label"><i class="skel" style="width:52%"></i></span><b class="value"><i class="skel" style="width:64%;height:24px"></i></b><span class="sub"><i class="skel" style="width:74%"></i></span></div>
+  <div class="kpi"><span class="label"><i class="skel" style="width:52%"></i></span><b class="value"><i class="skel" style="width:64%;height:24px"></i></b><span class="sub"><i class="skel" style="width:74%"></i></span></div>
+  <div class="kpi"><span class="label"><i class="skel" style="width:52%"></i></span><b class="value"><i class="skel" style="width:64%;height:24px"></i></b><span class="sub"><i class="skel" style="width:74%"></i></span></div>
+  <div class="kpi"><span class="label"><i class="skel" style="width:52%"></i></span><b class="value"><i class="skel" style="width:64%;height:24px"></i></b><span class="sub"><i class="skel" style="width:74%"></i></span></div>
+ </div>
 
- <!-- 4 ключевых KPI смены -->
- <div class="kpi-grid kpi-grid-4" id="dash_kpis" data-widget="kpis" style="margin-top:16px"><div class="kpi"><span class="label"><i class="skel" style="width:52%"></i></span><b class="value"><i class="skel" style="width:64%;height:24px"></i></b><span class="sub"><i class="skel" style="width:74%"></i></span></div><div class="kpi"><span class="label"><i class="skel" style="width:52%"></i></span><b class="value"><i class="skel" style="width:64%;height:24px"></i></b><span class="sub"><i class="skel" style="width:74%"></i></span></div><div class="kpi"><span class="label"><i class="skel" style="width:52%"></i></span><b class="value"><i class="skel" style="width:64%;height:24px"></i></b><span class="sub"><i class="skel" style="width:74%"></i></span></div><div class="kpi"><span class="label"><i class="skel" style="width:52%"></i></span><b class="value"><i class="skel" style="width:64%;height:24px"></i></b><span class="sub"><i class="skel" style="width:74%"></i></span></div></div>
-
- <!-- Оперативные действия: Сейчас нужно сделать + Ближайшие сроки -->
+ <!-- Оперативные действия: сначала показать срочные задачи и ближайшие сроки. -->
  <div class="grid g2" style="margin-top:16px">
   <div class="card operator-focus" data-widget="operator_focus">
    <div class="card-head"><div><h2>Сейчас нужно сделать</h2><p id="operator_focus_sub">Сначала опасное и срочное, потом плановая работа</p></div><button class="btn sm ghost" id="operator_focus_refresh" type="button">↻</button></div>
@@ -197,6 +208,19 @@
    <div class="card-head"><div><h2>Ближайшие сроки</h2><p>Сначала просроченные и срочные</p></div><a href="#orders" data-view="orders">Все заказы →</a></div>
    <div id="dash_due"></div>
   </div>
+ </div>
+
+
+
+ <div class="n2-dashboard-workspace" data-widget="overview_workspaces">
+  <section class="card n2-dashboard-orders">
+   <div class="card-head"><div><span class="eyebrow">Рабочая очередь</span><h2>Последние заказы</h2><p>Активные заказы и их реальные сроки</p></div><a href="#orders" data-view="orders">Все заказы →</a></div>
+   <div class="table-wrap"><table class="data"><thead><tr><th>№</th><th>Изделие</th><th>Клиент</th><th>Статус</th><th class="right">Цена</th><th>Срок</th></tr></thead><tbody id="dash_order_rows"><tr><td colspan="6"><span class="skel" style="display:block;width:90%;height:18px"></span></td></tr></tbody></table></div>
+  </section>
+  <section class="card n2-dashboard-finance">
+   <div class="card-head"><div><span class="eyebrow">Финансы</span><h2>Результат периода</h2><p id="dash_finance_period">Выбранный период</p></div><a href="#finance" data-view="finance">Подробнее →</a></div>
+   <div id="dash_finance_summary"><div class="skel" style="display:block;width:65%;height:28px"></div></div>
+  </section>
  </div>
 
  <!-- Сворачиваемый блок аналитики и графиков -->
@@ -282,7 +306,7 @@
   </div>
  </div>
  <div class="printer-park" id="pr_park" role="group" aria-label="Парк принтеров"></div>
- <div id="pr_empty" class="empty" hidden><span class="big">◉</span><b>Принтер ещё не добавлен</b><span>Подключите Bambu Lab по локальной сети.</span><button class="btn sm primary" type="button" data-empty-click="pr_add">+ Принтер</button></div>
+ <div id="pr_empty" class="empty" hidden><span class="big" id="pr_empty_icon">◉</span><b id="pr_empty_title">Принтер ещё не добавлен</b><span id="pr_empty_copy">Подключите Bambu Lab по локальной сети.</span><button class="btn sm primary" id="pr_empty_add" type="button" data-empty-click="pr_add">+ Принтер</button></div>
  <div id="pr_workspace" hidden>
    <div id="pr_alerts" class="alert-strip"></div>
    <div id="pr_enough" class="notice" hidden><span>◍</span><span id="pr_enough_text">Проверяем пластик на следующее задание…</span></div>
@@ -1170,6 +1194,7 @@
   </div>
  </div>
  <div class="calc-grid">
+  <div class="calc-inputs">
   <!-- ======= ПАРАМЕТРЫ ======= -->
   <div class="card">
    <div class="card-head"><div><h2>🖨 Плита (из слайсера)</h2><p>Данные слайсера на всю плиту целиком</p></div></div>
@@ -1254,38 +1279,39 @@
   </div>
 
   <!-- ======= РЕЗУЛЬТАТЫ ======= -->
-  <div class="grid" style="gap:16px">
-   <div class="card">
+  </div>
+  <div class="calc-results">
+   <div class="card calc-result-cost">
     <div class="card-head"><div><h2>📦 Себестоимость партии</h2><p id="calc_batch_sub">—</p></div></div>
     <div id="calc_rows"></div>
    </div>
-   <div class="card">
+   <div class="card calc-result-price">
     <div class="card-head"><div><h2>💰 Цена и прибыль</h2><p>Норма — от 250 ₽ чистыми за час печати</p></div></div>
-    <div class="big-num"><b id="calc_price">0 ₽</b><span>рекомендованная цена за штуку</span></div>
+    <div class="big-num"><b id="calc_price">—</b><span>рекомендованная цена за штуку</span></div>
     <div id="calc_profit_rows"></div>
     <div class="verdict" id="calc_verdict" style="margin-top:12px">Введите вес и время плиты из слайсера.</div>
    </div>
-  </div>
-
   <!-- ======= МИНИМАЛЬНАЯ ПАРТИЯ ======= -->
-  <div class="card">
+  <div class="card calc-result-min-batch">
    <div class="card-head"><div><h2>📈 Минимальная рентабельная партия</h2><p>При каком количестве прибыль/час становится приемлемой</p></div></div>
    <div id="calc_min_batch"></div>
   </div>
 
   <!-- ======= СЦЕНАРИИ ======= -->
-  <div class="card">
-   <div class="card-head"><div><h2>⚖️ Сценарии «Что если»</h2><p>Сравните разные материалы, партии и профили</p></div></div>
+  <details class="card calc-advanced-card">
+   <summary><span><strong>⚖️ Сценарии «Что если»</strong><small>Сравните разные материалы, партии и профили</small></span><span class="calc-disclosure" aria-hidden="true">⌄</span></summary>
+   <div class="calc-advanced-content">
    <div id="calc_scenarios"></div>
    <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
     <button class="btn sm" id="calc_scenario_materials" type="button">Сравнить материалы</button>
     <button class="btn sm" id="calc_scenario_batches" type="button">Сравнить партии</button>
     <button class="btn sm" id="calc_scenario_quality" type="button">Сравнить качество</button>
    </div>
-  </div>
+   </div>
+  </details>
 
   <!-- ======= ОКУПАЕМОСТЬ ======= -->
-  <div class="card">
+  <div class="card calc-result-payback">
    <div class="card-head"><div><h2>🔄 Окупаемость модели</h2><p>Сколько заказов нужно, чтобы отбить стоимость модели</p></div></div>
    <div class="form-grid">
     <label class="field"><span>Стоимость модели, ₽</span><input type="number" id="calc_model_cost" step="any" min="0" value="0"></label>
@@ -1293,6 +1319,7 @@
     <label class="field"><span>Продаж в неделю</span><input type="number" id="calc_sales_week" step="any" min="0.1" value="3"></label>
    </div>
    <div id="calc_payback" style="margin-top:10px"></div>
+  </div>
   </div>
  </div>
 </section>
@@ -1308,6 +1335,7 @@
   <button class="pr-workspace-tab" id="pr_tab_forms" type="button" role="tab" aria-controls="pr_panel_forms" aria-selected="true" data-pr-tab="forms"><span aria-hidden="true">▤</span> Формы <small id="pr_tab_forms_count">…</small></button>
   <button class="pr-workspace-tab" id="pr_tab_slicer" type="button" role="tab" aria-controls="pr_panel_slicer" aria-selected="false" tabindex="-1" data-pr-tab="slicer"><span aria-hidden="true">◺</span> 3D-печать</button>
   <button class="pr-workspace-tab" id="pr_tab_tools" type="button" role="tab" aria-controls="pr_panel_tools" aria-selected="false" tabindex="-1" data-pr-tab="tools"><span aria-hidden="true">⌗</span> Штрихкод и тираж</button>
+  <button class="pr-workspace-tab" id="pr_tab_v2" type="button" role="tab" aria-controls="pr_panel_v2" aria-selected="false" tabindex="-1" data-pr-tab="v2"><span aria-hidden="true">▧</span> Макеты v2 <small>61</small></button>
  </div>
 
  <section class="pr-panel" id="pr_panel_forms" role="tabpanel" aria-labelledby="pr_tab_forms" data-pr-panel="forms">
@@ -1334,7 +1362,7 @@
   </div>
   <div class="pr-catalog-meta"><div class="pr-summary-strip" id="pr_kpis" aria-live="polite"></div><span class="pr-result-count" id="pr_result_count" aria-live="polite"></span></div>
   <div class="pr-category-filters" id="pr_category_filters" role="toolbar" aria-label="Фильтр по разделам">
-   <button class="pr-filter-chip on" type="button" data-pr-filter="all" aria-pressed="true">Все формы <span id="pr_filter_all_count">0</span></button>
+   <button class="pr-filter-chip on" type="button" data-pr-filter="all" aria-pressed="true">Все формы <span id="pr_filter_all_count">—</span></button>
   </div>
   <div class="pr-forms" id="pr_forms" aria-live="polite"><div class="pr-loading"><div class="skeleton" style="height:190px"></div><span>Загружаем каталог форм…</span></div></div>
   <div class="pr-filter-empty" id="pr_filter_empty" hidden><b>Ничего не найдено</b><span>Измените запрос или сбросьте фильтр.</span><button class="btn sm" type="button" id="pr_filter_clear">Сбросить поиск и фильтр</button></div>
@@ -1416,6 +1444,13 @@
     </ul>
    </details>
   </div>
+ </section>
+
+ <section class="pr-panel pr-v2-panel" id="pr_panel_v2" role="tabpanel" aria-labelledby="pr_tab_v2" data-pr-panel="v2" hidden>
+  <div class="pr-v2-intro"><div><span class="card-kicker">РЕЕСТР ДИЗАЙНА · 03.10.2026</span><h2>Физические макеты из спецификации</h2><p>Предпросмотр координат из print-layouts.json. Тексты в квадратных скобках — описания полей, не реальные данные заказа. Для генерации документов используйте рабочий каталог форм.</p></div><span class="tag">61 макет · мм</span></div>
+  <div class="pr-v2-controls"><label class="field"><span>Форма</span><select id="pr_v2_select" aria-label="Выберите макет для предпросмотра"><option>Загрузка реестра…</option></select></label><div id="pr_v2_meta" class="pr-v2-meta" aria-live="polite">Загрузка геометрии…</div></div>
+  <div class="pr-v2-stage"><div id="pr_v2_paper" class="pr-v2-paper" aria-label="Предпросмотр печатного макета"></div></div>
+  <div id="pr_v2_status" class="pr-v2-status" role="status">Предпросмотр не запускает печать и не обращается к производственному API.</div>
  </section>
 </section>
 
@@ -1579,9 +1614,19 @@
  <div id="cb_error" class="notice error clientbot-error" role="alert" hidden><span>!</span><span id="cb_error_text">Не удалось загрузить данные.</span><button class="btn sm" id="cb_error_retry" type="button">Повторить</button></div>
  <div id="cb_loading" class="clientbot-loading" role="status"><span class="spinner" aria-hidden="true"></span> Загружаем состояние клиентского бота…</div>
  <div class="kpi-grid clientbot-kpis" id="cb_kpis" aria-live="polite"></div>
+ <div class="clientbot-grid clientbot-grid-top">
+  <section class="card clientbot-card clientbot-inbox-card">
+   <div class="card-head"><div><span class="card-kicker">Рабочий inbox</span><h2>Непрочитанные диалоги <span id="cb_unread_badge" class="tag warn" hidden>0</span></h2><p>Ответить из панели можно без переключения в Telegram.</p></div></div>
+   <div id="cb_inbox" class="clientbot-inbox" aria-live="polite"></div>
+  </section>
+  <section class="card clientbot-card">
+   <div class="card-head"><div><span class="card-kicker">Ручная сверка</span><h2>Заявки «Я оплатил»</h2><p>Подтверждение создаёт обычный платёж в кассовом журнале.</p></div></div>
+   <div class="table-wrap clientbot-table"><table class="data"><thead><tr><th>Заказ</th><th>Клиент</th><th class="right">Сумма</th><th>Состояние</th><th>Когда</th><th></th></tr></thead><tbody id="cb_payments"></tbody></table></div>
+  </section>
+ </div>
  <div class="clientbot-layout">
-  <section class="card clientbot-card clientbot-settings-card">
-   <div class="card-head"><div><span class="card-kicker">Подключение и политика</span><h2>Настройки клиентского бота</h2><p>Отдельный Bot Token хранится локально и не выводится в API.</p></div></div>
+  <details class="card clientbot-card clientbot-settings-card">
+   <summary class="card-head clientbot-settings-summary"><div><span class="card-kicker">Подключение и политика</span><h2>Настройки клиентского бота</h2><p>Отдельный Bot Token хранится локально и не выводится в API.</p></div><span class="clientbot-settings-disclosure" aria-hidden="true">⌄</span></summary>
    <div class="set-grid clientbot-form">
     <div class="set-row"><div class="sinfo"><b>Клиентский бот</b><small>Каталог, заказы, статусы и inbox</small></div><label class="switch"><input type="checkbox" id="cb_enabled"><i></i></label></div>
     <div class="set-row"><div class="sinfo"><b>Bot Token</b><small id="cb_token_hint">Создайте отдельного бота у @BotFather</small></div><input type="password" autocomplete="new-password" id="cb_token" placeholder="токен покупательского бота"></div>
@@ -1603,7 +1648,7 @@
    </div>
    <div class="btn-grid clientbot-actions"><button class="btn primary" id="cb_save" type="button">Сохранить</button><button class="btn" id="cb_test" type="button">Проверить токен</button><a class="btn ghost" href="https://t.me/BotFather" target="_blank" rel="noopener">Открыть @BotFather</a></div>
    <div class="notice" style="margin-top:10px"><span>ℹ</span><span>Клиентские чаты принимаются только в приватном Telegram-чате. Контакт привязывается только через отправку собственного контакта, а не через произвольный текст.</span></div>
-  </section>
+  </details>
   <section class="card clientbot-card clientbot-commands-card">
    <div class="card-head"><div><span class="card-kicker">Сценарии покупателя</span><h2>Команды и состояния</h2><p>Работают без слэша и в любом регистре.</p></div></div>
    <div class="table-wrap clientbot-table"><table class="data"><tbody id="cb_commands"></tbody></table></div>
@@ -1611,16 +1656,6 @@
    <div class="notice" style="margin-top:12px"><span>💡</span><span>Deep-link <b>/start src_…</b> сохраняется в локальной воронке. Данные аналитики не уходят во внешние сервисы.</span></div>
    <div class="clientbot-templates"><div class="card-head"><div><span class="card-kicker">Inbox</span><h3>Шаблоны ответов</h3><p>Выберите шаблон в диалоге или отредактируйте его здесь.</p></div></div><div id="cb_templates"></div></div>
   <div class="clientbot-templates clientbot-templates-lib"><div class="card-head"><div><span class="card-kicker">Библиотека</span><h3>Готовые ответы</h3><p>Заготовки под частые ситуации: цена, размеры, выдача, извинение. Кнопка «+» копирует в ваши шаблоны — текст можно править.</p></div></div><div id="cb_default_templates"></div></div>
-  </section>
- </div>
- <div class="clientbot-grid clientbot-grid-top">
-  <section class="card clientbot-card clientbot-inbox-card">
-   <div class="card-head"><div><span class="card-kicker">Рабочий inbox</span><h2>Непрочитанные диалоги <span id="cb_unread_badge" class="tag warn" hidden>0</span></h2><p>Ответить из панели можно без переключения в Telegram.</p></div></div>
-   <div id="cb_inbox" class="clientbot-inbox" aria-live="polite"></div>
-  </section>
-  <section class="card clientbot-card">
-   <div class="card-head"><div><span class="card-kicker">Ручная сверка</span><h2>Заявки «Я оплатил»</h2><p>Подтверждение создаёт обычный платёж в кассовом журнале.</p></div></div>
-   <div class="table-wrap clientbot-table"><table class="data"><thead><tr><th>Заказ</th><th>Клиент</th><th class="right">Сумма</th><th>Состояние</th><th>Когда</th><th></th></tr></thead><tbody id="cb_payments"></tbody></table></div>
   </section>
  </div>
  <div class="clientbot-grid clientbot-grid-main">
@@ -4089,6 +4124,7 @@
    <button class="btn primary" id="settings_save" type="button">Сохранить</button>
   </div>
  </div>
+ <div id="settings_connection_notice" class="notice error" role="status" hidden><span>!</span><span>Настройки не загружены. Подключите PrintFlow, чтобы увидеть фактические значения и безопасно менять их.</span></div>
 
  <div class="settings-quicknav" id="set_shortcuts" aria-label="Быстрый переход к настройкам">
   <button type="button" data-set-shortcut="printers" class="on"><span>🖨</span><b>Принтеры</b><small>Bambu, шлюз, сеть</small></button>
@@ -5899,38 +5935,38 @@
 
 <div id="toasts"></div>
 
-<script src="assets/qr.js?v=18.23.4"></script>
-<script src="assets/core.js?v=18.23.4"></script>
-<script src="assets/v19-shell.js?v=19.1.0"></script>
-<script src="assets/colors.js?v=18.23.4"></script>
-<script src="assets/icons.js?v=18.23.4"></script>
-<script src="assets/sound.js?v=18.23.4"></script>
-<script src="assets/knob.js?v=18.23.4"></script>
-<script src="assets/amspath.js?v=18.23.4"></script>
-<script src="assets/layers.js?v=18.23.4"></script>
-<script src="assets/incidents.js?v=18.23.4"></script>
-<script src="assets/gpuslice.js?v=18.23.4"></script>
-<script src="assets/printer.js?v=18.23.4"></script>
-<script src="assets/ams-autopilot.js?v=18.23.4"></script>
-<script src="assets/queue.js?v=18.23.4"></script>
-<script src="assets/ops.js?v=18.23.4"></script>
-<script src="assets/money.js?v=18.23.4"></script>
-<script src="assets/finance.js?v=18.23.4"></script>
-<script src="assets/shelf.js?v=18.23.4"></script>
-<script src="assets/products.js?v=18.23.4"></script>
-<script src="assets/bridge.js?v=18.23.4"></script>
+<script src="assets/qr.js?v=20.2.0"></script>
+<script src="assets/core.js?v=20.2.0"></script>
+<script src="assets/v19-shell.js?v=20.2.0"></script>
+<script src="assets/colors.js?v=20.2.0"></script>
+<script src="assets/icons.js?v=20.2.0"></script>
+<script src="assets/sound.js?v=20.2.0"></script>
+<script src="assets/knob.js?v=20.2.0"></script>
+<script src="assets/amspath.js?v=20.2.0"></script>
+<script src="assets/layers.js?v=20.2.0"></script>
+<script src="assets/incidents.js?v=20.2.0"></script>
+<script src="assets/gpuslice.js?v=20.2.0"></script>
+<script src="assets/printer.js?v=20.2.0"></script>
+<script src="assets/ams-autopilot.js?v=20.2.0"></script>
+<script src="assets/queue.js?v=20.2.0"></script>
+<script src="assets/ops.js?v=20.2.0"></script>
+<script src="assets/money.js?v=20.2.0"></script>
+<script src="assets/finance.js?v=20.2.0"></script>
+<script src="assets/shelf.js?v=20.2.0"></script>
+<script src="assets/products.js?v=20.2.0"></script>
+<script src="assets/bridge.js?v=20.2.0"></script>
 <!-- 14.0 (47): print.js грузится лениво при первом входе в раздел -->
 <!-- 14.0 (47): clientbot.js грузится лениво при первом входе в раздел -->
-<script src="assets/workshop.js?v=18.23.4"></script>
-<script src="assets/app.js?v=18.23.4"></script>
-<script type="module" src="assets/dist/printflow-app.js?v=18.23.4"></script>
+<script src="assets/workshop.js?v=20.2.0"></script>
+<script src="assets/app.js?v=20.2.0"></script>
+<script type="module" src="assets/dist/printflow-app.js?v=20.2.0"></script>
 <!-- 14.0 (47): ops10.js грузится лениво при первом входе в раздел -->
 <script>
 /* Служебный воркер: мгновенный старт панели и работа при мигании сети.
    Регистрируется только там, где браузер это разрешает (localhost/HTTPS). */
 if ('serviceWorker' in navigator && window.isSecureContext) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js?v=18.23.4').catch(() => {});
+    navigator.serviceWorker.register('/sw.js?v=20.2.0').catch(() => {});
   });
 }
 </script>
@@ -5951,5 +5987,3 @@ if ('serviceWorker' in navigator && window.isSecureContext) {
  </div>
 </dialog>
 </body></html>
-
-

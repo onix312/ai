@@ -237,7 +237,9 @@ if (upBtn) {
 /* ============================================================== HTTP */
 let offline = false;
 function setOffline(flag, reason) {
+  const changed = offline !== flag;
   offline = flag;
+  PF.offline = flag;
   const bar = $('offline-bar');
   if (bar) bar.classList.toggle('show', flag);
   const dot = $('conn_dot');
@@ -246,6 +248,7 @@ function setOffline(flag, reason) {
   if (title) title.textContent = flag ? 'Коннектор недоступен' : 'Коннектор работает';
   const sub = $('conn_sub');
   if (sub) sub.textContent = flag ? (reason || 'Данные не сохраняются') : `Локально · v${PF.state.version || '2.0'}`;
+  if (changed) PF.emit('connection', { offline: flag, reason: reason || '' });
 }
 
 function setChannelBar(channels) {
@@ -305,12 +308,20 @@ async function api(path, options) {
     throw new Error('Нет связи с коннектором PrintFlow');
   }
   const text = await res.text();
+  const contentType = res.headers && res.headers.get ? (res.headers.get('Content-Type') || '') : '';
+  const htmlResponse = /text\/html/i.test(contentType);
   let data = {};
-  if (text) { try { data = JSON.parse(text); } catch (e) { data = { error: text.slice(0, 300) }; } }
+  if (text) {
+    try { data = JSON.parse(text); }
+    catch (e) { data = { error: htmlResponse ? 'API PrintFlow недоступен' : `Некорректный ответ сервера (${res.status})` }; }
+  }
   // Н2: id запроса из заголовка — по нему сбой находится в connector.log.
   const rid = res.headers && res.headers.get ? (res.headers.get('X-Request-Id') || '') : '';
   if (rid && data && typeof data === 'object') data.request_id = data.request_id || rid;
   if (!res.ok) {
+    if (htmlResponse || [502, 503, 504].includes(res.status)) {
+      setOffline(true, 'Запустите PrintFlow: python pf.py');
+    }
     const message = data.error || `Ошибка ${res.status}`;
     const err = new Error(rid ? `${message} · ${rid}` : message);
     // Подробности ответа не теряются: например, производство при нехватке
@@ -720,6 +731,7 @@ PF.setAssistantContext = debounce((patch = {}) => {
 
 PF.ready = false;
 PF.dataReady = false;
+PF.offline = false;
 PF.onReady = (fn) => {
   if (PF.ready) { fn(); return; }
   PF.on('ready', fn);
@@ -1084,7 +1096,7 @@ function showView(name, sub) {
   syncStockTabs(name);
   $('top_title').textContent = VIEWS[name].title;
   $('top_sub').textContent = VIEWS[name].sub;
-  document.title = `${VIEWS[name].title} · PrintFlow`;
+  document.title = `${VIEWS[name].title} · NOZZA`;
   resetViewScroll();
   closeSide();
   PF.emit('view', { view: name, sub });
@@ -1492,6 +1504,13 @@ function filterNav(q) {
     const more = g.querySelector('details.nav-more');
     if (more && s && hit) more.open = true;
   });
+  const pinnedSettings = $('side_settings_link');
+  if (pinnedSettings) {
+    const blob = (pinnedSettings.textContent + ' ' + (pinnedSettings.dataset.find || '') + ' ' + (pinnedSettings.dataset.view || '')).toLowerCase();
+    const ok = !s || blob.includes(s);
+    pinnedSettings.hidden = !ok;
+    if (ok) shown++;
+  }
   if (empty) empty.hidden = !s || shown > 0;
 }
 const navMore = $('nav_more');

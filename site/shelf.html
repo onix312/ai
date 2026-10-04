@@ -63,12 +63,13 @@
    background:var(--bg); color:var(--text); font-size:16px; text-align:center; }
 </style>
 <link rel="stylesheet" href="assets/refine.css?v=18.23.1">
+<link rel="stylesheet" href="/assets/nozza-design-v2.css?v=20.1.38">
 </head>
-<body class="pf-public">
+<body class="pf-public pf-shelf-page">
 <div class="season-ribbon"></div>
 <div class="wrap">
  <div class="logo">NOZZA<small>Там, где рождается форма</small></div>
- <div class="card">
+ <div class="card shelf-card">
   <div id="photo"></div>
   <p class="name" id="name">Загрузка…</p>
   <p class="muted" id="note"></p>
@@ -121,15 +122,20 @@
     $('#name').textContent = item.name || 'Позиция';
     $('#note').textContent = item.note || 'Позиция стеллажа NOZZA';
     $('#price').textContent = num(item.price) ? money(item.price) : 'Цена в магазине';
-    var qty = num(item.qty);
-    var st = item.status || 'ok';
-    var labels = { ok: 'В наличии: ' + qty + ' шт', low: 'Осталось мало: ' + qty + ' шт',
-      dead: 'Под заказ', empty: 'Нет в наличии' };
+    var rawQty = item.qty;
+    var qtyValue = parseFloat(String(rawQty ?? '').replace(',', '.'));
+    var qtyKnown = rawQty !== null && rawQty !== undefined && String(rawQty).trim() !== '' && isFinite(qtyValue);
+    var qty = qtyKnown ? qtyValue : 0;
+    var st = item.status || (qtyKnown && qty <= 0 ? 'empty' : 'ok');
+    if (qtyKnown && qty <= 0 && (st === 'ok' || st === 'low')) st = 'empty';
+    var labels = qtyKnown
+      ? { ok: 'В наличии: ' + qty + ' шт', low: 'Осталось мало: ' + qty + ' шт', dead: 'Под заказ', empty: 'Нет в наличии' }
+      : { ok: 'Остаток уточняется', low: 'Осталось мало', dead: 'Под заказ', empty: 'Нет в наличии' };
     var stEl = $('#stock');
     stEl.textContent = labels[st] || labels.ok;
-    stEl.className = 'stock ' + (st === 'dead' || st === 'empty' ? 'empty' : st);
-    $('#bar').style.width = Math.min(100, qty * 10) + '%';
-    $('#sellBtn').disabled = !(qty > 0);
+    stEl.className = 'stock ' + (st === 'dead' || st === 'empty' ? 'empty' : (st === 'ok' && !qtyKnown ? 'unknown' : st));
+    $('#bar').style.width = qtyKnown ? Math.min(100, qty * 10) + '%' : '0%';
+    $('#sellBtn').disabled = !(qtyKnown && qty > 0);
     $('#qty').max = Math.max(1, qty);
     var ph = $('#photo');
     if (item.photo) {
@@ -168,7 +174,16 @@
   $('#sellForm').addEventListener('submit', function (e) {
     e.preventDefault();
     if (!item) return;
+    var available = parseFloat(String(item.qty ?? '').replace(',', '.'));
+    if (!isFinite(available) || available <= 0) {
+      showMsg('Продажа недоступна: остаток неизвестен или закончился', false);
+      return;
+    }
     var qty = Math.max(1, parseInt($('#qty').value, 10) || 1);
+    if (qty > available) {
+      showMsg('Количество превышает остаток', false);
+      return;
+    }
     fetch('/api/shelf/sale', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ item_id: item.id, qty: qty, channel: 'shelf', note: 'продажа по QR' }),

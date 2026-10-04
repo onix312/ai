@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import pathlib
+import json
+import re
 import sqlite3
 import sys
 import tempfile
@@ -150,6 +152,30 @@ class WorkshopTests(unittest.TestCase):
         self.assertIn("<svg", mark)
         html = self.w.spool_label_html(spool["id"])
         self.assertIn("<svg", html)
+
+    def test_spool_thermal_label_follows_v2_recipe(self):
+        spool = self.repo.save_spool({"material": "PETG", "color_name": "Лиловый",
+                                      "brand": "Материал", "remaining_grams": 425,
+                                      "total_grams": 1000, "ams_slot": "A1"})
+        html = self.w.spool_label_html(spool["id"])
+        self.assertIn("@page { size: 62mm 40mm; margin: 0; }", html)
+        self.assertIn("<svg", html)
+        self.assertIn("PETG Лиловый", html)
+        self.assertIn("425 г", html)
+        self.assertIn("слот 1", html)
+        spec = json.loads((ROOT / "site" / "assets" / "print-layouts-v2.json")
+                          .read_text(encoding="utf-8"))
+        layout = next(doc for doc in spec["documents"] if doc["id"] == "spool-thermal")
+        rendered = {
+            block_id: block_style
+            for block_id, block_style in re.findall(
+                r'data-block="([^\"]+)" style="([^\"]+)"', html)
+        }
+        self.assertEqual({block["id"] for block in layout["blocks"]}, set(rendered))
+        for block in layout["blocks"]:
+            for prop, key in (("left", "x_mm"), ("top", "y_mm"),
+                              ("width", "width_mm"), ("height", "height_mm")):
+                self.assertIn(f'{prop}:{block[key]}mm', rendered[block["id"]])
 
     def test_supplier_price_and_preset(self):
         spool = self.repo.save_spool({"material": "PETG", "remaining_grams": 900,

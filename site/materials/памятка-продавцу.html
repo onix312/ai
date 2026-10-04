@@ -1,46 +1,122 @@
 <!DOCTYPE html>
-<html lang="ru"><head><meta charset="utf-8">
-<title>NOZZA — памятка продавцу</title>
-<style>
-  @page { size:A4; margin:11mm; }
-  * { box-sizing:border-box; margin:0; padding:0; }
-  body { font-family:"Segoe UI",Arial,sans-serif; color:#12203c; font-size:10.5pt; }
-  .head { background:linear-gradient(135deg,#4f46e5,#7c3aed); color:#fff; padding:6mm 7mm; border-radius:10px; margin-bottom:5mm; display:flex; align-items:center; gap:5mm; }
-  .head img { width:16mm; height:16mm; flex:none; }
-  .head h1 { font-size:19pt; font-weight:900; }
-  .head p { font-size:10pt; opacity:.85; margin-top:1.5mm; }
-  h2 { font-size:12.5pt; color:#4f46e5; margin:5mm 0 2.5mm; padding-bottom:1.5mm; border-bottom:2px solid #dbe3f2; }
-  .q { background:#f3f6fd; border-left:4px solid #4f46e5; padding:3mm 4mm; border-radius:0 7px 7px 0; margin-bottom:2.5mm; }
-  .q .qq { font-weight:800; font-size:10.5pt; }
-  .q .aa { margin-top:1.5mm; color:#31405f; line-height:1.45; }
-  table { width:100%; border-collapse:collapse; font-size:9.5pt; margin-bottom:3mm; }
-  th { background:#4f46e5; color:#fff; padding:2mm 3mm; text-align:left; font-size:9pt; }
-  td { border:1px solid #dbe3f2; padding:2mm 3mm; }
-  td.p { font-weight:800; text-align:center; width:24mm; color:#4f46e5; }
-  .box { border:2px solid #1e8449; border-radius:9px; padding:4mm 5mm; background:#f2fbf5; margin-bottom:3mm; }
-  .box h3 { font-size:11.5pt; color:#1e8449; margin-bottom:2mm; }
-  .box ol { margin-left:5mm; line-height:1.7; }
-  .warn { border:2px solid #c0392b; border-radius:9px; padding:4mm 5mm; background:#fdf3f2; }
-  .warn h3 { font-size:11.5pt; color:#c0392b; margin-bottom:2mm; }
-  .warn ul { margin-left:5mm; line-height:1.6; }
-  .grid2 { display:flex; gap:4mm; }
-  .grid2 > div { flex:1; }
-  .form { border:2px dashed #b9c4da; border-radius:9px; padding:4mm 5mm; }
-  .form .line { border-bottom:1px solid #ccd4e4; height:7mm; margin-bottom:1mm; font-size:8.5pt; color:#8892a6; padding-top:4.5mm; }
-</style></head>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>NOZZA — памятка продавцу</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body { width: 100%; margin: 0; min-height: 100%; font-family: Arial,sans-serif; color: #31242E; }
+    body { background: #EEEAF0; padding: 20px 0; }
+    .toolbar { position: fixed; z-index: 2; top: 16px; right: 16px; display: flex; gap: 8px; }
+    .toolbar button, .toolbar a { border: 0; border-radius: 9px; padding: 11px 18px; background: #6E2BC8;
+      color: #fff; font: 600 14px Arial,sans-serif; cursor: pointer; text-decoration: none; }
+    .toolbar a { background: #fff; color: #31242E; border: 1px solid #DBD2E0; }
+    .page-frame { width: 100%; padding: 0 8px 16px; overflow-x: auto; }
+    .sheet { position: relative; flex:none; width: 210mm; height: 297mm; margin: 0 auto 16px;
+      overflow: hidden; background: #fff; page-break-after: always; break-after: page; }
+    .sheet:last-of-type { page-break-after: auto; break-after: auto; }
+    .block { position: absolute; overflow: hidden; overflow-wrap: anywhere;
+      white-space: pre-wrap; }
+    .block-logo img { display: block; width: 100%; height: 100%;
+      object-fit: contain; object-position: left center; }
+    .loading, .error { width: min(680px,calc(100% - 32px)); margin: 24px auto;
+      padding: 18px; border: 1px solid #DBD2E0; border-radius: 10px; background: #fff; }
+    .error { color: #9C3E4B; }
+    @media screen { .sheet { box-shadow: 0 6px 30px #31242E20; } }
+    @page { size: A4; margin: 0; }
+    @media print {
+      html, body { width: 210mm; margin: 0; padding: 0; background: #fff;
+        -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      .toolbar, .loading, .error { display: none !important; }
+      .page-frame { width: 210mm; padding: 0; overflow: visible; }
+      .sheet { margin: 0; box-shadow: none; }
+    }
+    @media (prefers-reduced-motion: reduce) { *,*::before,*::after { scroll-behavior: auto !important; } }
+  </style>
+</head>
 <body>
-<div class="head"><img src="../assets/brand/nozza-mark-1-white.svg" alt="NOZZA"><div><h1>Памятка продавцу: NOZZA</h1><p>Три ниши, приём заявки и безопасные обещания. Обновлено: август 2026.</p></div></div>
-<h2>Что мы делаем</h2>
-<div class="q"><div class="qq">«Что можно заказать?»</div><div class="aa">Персональные аксессуары для питомцев, органайзеры и крепления по размерам, а также таблички и оснастку для бизнеса. Готовые образцы можно посмотреть на полке.</div></div>
-<div class="q"><div class="qq">«Сколько стоит и когда будет готово?»</div><div class="aa">На готовом товаре цена указана. Индивидуальный заказ мастер рассчитывает после фото, размеров, количества и нужной даты. Не обещайте цену и срок самостоятельно.</div></div>
-<div class="q"><div class="qq">«Сможете повторить сломанную деталь?»</div><div class="aa">Оставьте фото, размеры и контакты. Мастер проверит назначение и безопасность. Опасные детали для газа, электричества, автомобиля и защиты мы без документации не изготавливаем.</div></div>
-<h2>Три направления</h2>
-<table><tr><th>Ниша</th><th>Примеры</th><th>Что спросить</th></tr>
-<tr><td>🐾 Питомцы</td><td>Адресник, табличка, держатель поводка</td><td>Имя, телефон, размер, цвет</td></tr>
-<tr><td>🏠 Для дома</td><td>Органайзер, держатель, крепление</td><td>Фото места, точные размеры, нагрузка</td></tr>
-<tr><td>🏪 Для бизнеса</td><td>QR-стойка, ценник, номерок, оснастка</td><td>Количество, макет, срок, реквизиты</td></tr></table>
-<div class="box"><h3>Как принять заказ</h3><ol><li>Запишите задачу словами клиента.</li><li>Возьмите имя, телефон или мессенджер.</li><li>Попросите фото, размеры, количество, цвет и нужную дату.</li><li>Скажите: «Мастер проверит задачу и пришлёт расчёт».</li><li>Создайте заявку в PrintFlow (система учёта) или передайте данные ответственному.</li></ol><p style="margin-top:2mm"><b>Персональные данные не оставляйте на виду и не публикуйте.</b></p></div>
-<div class="warn"><h3>Чего не обещать</h3><ul><li>Точную цену, срок, нагрузку или материал без расчёта.</li><li>Пищевую, медицинскую или детскую безопасность «по умолчанию».</li><li>Изготовление чужого персонажа или логотипа без права.</li><li>Несущие карабины, детали поводка и другие критичные изделия.</li><li>Скидку или бесплатную разработку без согласования.</li></ul></div>
-<h2>Бланк заявки</h2><div class="grid2"><div class="form"><div class="line">Дата / ниша</div><div class="line">Задача</div><div class="line">Фото и размеры</div><div class="line">Количество / цвет / срок</div><div class="line">Имя</div><div class="line">Телефон / мессенджер</div></div><div class="form"><div class="line">Дата / ниша</div><div class="line">Задача</div><div class="line">Фото и размеры</div><div class="line">Количество / цвет / срок</div><div class="line">Имя</div><div class="line">Телефон / мессенджер</div></div></div>
+  <div class="toolbar">
+    <a href="?form=seller">Памятка</a>
+    <a href="?form=seller-forms">Бланк заявки</a>
+    <button type="button" id="print" disabled>Загрузка макета…</button>
+  </div>
+  <div id="status" class="loading" role="status" aria-live="polite">Загружаю рецепт памятки…</div>
+  <div class="page-frame"><main id="sheet" class="sheet" aria-label="Памятка продавцу NOZZA" hidden></main></div>
+  <script>
+    'use strict';
+    const statusNode = document.getElementById('status');
+    const sheet = document.getElementById('sheet');
+    const printButton = document.getElementById('print');
+    const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, (char) => ({
+      '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'
+    })[char]);
+    const today = new Intl.DateTimeFormat('ru-RU', {
+      day:'numeric', month:'long', year:'numeric'
+    }).format(new Date());
+    const formId = new URLSearchParams(location.search).get('form') === 'seller-forms'
+      ? 'seller-forms' : 'seller';
+    const memoValues = {
+      'document-title': 'Памятка продавцу',
+      metadata: `Внутренний документ · обновлено ${today}`,
+      'faq-0': 'Что можно заказать?\nПитомцы: адресник, табличка, держатель поводка — спросите имя, телефон, размер и цвет.\nДом: органайзер и крепление — нужны фото, размеры и нагрузка.\nБизнес: QR-стойка, ценник, оснастка — уточните количество, макет, срок и реквизиты.',
+      'faq-1': 'Сколько стоит и когда будет готово?\nЦены готовых товаров указаны на полке. Индивидуальный заказ мастер рассчитывает после фото, размеров, количества и нужной даты. Не обещайте цену и срок самостоятельно.',
+      'faq-2': 'Сможете повторить сломанную деталь?\nПередайте мастеру фото, размеры и назначение. Опасные детали для газа, электричества, автомобиля и защиты без документации не изготавливаем.',
+      acceptance: 'Как принять заказ\n1. Запишите задачу словами клиента.\n2. Возьмите имя и телефон или мессенджер.\n3. Попросите фото, размеры, количество, цвет и желаемую дату.\n4. Скажите: «Мастер проверит задачу и пришлёт расчёт».\n5. Создайте заявку в PrintFlow или передайте данные ответственному.\n\nПерсональные данные не оставляйте на виду и не публикуйте.',
+      prohibitions: 'Чего не обещать\nТочную цену, срок, нагрузку или материал без расчёта.\nПищевую, медицинскую или детскую безопасность по умолчанию.\nИзготовление чужого персонажа или логотипа без права.\nНесущие и другие критичные изделия без проверки.\nСкидку или бесплатную разработку без согласования.',
+      footer: `Внутренний документ · обновлено ${today}`
+    };
+    fetch('/assets/print-layouts-v2.json').then((response) => {
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      return response.json();
+    }).then((spec) => {
+      const layout = spec.documents.find((document) => document.id === formId);
+      if (!layout || layout.width_mm !== 210 || layout.height_mm !== 297) {
+        throw new Error(`Рецепт ${formId} отсутствует или имеет неверный формат`);
+      }
+      document.title = formId === 'seller-forms'
+        ? 'NOZZA — бланки заявки продавца' : 'NOZZA — памятка продавцу';
+      const values = formId === 'seller-forms'
+        ? { 'document-title': 'Бланки заявки продавца',
+            metadata: 'Бланк приёма заявки' }
+        : memoValues;
+      sheet.innerHTML = layout.blocks.map((block) => {
+        const style = `left:${block.x_mm}mm;top:${block.y_mm}mm;width:${block.width_mm}mm;` +
+          `height:${block.height_mm}mm;font-family:Arial,sans-serif;font-size:${block.font_pt}pt;` +
+          `font-weight:${/bold/i.test(block.font) ? 700 : 400};line-height:${block.line_height};` +
+          `color:${block.color};background:${block.background || 'transparent'};` +
+          `text-align:${block.align};padding:${block.text_padding_mm || 0}mm;` +
+          `border-radius:${block.radius_mm || 0}mm;`;
+        if (block.kind === 'logo') {
+          const crop = block.source_crop_px.map((value) => Math.round(value)).join('-');
+          return `<div class="block block-logo" data-block="${escapeHtml(block.id)}" style="${style}">` +
+            `<img src="/assets/brand/nozza-print-crop-${crop}.png" alt="NOZZA"></div>`;
+        }
+        const value = Object.prototype.hasOwnProperty.call(values, block.id)
+          ? values[block.id] : block.text || '';
+        return `<div class="block" data-block="${escapeHtml(block.id)}" style="${style}">` +
+          `${escapeHtml(value).replace(/\n/g, '<br>')}</div>`;
+      }).join('');
+      sheet.hidden = false;
+      void sheet.offsetHeight;
+      const overflowing = [...sheet.querySelectorAll('.block:not(.block-logo)')]
+        .filter((block) => block.scrollWidth > block.clientWidth + 1 ||
+          block.scrollHeight > block.clientHeight + 1);
+      if (overflowing.length) {
+        sheet.hidden = true;
+        throw new Error(`${overflowing.length} текстовых блока выходят за область макета`);
+      }
+      statusNode.hidden = true;
+      printButton.disabled = false;
+      printButton.textContent = 'Печать / PDF';
+    }).catch((error) => {
+      statusNode.className = 'error';
+      statusNode.textContent = `Не удалось загрузить макет памятки: ${error.message}`;
+      printButton.textContent = 'Печать недоступна';
+    });
+    printButton.addEventListener('click', () => {
+      if (!printButton.disabled && !sheet.hidden) window.print();
+    });
+  </script>
 </body>
 </html>

@@ -78,7 +78,21 @@ async function refreshReport() {
     PF.state.reportSales = sales;
     renderReport();
     renderSalesLedger();
-  } catch (e) { fail(e); }
+  } catch (e) {
+    if (!PF.offline) { fail(e); return; }
+    const message = '<div class="empty compact" role="status"><b>Отчёт недоступен</b>'
+      + '<span>Показатели появятся после подключения к PrintFlow. Текущие значения неизвестны.</span></div>';
+    if ($('rep_label')) $('rep_label').textContent = 'Нет связи с данными';
+    ['rep_kpis', 'rep_expenses', 'abc_body'].forEach((id) => {
+      const host = $(id);
+      if (host) host.innerHTML = message;
+    });
+    [['rep_sales_rows', 10], ['rep_customers', 4], ['rep_products', 4], ['rep_channels', 5]]
+      .forEach(([id, columns]) => {
+        const host = $(id);
+        if (host) host.innerHTML = `<tr><td colspan="${columns}">${message}</td></tr>`;
+      });
+  }
 }
 
 /* ================================================================== P&L */
@@ -94,7 +108,7 @@ function renderPnl() {
     return `${num(d.diff) >= 0 ? '↑' : '↓'} ${pct(Math.abs(num(d.percent)))} к прошлому месяцу`;
   };
   $('pnl_kpis').innerHTML = [
-    kpi('Доход за месяц', money(cur.income), dir('income'), num(cur.income) ? 'ok' : ''),
+    kpi('Доход за месяц', money(cur.income), dir('income')),
     kpi('Расход за месяц', money(cur.expense), dir('expense')),
     kpi('Прибыль', money(cur.profit), dir('profit'), num(cur.profit) >= 0 ? 'ok' : 'bad'),
     kpi('Маржа', pct(cur.margin), `в среднем ${money(pnl.average_profit)} прибыли в месяц`,
@@ -358,7 +372,7 @@ function renderCash() {
   const debts = data.debts || {};
   const tax = data.tax || {};
   $('cash_kpis').innerHTML = [
-    kpi('Доступно сейчас', money(acc.total), `${(acc.accounts || []).length} касс(ы) и счёта`, num(acc.total) >= 0 ? 'ok' : 'bad'),
+    kpi('Доступно сейчас', money(acc.total), `${(acc.accounts || []).length} касс(ы) и счёта`, num(acc.total) < 0 ? 'bad' : ''),
     kpi('К получению', money(debts.total), `${nfmt(debts.count)} заказ(ов) с долгом`, num(debts.total) ? 'warn' : 'ok'),
     kpi('Просрочено', money(debts.overdue), `дольше ${nfmt(PF.state.settings.debt_alert_days, 0)} дней`,
       num(debts.overdue) ? 'bad' : 'ok'),
@@ -541,7 +555,7 @@ function renderShelfCash() {
   if (!host) return;
   const c = shelfCash || { shelf_income: 0, collected_total: 0, in_shop: 0, online_income: 0, collections: [] };
   host.innerHTML = [
-    kpi('Продано со стеллажа', money(c.shelf_income), 'доход за всю историю', num(c.shelf_income) ? 'ok' : ''),
+    kpi('Продано со стеллажа', money(c.shelf_income), 'доход за всю историю'),
     kpi('Забрали из магазина', money(c.collected_total), 'выемки наличных', num(c.collected_total) ? '' : ''),
     kpi('Лежит в магазине', money(c.in_shop),
       num(c.in_shop) ? 'должно быть в кассе магазина' : 'касса сведена',
@@ -1170,6 +1184,23 @@ async function remindDebt(orderId) {
 }
 
 function renderAll() {
+  if (!PF.state.money) {
+    if (!PF.offline) return;
+    const note = '<div class="empty compact" role="status"><b>Финансовые данные недоступны</b>'
+      + '<span>Показатели появятся после подключения PrintFlow. Неоплаченные суммы и балансы сейчас неизвестны.</span></div>';
+    const unknownKpis = ['Доступно сейчас', 'К получению', 'Просрочено', 'К уплате']
+      .map((label) => kpi(label, '—', 'Нет связи с данными')).join('');
+    if ($('cash_kpis')) $('cash_kpis').innerHTML = unknownKpis;
+    if ($('pnl_kpis')) $('pnl_kpis').innerHTML = note;
+    if ($('tax_kpis')) $('tax_kpis').innerHTML = note;
+    ['fin_attention', 'fin_result', 'fin_sources', 'fin_tx', 'fin_niches',
+      'cash_accounts', 'cash_fixed', 'tax_box', 'tax_reserve', 'pnl_chart', 'fin_chart']
+      .forEach((id) => { const host = $(id); if (host) host.innerHTML = note; });
+    if ($('fin_result_sub')) $('fin_result_sub').textContent = 'Сводка периода недоступна';
+    if ($('fin_tx_sub')) $('fin_tx_sub').textContent = 'Проводки пока не загружены';
+    if ($('tax_sub')) $('tax_sub').textContent = 'Данные налогового режима недоступны';
+    return;
+  }
   renderPnl();
   renderTax();
   renderCash();
@@ -1207,6 +1238,7 @@ async function loadAbc() {
 PF.on('ready', () => {
   bind();
   refreshMoney().then(() => { renderAll(); refreshReport(); });
+  if (!PF.state.money && PF.offline && PF.modules.finance) renderAll();
   refreshShelfCash();
   refreshMoneySources();
   loadAbc();
@@ -1223,11 +1255,13 @@ PF.on('money', PF.whenView(['finance', 'calc'], renderAll));
 PF.on('finance', PF.whenView(['finance', 'calc'], () => { if (PF.state.money) renderAll(); }));
 PF.on('view', (d) => {
   if (d.view === 'finance' || d.view === 'settings') {
+    if (!PF.state.money && PF.offline && d.view === 'finance') renderAll();
     refreshMoney();
     refreshShelfCash();
     if (d.view === 'finance') refreshMoneySources();
   }
 });
+PF.on('connection', () => { if (PF.viewOn('finance') && !PF.state.money) renderAll(); });
 
 PF.modules.finance = {
   refreshMoney, refreshMoneySources, renderAll, openAccount, openChannel, openFixed, openExpCat,

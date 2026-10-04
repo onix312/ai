@@ -27,6 +27,7 @@ let slicerModels = [];        // модели STL из библиотеки
 let slicerSpools = [];        // 18.8: катушки склада пластика для нарезки
 let slicerLast = null;        // результат последней нарезки: {output, stem, report, machine}
 let formGroupFilter = 'all';
+let v2Layouts = null;
 
 /* ============================================================ окно печати */
 /* Печать серверного листа. Своё окно, а не iframe: браузер печатает его
@@ -618,9 +619,37 @@ function applyCatalogFilters() {
   });
 }
 
+function renderCatalogUnavailable() {
+  const host = $('pr_forms');
+  if (host) host.innerHTML = '<div class="pr-catalog-offline" role="status">'
+    + '<b>Каталог бланков недоступен</b>'
+    + '<span>Подключите PrintFlow, чтобы загрузить рабочие формы и их реальные поля. '
+    + 'Предпросмотр 61 макета доступен во вкладке «Макеты v2».</span></div>';
+  const result = $('pr_result_count');
+  if (result) result.textContent = 'Каталог недоступен';
+  const kpis = $('pr_kpis');
+  if (kpis) kpis.hidden = true;
+  const tag = $('pr_tag');
+  if (tag) tag.hidden = true;
+  const tabCount = $('pr_tab_forms_count');
+  if (tabCount) tabCount.textContent = '—';
+  const allCount = $('pr_filter_all_count');
+  if (allCount) allCount.textContent = '—';
+  const search = $('pr_search');
+  if (search) search.disabled = true;
+  const filters = $('pr_category_filters');
+  if (filters) filters.querySelectorAll('[data-pr-filter]').forEach((button) => { button.disabled = true; });
+}
+
 function renderCatalog() {
   const host = $('pr_forms');
   if (!host) return;
+  const search = $('pr_search');
+  if (search) search.disabled = false;
+  const filters = $('pr_category_filters');
+  if (filters) filters.querySelectorAll('[data-pr-filter]').forEach((button) => { button.disabled = false; });
+  const kpis = $('pr_kpis');
+  if (kpis) kpis.hidden = false;
   const tag = $('pr_tag');
   if (tag) {
     tag.textContent = forms.length ? `${forms.length} форм` : '';
@@ -689,6 +718,7 @@ async function loadCatalog(options = {}) {
     loaded = true;
     renderCatalog();
   } catch (error) {
+    if (!loaded) renderCatalogUnavailable();
     if (!options.quiet) {
       showError('Каталог форм не загрузился: ' + (error && error.message ? error.message : error));
       fail(error);
@@ -792,7 +822,7 @@ async function buildBarcode() {
 let bound = false;
 
 function selectPrintPanel(name, moveFocus = false) {
-  const panels = ['forms', 'slicer', 'tools'];
+  const panels = ['forms', 'slicer', 'tools', 'v2'];
   if (!panels.includes(name)) return;
   panels.forEach((key) => {
     const tab = $('pr_tab_' + key);
@@ -808,19 +838,91 @@ function selectPrintPanel(name, moveFocus = false) {
   });
 }
 
+async function loadV2Layouts() {
+  if (v2Layouts) return v2Layouts;
+  const select = $('pr_v2_select');
+  const status = $('pr_v2_status');
+  try {
+    const response = await fetch('/assets/print-layouts-v2.json');
+    if (!response.ok) throw new Error('HTTP ' + response.status);
+    const spec = await response.json();
+    if (!Array.isArray(spec.documents) || spec.documents.length !== 61 || spec.units !== 'mm') {
+      throw new Error('Реестр не прошёл проверку количества форм и единиц');
+    }
+    v2Layouts = spec.documents;
+    if (select) {
+      select.innerHTML = v2Layouts.map((doc, index) =>
+        `<option value="${index}">${esc(doc.title)} · ${esc(doc.width_mm)} × ${esc(doc.height_mm)} мм</option>`).join('');
+      select.addEventListener('change', renderV2Layout);
+    }
+    if (status) status.textContent = `Загружено ${v2Layouts.length} макетов из спецификации. QR и штрихкоды показаны как обозначения полей, не как готовые к сканированию коды.`;
+    renderV2Layout();
+  } catch (error) {
+    if (select) select.innerHTML = '<option value="">Реестр недоступен</option>';
+    if (status) status.textContent = 'Не удалось загрузить реестр макетов: ' + (error.message || 'ошибка чтения файла');
+  }
+  return v2Layouts;
+}
+
+function renderV2Layout() {
+  const paper = $('pr_v2_paper');
+  if (!paper || !v2Layouts || !v2Layouts.length) return;
+  const select = $('pr_v2_select');
+  const layout = v2Layouts[Number(select && select.value) || 0];
+  const meta = $('pr_v2_meta');
+  paper.style.width = layout.width_mm + 'mm';
+  paper.style.height = layout.height_mm + 'mm';
+  paper.setAttribute('aria-label', `${layout.title}, ${layout.width_mm} на ${layout.height_mm} миллиметров`);
+  if (meta) meta.textContent = `${layout.title} · ${layout.width_mm} × ${layout.height_mm} мм · ${layout.blocks.length} элементов · ${layout.family || 'формат'}`;
+  paper.innerHTML = layout.blocks.map((block) => {
+    const left = Number(block.x_mm) || 0;
+    const top = Number(block.y_mm) || 0;
+    const width = Number(block.width_mm) || 0;
+    const height = Number(block.height_mm) || 0;
+    const border = Number(block.stroke_width_mm) || 0;
+    const radius = Number(block.radius_mm) || 0;
+    const styles = [
+      `left:${left}mm`, `top:${top}mm`, `width:${width}mm`, `height:${height}mm`,
+      `color:${block.color || '#31242E'}`, `background:${block.background || 'transparent'}`,
+      `font-size:${Math.max(1.5, (Number(block.font_pt) || 9) * 0.352778)}mm`,
+      `font-weight:${/bold/i.test(block.font || '') ? 700 : 400}`,
+      `line-height:${Number(block.line_height) || 1.25}`, `text-align:${block.align || 'left'}`,
+      `border:${border ? `${border}mm solid ${block.stroke_color || '#D9C8CE'}` : '0'}`,
+      `border-radius:${radius}mm`, `padding:${Number(block.text_padding_mm) || 0}mm`,
+    ].join(';');
+    const label = block.text ? esc(block.text).replace(/\n/g, '<br>') : '';
+    let content = label;
+    if (block.kind === 'logo') {
+      const crop = Array.isArray(block.source_crop_px) ? block.source_crop_px : null;
+      const cropSrc = crop && crop.length === 4
+        ? `/assets/brand/nozza-print-crop-${crop.map((v) => Math.max(0, Math.round(Number(v) || 0))).join('-')}.png`
+        : '/assets/brand/nozza-selected-v2.png';
+      content = `<img src="${cropSrc}" alt="NOZZA" loading="lazy">`;
+    }
+    else if (block.kind === 'qr' || block.kind === 'barcode') {
+      content = `<span class="pr-v2-code-label">${block.kind === 'qr' ? 'QR · поле кода' : 'CODE 128 · поле кода'}</span>${label ? `<small>${label}</small>` : ''}`;
+    }
+    const shapeClass = ['shape', 'circle', 'outline', 'checkbox'].includes(block.kind) ? ` pr-v2-${block.kind}` : '';
+    return `<div class="pr-v2-block pr-v2-${esc(block.kind)}${shapeClass}" style="${styles}" data-block="${esc(block.id || block.kind)}">${content}</div>`;
+  }).join('');
+}
+
 function bindWorkspaceTabs() {
   const tabs = $('pr_tabs');
   if (!tabs) return;
   tabs.addEventListener('click', (event) => {
     const target = event.target;
     const tab = target && target.closest ? target.closest('[data-pr-tab]') : null;
-    if (tab) selectPrintPanel(tab.dataset.prTab);
+    if (tab) {
+      selectPrintPanel(tab.dataset.prTab);
+      if (tab.dataset.prTab === 'v2') loadV2Layouts();
+    }
   });
   tabs.addEventListener('keydown', (event) => {
     const tab = event.target && event.target.closest
       ? event.target.closest('[data-pr-tab]') : null;
     if (!tab) return;
-    const names = ['forms', 'slicer', 'tools'];
+    const names = ['forms', 'slicer', 'tools', 'v2'];
     const current = names.indexOf(tab.dataset.prTab);
     const next = event.key === 'ArrowRight' ? (current + 1) % names.length
       : event.key === 'ArrowLeft' ? (current - 1 + names.length) % names.length
@@ -828,6 +930,7 @@ function bindWorkspaceTabs() {
     if (next < 0) return;
     event.preventDefault();
     selectPrintPanel(names[next], true);
+    if (names[next] === 'v2') loadV2Layouts();
   });
 }
 

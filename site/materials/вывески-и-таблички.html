@@ -4,6 +4,7 @@
 <title>NOZZA — конструктор вывесок и табличек</title>
 <link rel="icon" href="../assets/brand/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="generator.css?v=18.23.1">
+<link rel="stylesheet" href="../assets/nozza-design-v2.css?v=18.23.1">
 <style>
   /* ------------------------------------------------------------ листы */
   .grid { display: flex; flex-wrap: wrap; gap: 5mm; align-content: flex-start; }
@@ -92,18 +93,49 @@
   }
   .lib-chip:hover { border-color: var(--brand); color: var(--brand); }
   .lib-chip .ic { font-family: "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif; }
+  body.pf-sign-workbench { min-height:100vh;background:#1D161F;font-family:Arial,Helvetica,sans-serif;color:#F8EEE6; }
+  body.pf-sign-workbench .panel { position:relative;top:auto; }
+  .pf-sign-workbench .editor { border-color:#493949;border-radius:12px;background:linear-gradient(145deg,#2C232E,#241B25); }
+  .pf-sign-workbench .editor h3,.pf-sign-workbench .editor label,.pf-sign-workbench .library h3 { color:#BFAFB7; }
+  .pf-sign-workbench .editor input,.pf-sign-workbench .editor select { border-color:#59445B;border-radius:8px;background:#241B25;color:#F8EEE6; }
+  body.pf-sign-workbench .panel [data-nz-common] input,body.pf-sign-workbench .panel [data-nz-common] select { border-color:#59445B!important;border-radius:8px!important;background:#241B25!important;color:#F8EEE6!important; }
+  .pf-sign-workbench .btn:not(.primary):not(.danger) { border:1px solid #59445B;background:#352A37;color:#F8EEE6;box-shadow:none; }
+  .pf-sign-workbench .btn:not(.primary):not(.danger):hover { border-color:#745970;background:#403241; }
+  .pf-sign-workbench .btn.danger { border-color:rgba(255,146,159,.4);background:rgba(255,100,125,.1);color:#FF929F; }
+  .pf-sign-workbench .chip,.pf-sign-workbench .lib-chip { border-color:#493949;border-radius:8px;background:#241B25;color:#E2D2D9; }
+  .pf-sign-workbench .lib-chip:hover { border-color:#CE8BFF;color:#E5C2FF; }
+  .pf-sign-workbench .note { border-color:rgba(244,188,128,.35);background:rgba(244,188,128,.1);color:#F4BC80; }
+  .pf-sign-workbench .note b { color:#F4BC80; }
+  .sg.json-layout { display:block;padding:0;border:0;border-radius:0;background:#fff;color:#31242E;box-shadow:none; }
+  .sg.json-layout:hover { box-shadow:none; }
+  .sg.json-layout .json-block { position:absolute;display:block;overflow:hidden;white-space:pre-wrap; }
+  .sg.json-layout .json-logo { object-fit:contain; object-position:left center; mix-blend-mode:normal; background:transparent; }
+  .sg.json-layout .json-qr { position:absolute;right:0;bottom:0;width:14mm;height:14mm;display:grid;place-items:center;background:#fff; }
+  .sg.json-layout .json-qr svg { display:block;width:14mm;height:14mm; }
+  .sg.json-layout .json-title { text-transform:uppercase; }
+  .sg.json-layout.selected { outline:2px solid #B52BFF;outline-offset:2px; }
+  @media print {
+    body:not(.sign-recipes-ready) .sg.json-layout { visibility:hidden !important; }
+    body.door-sign-overflow .sg.json-layout { visibility:hidden !important; }
+    .sg.json-layout.selected { outline:none; }
+  }
+  @media (max-width:700px) { .pf-sign-workbench .panel .panel-row { align-items:flex-start; } .pf-sign-workbench .editor input.wide { min-width:min(240px,calc(100vw - 64px)); } }
+  @media (prefers-reduced-motion:reduce) { .pf-sign-workbench *, .pf-sign-workbench *::before, .pf-sign-workbench *::after { transition:none !important; } }
 </style>
-</head><body>
+</head><body class="pf-utility pf-sign-workbench">
 
 <div class="panel noprint">
   <div class="panel-row">
     <h1><img data-nz-mark src="../assets/brand/nozza-mark-1.svg" alt="">Вывески и таблички — конструктор</h1>
     <label>Размер <select id="size">
       <option value="door">Дверная 186 × 86 мм — 3 на лист</option>
+      <option value="shop">Табличка цеха 92 × 65 мм — 8 на лист</option>
+      <option value="shelf">Табличка полки 90 × 55 мм — 8 на лист</option>
       <option value="big">Крупная 186 × 126 мм — 2 на лист</option>
       <option value="full">Целый лист A4 — 186 × 266 мм</option>
       <option value="small">Малая 92 × 52 мм — 8 на лист</option>
     </select></label>
+    <span class="status" id="doorSignStatus" role="status" aria-live="polite">Загружаю геометрию door-sign…</span>
     <div class="panel-row" data-nz-common></div>
   </div>
 
@@ -167,8 +199,11 @@ const SIZES = {
   full:  { per: 1, label: 'лист A4' },
   big:   { per: 2, label: '186 × 126' },
   door:  { per: 3, label: '186 × 86' },
+  shop:  { per: 8, label: '92 × 65 · shop-sign' },
+  shelf: { per: 8, label: '90 × 55 · shelf-sign' },
   small: { per: 8, label: '92 × 52' },
 };
+const RECIPE_BY_SIZE = { door: 'door-sign', shop: 'shop-sign', shelf: 'shelf-sign' };
 
 /* ------------------------------------------------ библиотека ситуаций */
 const GROUPS = [
@@ -217,6 +252,7 @@ const START = [
 
 let signs = [];
 let selected = -1;
+let signRecipes = {};
 
 function load() {
   const st = NZ.pageState({});
@@ -227,8 +263,22 @@ function save() { NZ.pageStateSave({ [LS_KEY]: signs, size: $('size').value }); 
 
 function footLine() { return 'NOZZA · ' + (NZ.contact().city || 'Симферополь'); }
 
+function renderRecipeSign(s, idx, size) {
+  const recipe = signRecipes[RECIPE_BY_SIZE[size]];
+  const accent = { brand:'#6E2BC8', ink:'#31242E', light:'#31242E', green:'#16815C', red:'#B42318', amber:'#9A5B00' }[s.theme] || '#6E2BC8';
+  const qr = s.qr ? NZ.qr(s.link || NZ.contact().qrbase || NZ.contact().site, { ecl:'M', margin:1 }) : '';
+  const blocks = recipe.blocks.map((b) => {
+    const style = `left:${b.x_mm}mm;top:${b.y_mm}mm;width:${b.width_mm}mm;height:${b.height_mm}mm;font-family:Arial,Helvetica,sans-serif;font-size:${b.font_pt}pt;font-weight:${/bold/i.test(b.font) ? 700 : 400};line-height:${b.line_height};color:${b.id === 'title' ? accent : b.color};text-align:${b.align};padding:${b.text_padding_mm || 0}mm;${b.id === 'text' && qr ? 'padding-right:18mm;' : ''}`;
+    if (b.kind === 'logo') return `<img class="json-block json-logo" data-block="${b.id}" style="${style}" src="../assets/brand/nozza-print-crop-${b.source_crop_px.join('-')}.png" alt="NOZZA">`;
+    const value = b.id === 'title' ? s.title : s.sub;
+    return `<div class="json-block json-${b.id}" data-block="${b.id}" style="${style}">${NZ.esc(value || '')}${b.id === 'text' && qr ? `<span class="json-qr" aria-label="QR-код">${qr}</span>` : ''}</div>`;
+  }).join('');
+  return `<div class="sg json-layout sz-${size} cut${idx === selected ? ' selected' : ''}" data-idx="${idx}" data-recipe="${recipe.id}" title="Клик — править эту табличку" style="width:${recipe.width_mm}mm;height:${recipe.height_mm}mm">${blocks}</div>`;
+}
+
 function renderSign(s, idx) {
   const size = $('size').value;
+  if (RECIPE_BY_SIZE[size] && signRecipes[RECIPE_BY_SIZE[size]]) return renderRecipeSign(s, idx, size);
   const qr = s.qr ? NZ.qr(s.link || NZ.contact().qrbase || NZ.contact().site, { ecl: 'M', margin: 0 }) : '';
   const foot = (s.foot == null || s.foot === '') ? footLine() : s.foot;
   return `<div class="sg t-${s.theme || 'brand'} sz-${size}${size !== 'full' ? ' cut' : ''}${idx === selected ? ' selected' : ''}" data-idx="${idx}" title="Клик — править эту табличку">
@@ -248,6 +298,12 @@ function draw() {
   const size = $('size').value;
   save();
   $('count').textContent = signs.length;
+  const recipeId = RECIPE_BY_SIZE[size];
+  if (recipeId) {
+    const recipe = signRecipes[recipeId];
+    $('doorSignStatus').textContent = recipe ? `${recipe.id} · ${recipe.width_mm} × ${recipe.height_mm} мм · размеры из JSON` : `Загружаю геометрию ${recipeId}…`;
+    $('doorSignStatus').classList.toggle('err', !recipe);
+  }
 
   const per = SIZES[size].per;
   const pages = [];
@@ -255,6 +311,7 @@ function draw() {
 
   const host = $('sheets');
   if (!signs.length) {
+    document.body.classList.remove('door-sign-overflow');
     host.innerHTML = '<div class="sheet"><div style="padding:40mm 10mm;text-align:center;color:var(--ink-soft);font-size:13px;line-height:1.7">Набор пуст.<br>Добавьте табличку кнопкой «+ Добавить» или из библиотеки ситуаций ниже.</div></div>';
     return;
   }
@@ -263,6 +320,16 @@ function draw() {
       <div class="sheet-title noprint">Лист ${p + 1} из ${pages.length} · ${SIZES[size].label} · ${page.length} шт</div>
       <div class="grid">${page.map((s, j) => renderSign(s, p * per + j)).join('')}</div>
     </div>`).join('');
+
+  if (recipeId && signRecipes[recipeId]) {
+    const overflowing = [...host.querySelectorAll('.sg.json-layout .json-block')].filter((el) => el.scrollWidth > el.clientWidth + 1 || el.scrollHeight > el.clientHeight + 1);
+    document.body.classList.toggle('door-sign-overflow', overflowing.length > 0);
+    const recipe = signRecipes[recipeId];
+    $('doorSignStatus').textContent = overflowing.length ? `${overflowing.length} текстовых блока выходят за размер — сократите текст до печати.` : `${recipe.id} · ${recipe.width_mm} × ${recipe.height_mm} мм · размеры из JSON`;
+    $('doorSignStatus').classList.toggle('err', overflowing.length > 0);
+  } else {
+    document.body.classList.remove('door-sign-overflow');
+  }
 
   host.querySelectorAll('.sg[data-idx]').forEach((el) => {
     el.addEventListener('click', () => select(Number(el.dataset.idx)));
@@ -371,5 +438,22 @@ function renderLibrary() {
 load();
 renderLibrary();
 NZ.mount(draw);
+fetch('../assets/print-layouts-v2.json', { cache: 'no-store' }).then((r) => {
+  if (!r.ok) throw new Error('layout');
+  return r.json();
+}).then((data) => {
+  const expected = { 'door-sign': [186,86], 'shop-sign': [92,65], 'shelf-sign': [90,55] };
+  for (const [id, [width, height]] of Object.entries(expected)) {
+    const recipe = data.documents.find((d) => d.id === id);
+    if (!recipe || recipe.width_mm !== width || recipe.height_mm !== height || recipe.blocks.length !== 3 || recipe.blocks.some((b) => b.x_mm < 0 || b.y_mm < 0 || b.x_mm + b.width_mm > recipe.width_mm || b.y_mm + b.height_mm > recipe.height_mm)) throw new Error(`recipe:${id}`);
+    signRecipes[id] = recipe;
+  }
+  document.body.classList.add('sign-recipes-ready');
+  draw();
+}).catch(() => {
+  signRecipes = {};
+  $('doorSignStatus').textContent = 'Геометрия табличек не загрузилась; рецептурные форматы скрыты при печати.';
+  $('doorSignStatus').classList.add('err');
+});
 </script>
 </body></html>

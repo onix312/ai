@@ -224,6 +224,9 @@ function touchCustomPreset() {
 function renderOrderPulse() {
   const host = $('orders_pulse');
   if (!host) return;
+  const unavailable = !PF.dataReady && PF.offline;
+  host.classList.toggle('unavailable', unavailable);
+  host.setAttribute('aria-busy', String(!PF.dataReady && !PF.offline));
   const source = PF.state.orders || [];
   const active = source.filter((o) => !PF.isFinal(o));
   const hot = active.filter((o) => {
@@ -234,11 +237,11 @@ function renderOrderPulse() {
   const debt = source.filter((o) => orderDebt(o) > 0);
   const stale = active.filter((o) => orderStaleDays(o) >= 7);
   const set = (id, value) => { const el = $(id); if (el) el.textContent = String(value); };
-  set('orders_pulse_all', active.length);
-  set('orders_pulse_hot', hot.length);
-  set('orders_pulse_ready', ready.length);
-  set('orders_pulse_debt', debt.length);
-  set('orders_pulse_stale', stale.length);
+  set('orders_pulse_all', unavailable || !PF.dataReady ? '—' : active.length);
+  set('orders_pulse_hot', unavailable || !PF.dataReady ? '—' : hot.length);
+  set('orders_pulse_ready', unavailable || !PF.dataReady ? '—' : ready.length);
+  set('orders_pulse_debt', unavailable || !PF.dataReady ? '—' : debt.length);
+  set('orders_pulse_stale', unavailable || !PF.dataReady ? '—' : stale.length);
   host.querySelectorAll('[data-order-pulse]').forEach((button) => {
     button.classList.toggle('on',
       PF.orderBox !== 'archived' && presetMatchesFilters(button.dataset.orderPulse || 'all'));
@@ -581,6 +584,30 @@ function renderTable(list) {
 function renderOrders() {
   const archived = PF.orderBox === 'archived';
   renderOrderPulse();
+  const ordersHost = $('orders_kanban');
+  if (!PF.dataReady && PF.offline) {
+    text('orders_sub', 'Нет связи с локальной базой — проверьте подключение и повторите.');
+    $$('#orders_pulse [data-order-pulse]').forEach((button) => { button.disabled = true; });
+    if (!archived && orderView === 'kanban' && ordersHost) {
+      ordersHost.hidden = false;
+      ordersHost.innerHTML = '<div class="empty"><span class="big">⚠</span><b>Не удалось загрузить заказы</b>'
+        + '<span>Список заказов пока недоступен. Восстановите связь и повторите загрузку.</span>'
+        + '<button class="btn sm" type="button" data-orders-retry>↻ Повторить</button></div>';
+    }
+    const retry = document.querySelector('[data-orders-retry]');
+    if (retry && !retry.dataset.bound) {
+      retry.dataset.bound = '1';
+      retry.addEventListener('click', () => PF.refreshCore().then(renderOrders).catch(() => {}));
+    }
+    return;
+  }
+  if (!PF.dataReady) {
+    text('orders_sub', 'Загружаем рабочую доску…');
+    $$('#orders_pulse [data-order-pulse]').forEach((button) => { button.disabled = true; });
+    if (ordersHost) ordersHost.innerHTML = '<div class="kan-loading" aria-hidden="true"><i></i><i></i><i></i><i></i></div>';
+    return;
+  }
+  $$('#orders_pulse [data-order-pulse]').forEach((button) => { button.disabled = false; });
   const source = ordersSource();
   const list = filtered();
   const viewName = ([...PRESET_VIEWS, ...customViews()].find((v) => v.id === activePreset) || {}).name || '';
@@ -3013,6 +3040,11 @@ function requestKey(prefix) {
 function renderAftercare() {
   const host = $('aftercare_list');
   if (!host) return;
+  const kpiHost = $('aftercare_kpi');
+  kpiHost.classList.remove('unavailable');
+  kpiHost.removeAttribute('role');
+  kpiHost.removeAttribute('aria-label');
+  host.closest('.aftercare-card')?.classList.remove('unavailable');
   const ready = aftercareItems.filter((i) => i.state === 'ready').length;
   const waiting = aftercareItems.filter((i) => i.state === 'waiting').length;
   const received = aftercareItems.filter((i) => i.state === 'received').length;
@@ -3048,8 +3080,18 @@ async function loadAftercare() {
     aftercareItems = result.items || [];
     renderAftercare();
   } catch (e) {
-    host.innerHTML = '<div class="empty compact"><span>Не удалось проверить очередь обратной связи.</span></div>';
-    fail(e);
+    const kpi = $('aftercare_kpi');
+    kpi.classList.add('unavailable');
+    kpi.setAttribute('role', 'group');
+    kpi.setAttribute('aria-label', 'Счётчики обратной связи неизвестны без подключения');
+    kpi.innerHTML = '<span class="chip ok" aria-label="Готово: неизвестно">Готово <b>—</b></span>'
+      + '<span class="chip accent" aria-label="Ждём ответ: неизвестно">Ждём ответ <b>—</b></span>'
+      + '<span class="chip outline" aria-label="Получено: неизвестно">Получено <b>—</b></span>';
+    host.closest('.aftercare-card')?.classList.add('unavailable');
+    host.innerHTML = PF.offline
+      ? '<div class="empty compact" role="status"><span>Состояние обратной связи неизвестно без подключения к PrintFlow.</span></div>'
+      : '<div class="empty compact" role="alert"><span>Не удалось проверить очередь обратной связи.</span></div>';
+    if (!PF.offline) fail(e);
   }
 }
 
@@ -3116,7 +3158,8 @@ async function copyAftercare(id, success) {
 function nicheVerdict(n) {
   const orders = num(n.orders), leads = num(n.leads), views = num(n.views);
   const pph = num(n.profit_per_hour), target = num(PF.state.settings.target_profit_per_hour, 250);
-  if (!orders && !leads) return ['', 'Данных ещё нет. Покажите предложение и запишите показы и обращения.'];
+  if (!orders && !leads && !views) return ['', 'Данных ещё нет. Покажите предложение и запишите показы и обращения.'];
+  if (!orders && !leads && views) return ['warn', `Показы есть (${nfmt(views)}), но обращений пока нет. Проверьте предложение и канал.`];
   if (!orders) return ['warn', `Обращения есть (${nfmt(leads)}), заказов нет. Проверьте цену, сроки и то, как формулируете предложение.`];
   if (pph >= target) return ['ok', `Ниша работает: ${money(pph)} прибыли за час печати при норме ${money(target)}. Масштабируйте ассортимент.`];
   if (pph > 0) return ['warn', `Прибыль есть, но ${money(pph)} за час печати ниже нормы ${money(target)}. Поднимите цену или сократите время печати.`];
@@ -3125,6 +3168,12 @@ function nicheVerdict(n) {
 function renderNicheSummary(niches) {
   const host = $('niche_summary');
   if (!host) return;
+  const unavailable = PF.offline && !PF.state.version;
+  if (unavailable) {
+    host.innerHTML = `<article class="niche-overview"><span>Состояние гипотез</span><b>—</b><small>Нет связи с PrintFlow. Число направлений станет известно после загрузки.</small></article>`
+      + ['Заказов', 'Конверсия', 'Прибыль'].map((label) => `<article class="niche-summary-stat"><span>${label}</span><b>—</b><small>Нет связи с данными</small></article>`).join('');
+    return;
+  }
   const active = niches.filter((niche) => num(niche.active, 1));
   const pool = active.length ? active : niches;
   const orders = pool.reduce((sum, niche) => sum + num(niche.orders), 0);
@@ -3141,6 +3190,13 @@ function renderNiches() {
   const host = $('niche_grid');
   const niches = PF.state.niches || [];
   renderNicheSummary(niches);
+  if (PF.offline && !PF.state.version) {
+    host.classList.add('niche-grid-offline');
+    host.innerHTML = '<div class="empty"><span class="big">⚠</span><b>Не удалось загрузить гипотезы</b>'
+      + '<span>Ниши и результаты появятся после подключения PrintFlow. Повторите загрузку через статус подключения.</span></div>';
+    return;
+  }
+  host.classList.remove('niche-grid-offline');
   host.innerHTML = niches.length ? niches.map((niche) => {
     const [kind, verdict] = nicheVerdict(niche);
     const leadRate = num(niche.views) ? num(niche.leads) / num(niche.views) * 100 : 0;
@@ -4580,18 +4636,49 @@ function bind() {
 
 /* =============================================================== старт */
 PF.on('ready', () => { bind(); fillSelectors(); renderNiches(); });
+PF.on('connection', () => { if (PF.viewOn('niches')) renderNiches(); });
+PF.on('ready', () => {
+  if (PF.viewOn('orders')) { fillSelectors(); renderOrders(); }
+});
+PF.on('connection', () => {
+  if (PF.viewOn('orders')) renderOrders();
+  if (PF.viewOn('customers')) {
+    if (PF.dataReady) renderCustomers();
+    else renderCustomersUnavailable();
+  }
+});
 PF.on('data', PF.whenView(['orders', 'customers'], () => {
   if (PF.viewOn('orders')) { fillSelectors(); renderOrders(); }
   if (PF.viewOn('customers')) renderCustomers();
 }));
 PF.on('finance', PF.whenView('niches', () => { renderNiches(); }));
 PF.on('view', (detail) => {
-  if (detail.view === 'orders' && PF.dataReady) { fillSelectors(); renderOrders(); }
+  if (detail.view === 'orders') {
+    if (PF.dataReady) fillSelectors();
+    renderOrders();
+  }
   if (detail.view === 'customers') {
     if (PF.dataReady) renderCustomers();
+    else renderCustomersUnavailable();
     loadAftercare();
   }
 });
+
+function renderCustomersUnavailable() {
+  const head = $('customers_kpi');
+  if (head) head.innerHTML = '<span class="chip">База <b>—</b></span><span class="chip">Связь с данными недоступна</span>';
+  const insights = $('customers_insight');
+  if (insights) insights.innerHTML = '<article class="more-insight"><span>Клиентов в базе</span><b>—</b><small>Нет связи с данными</small></article>'
+    + '<article class="more-insight"><span>Повторных покупателей</span><b>—</b><small>Нет связи с данными</small></article>'
+    + '<article class="more-insight"><span>Выручка по базе</span><b>—</b><small>Нет связи с данными</small></article>';
+  const tbody = $('customers_tbody');
+  if (tbody) tbody.innerHTML = '<tr><td colspan="7"><div class="empty compact" role="status"><b>Не удалось загрузить клиентов</b>'
+    + '<span>Количество клиентов, выручка и сегменты неизвестны без подключения к PrintFlow.</span></div></td></tr>';
+  const map = $('cust_map_card');
+  if (map) map.hidden = true;
+  const filters = $('customers_filter');
+  if (filters) filters.querySelectorAll('button').forEach((button) => { button.disabled = true; });
+}
 
 PF.modules.ops = { openOrder, openOrderFulfillment, openOrderStock, openNiche, renderOrders, fillSelectors, loadAftercare };
 /* 14.0 (идея 57): #orders/<id> открывает карточку заказа. */

@@ -142,7 +142,7 @@ class FlyerContentTests(unittest.TestCase):
 
     def test_food_safety_disclaimer_is_kept(self):
         """Контакт с напитком не обещаем (docs/B2B-СКРИПТЫ.md, п. 4)."""
-        self.assertIn("не касается напитка", self.text)
+        self.assertIn("не касается напитка", self.text.casefold())
 
     def test_page_uses_shared_engine_and_local_qr(self):
         """Общая панель и QR без интернета — как у остальных генераторов."""
@@ -175,7 +175,7 @@ class FlyerContentTests(unittest.TestCase):
     def test_editor_health_runs_after_real_layout_fit(self):
         """Статус готовности учитывает фактическое переполнение оборота."""
         self.assertIn("return over;", self.text)
-        self.assertIn("const overflow = fitBacks();", self.text)
+        self.assertRegex(self.text, r"const overflow = fitBacks\(\)")
         self.assertIn("updateEditorHealth(overflow);", self.text)
         self.assertIn("Макет готов к пробной печати", self.text)
 
