@@ -173,7 +173,8 @@ def register_all() -> int:
     for name in ("routes_workshop", "routes_system", "routes_sbp", "routes_cashier",
                  "routes_bank", "routes_npd", "routes_app", "routes_printers", "routes_ams",
                  "routes_print", "routes_get", "routes_farmloop",
-                 "routes_slicer", "routes_nomenclature", "routes_assistant"):
+                 "routes_slicer", "routes_nomenclature", "routes_assistant",
+                 "routes_product_ideas"):
         try:
             register_module(name)
         except Exception as exc:  # pragma: no cover - защита от частичного релиза
