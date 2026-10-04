@@ -4,6 +4,7 @@ from __future__ import annotations
 import pathlib
 import sys
 import unittest
+from datetime import datetime, timedelta
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
@@ -170,6 +171,46 @@ class SmartQueueTests(unittest.TestCase):
         pla_positions = [j["position"] for j in result["queue"]
                          if j["group_material"] == "PLA"]
         self.assertEqual(pla_positions, [1, 2, 3])
+
+
+class ProductOpportunitiesTests(unittest.TestCase):
+    def setUp(self):
+        self.db = Database(":memory:")
+        self.a = Analytics(self.db)
+
+    def tearDown(self):
+        self.db.close()
+
+    def test_includes_catalog_products_without_sales_and_model_links(self):
+        self.db.upsert("nomenclature", {"id": "linked", "name": "Органайзер",
+                                        "kind": "product", "model_url": "https://makerworld.com/model/1"})
+        self.db.upsert("nomenclature", {"id": "empty", "name": "Новая модель",
+                                        "kind": "product", "model_url": "https://printables.com/model/2"})
+        self.db.upsert("nomenclature", {"id": "service", "name": "Услуга", "kind": "service"})
+        self.db.upsert("statuses", {"id": "done", "name": "Готов", "is_final": 1})
+        now = datetime.now()
+        old_at = (now - timedelta(days=110)).isoformat()
+        recent_at = (now - timedelta(days=10)).isoformat()
+        self.db.upsert("orders", {"id": "order-old", "product": "Органайзер", "nom_id": "linked",
+                                   "qty": 2, "status": "done", "created_at": old_at,
+                                   "closed_at": old_at})
+        self.db.upsert("documents", {"id": "doc-new", "kind": "sale", "state": "posted",
+                                      "at": recent_at})
+        self.db.upsert("doc_items", {"id": "line-new", "doc_id": "doc-new", "nom_id": "linked",
+                                      "qty": 2})
+        self.db.upsert("shelf_items", {"id": "shelf-linked", "name": "Органайзер", "nom_id": "linked"})
+        self.db.upsert("shelf_moves", {"id": "shelf-sale", "item_id": "shelf-linked", "kind": "sale",
+                                       "qty": -2, "at": recent_at})
+        self.db.upsert("stock_moves", {"id": "shelf-register-mirror", "at": recent_at,
+                                        "doc_kind": "sale", "nom_id": "linked", "qty": -2})
+        result = self.a.product_opportunities(90)
+        products = {item["nom_id"]: item for item in result["products"]}
+        self.assertEqual({"linked", "empty"}, set(products))
+        self.assertEqual("https://makerworld.com/model/1", products["linked"]["model_url"])
+        self.assertEqual((4, 2, "rising"), (products["linked"]["sold_period"],
+                                             products["linked"]["sold_previous"],
+                                             products["linked"]["trend"]))
+        self.assertEqual("no_data", products["empty"]["trend"])
 
 
 if __name__ == "__main__":

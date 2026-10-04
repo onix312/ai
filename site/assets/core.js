@@ -1121,7 +1121,8 @@ function routeFromHash() {
     showView(last);
     return;
   }
-  const [name, sub] = raw.split('/');
+  const [rawName, sub] = raw.split('/');
+  const name = rawName === 'productideas' ? 'product-ideas' : rawName;
   showView(name, sub);
 }
 /* ================================================== глубокие ссылки (57)
